@@ -5,23 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "proxy": "node proxy-server.js",
     "build": "vite build",
-    "preview": "vite preview",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
-    "test:run": "vitest run"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^5.1.0",
     "vue": "^3.5.22"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.1",
-    "@vitest/ui": "^3.2.4",
-    "happy-dom": "^20.0.8",
-    "vite": "^7.1.7",
-    "vitest": "^3.2.4"
+    "vite": "^7.1.7"
   }
 }
