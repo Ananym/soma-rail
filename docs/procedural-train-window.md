@@ -1,18 +1,35 @@
 # Soma Rail: Procedural Train Window — Design Doc
 
-Draft of 19 November 2026 · committed copy of the [living doc](https://claude.ai/artifact/UeqzGYDoiugh3gkaXbHHqP)
+Draft of 19 November 2026, fact-checked the same day · committed copy of the [living doc](https://claude.ai/artifact/UeqzGYDoiugh3gkaXbHHqP)
 
 ## Summary
 
 Replace the looping YouTube video with a train-window view generated in the browser: layered Gaussian splats for the land, a shader for the sky and a glass-and-camera pass on top, all steered by a slow "director".
 
-- **Splats can be generated procedurally, at two levels.** Code arranges photoreal pieces, and code also writes splats of its own. The first gives the photographic half of the look, the second the surreal half.
+- **Splats can be generated procedurally, at two levels.** Code arranges photoreal pieces, and code also writes splats of its own. The first gives the photographic half of the look, the second the surreal half. Both ran here on Spark 2.4.
 - **The side-window camera makes this tractable.** The world is used once, from one side, and the nearest layer is motion blur.
-- **Music reactivity is feasible in the browser.** The blocker is cross-origin access to the SomaFM audio, not the models. v1 reacts to channel and track metadata; the rest depends on SomaFM's answer.
+- **Music reactivity is unblocked.** SomaFM's streams already allow cross-origin reads: in Chromium the page gets real samples with a one-attribute change. No relay and no permission from SomaFM is needed. Safari and Firefox are still to test.
 - **The distraction mechanic improves.** Train speed becomes continuous, so the world can brake to a halt and sharpen as it does.
 - **Next step: a one-biome look spike.** Nothing else matters until that looks right.
 
-One caveat on this draft: facts about Spark, WebGPU support and the in-browser audio models come from search results. This environment could not open those pages or reach SomaFM, so the spikes confirm them.
+## What was checked
+
+The first draft was written without web access and flagged its facts as leads. They have now been checked against the vendors' own pages, and the three claims that could be run were run. The scripts are in [`docs/checks/`](checks/).
+
+| Question | Answer | Evidence |
+| --- | --- | --- |
+| Can the page read SomaFM audio samples? | Yes, in Chromium | All six stream servers (`ice1`–`ice6`), MP3 and AAC, reply with `Access-Control-Allow-Origin: *`. An `<audio crossorigin="anonymous">` fed into an `AnalyserNode` gave a peak of 0.78; the same element without the attribute gave exact silence. |
+| What caused the 403s recorded in the repo? | The `Referer` header | A stream request with a `localhost` or `github.io` referrer gets 403, as does a non-browser user agent. `Origin`, `Sec-Fetch-Mode: cors` and `Sec-GPC: 1` all get 200. Both `CROSSORIGIN_FIX.md` and `BRAVE_GPC_ISSUE.md` blame the wrong header. |
+| Does Spark build splats in code and rewrite them on the GPU? | Yes | A test scene on Spark 2.4.0 built 150,000 splats with `constructSplats` and `pushSplat` in 68 ms, then scrolled and hazed them with a dyno `objectModifier`. |
+| Does stretching splats give motion blur? | Yes, by a different mechanism than drafted | It is one extra term in Spark's vertex shader, not a dyno modifier. See "Why splats suit this camera". |
+| How big and how fast is CLAP in a browser? | 34 MB, about half a second per 10 s of audio | Quantized audio encoder, single-threaded WebAssembly, no GPU. Speed and size only; match quality was not assessed. |
+| Is Essentia.js usable? | Not for this project | AGPL-3.0, its models are non-commercial (CC BY-NC-SA 4.0), and it has had no release since June 2021. |
+
+Still unverified, because this environment cannot test them:
+
+- **Audio on Safari, iOS and Firefox.** WebKit has an open bug where live streams play but the analyser reads zeros.
+- **Frame rate.** The test scene ran on a software renderer, so it says nothing about speed on a real GPU.
+- **The look.** That is spike 1.
 
 ## Where we are today
 
@@ -21,11 +38,14 @@ Soma Rail is a static Vue 3 + Vite app on GitHub Pages that plays a SomaFM strea
 | Piece | How it works now | What it means for the redesign |
 | --- | --- | --- |
 | The view | `VideoPlayer.vue` wraps the YouTube IFrame API around one hard-coded video (`YOUTUBE_VIDEO_ID` in `src/config.js`), seeks to 8 s and loops | Swap in a canvas renderer behind the same props (`visible`, `distractionScore`). No ad-blocker or embed failures. |
-| Distraction mechanic | `useInteraction` turns mouse movement and tab blur into a 0–100 score; `usePlaybackControl` maps it to video playback rate and audio volume | Train speed becomes a continuous parameter. YouTube snaps to a few fixed rates and cannot stop; a generated world can brake smoothly to a halt and pull away again. |
-| Audio | A plain `<audio>` element on a SomaFM Icecast stream, no `crossorigin`, no Web Audio graph | The renderer cannot read samples from this stream as it stands. This is the main blocker for music reactivity (see that section). |
+| Distraction mechanic | `useInteraction` turns mouse movement and tab blur into a 0–100 score; `usePlaybackControl` maps it to video playback rate and audio volume | Train speed becomes a continuous parameter. YouTube only offers a fixed set of rates and may ignore a request; a generated world can brake smoothly to a halt and pull away again. |
+| Audio | A plain `<audio>` element on a SomaFM Icecast stream, no `crossorigin`, no Web Audio graph | Adding `crossorigin="anonymous"` is enough for the renderer to read samples in Chromium (see Music reactivity). |
+| Referrer | `<meta name="referrer" content="no-referrer">` in `index.html` | This tag is what keeps the streams playing on `localhost`; it must stay. The `referrerpolicy` attribute on the `<audio>` element does nothing: tested alone, the stream still returned 403. |
 | Metadata | `channels.json` gives genre and description; `songs/<channel>.json` is polled every 45 s for artist and title | A signal we already have, with no audio access needed, for slow style changes. |
-| Hosting | GitHub Pages from `soma-rail-app/dist`, custom domain, no backend | Assets must fit a static host or move to a CDN. Any proxy or server-side generation is a new piece of infrastructure. |
-| Dependencies | `vue` only | The renderer is the first heavy dependency; load it after the Start click. |
+| Hosting | GitHub Pages from `soma-rail-app/dist`, custom domain, no backend | Assets must fit a static host or move to a CDN. Pages allows a 1 GB site and about 100 GB of traffic a month. |
+| Dependencies | `vue` only | The renderer is the first heavy dependency; load it after the Start click. Spark 2.4.0 is 2.9 MB minified, 1.0 MB gzipped. |
+
+One wiring detail for the swap: `usePlaybackControl` holds the YouTube player and calls `setPlaybackRate` on it. The new view should take the 0–1 `playbackRate` it already computes as its speed input instead of handing back a player object.
 
 ## Visual target
 
@@ -68,12 +88,12 @@ Gaussian splats are the right primary medium, used two ways at once, with a shad
 
 | Approach | Realism | Surreal and reactive | Endless | Cost in the browser | Role here |
 | --- | --- | --- | --- | --- | --- |
-| Splat kit: captured or AI-generated pieces, placed by code | High; inherits the source | Good; any piece can warp or dissolve on the GPU | Arrangement is endless, the set of pieces is finite | Assets streamed per biome, tens of MB each (estimate) | Core of the near and mid bands |
+| Splat kit: captured or AI-generated pieces, placed by code | High; inherits the source | Good; any piece can warp or dissolve on the GPU | Arrangement is endless, the set of pieces is finite | Assets streamed per biome. A World Labs scene is 7.6 MB at 500,000 splats and 30 MB at 2 million. | Core of the near and mid bands |
 | Splats written by code from noise fields | Painterly, not photographic | Best; every parameter is ours | Fully | No download; worker time per chunk | Ground, water, far band, all "matter" effects |
 | Raymarched shader world | High for sky, haze, water, distant terrain; poor for trees and buildings | Best | Fully | No download; heavy per pixel at high resolution | Sky and atmosphere |
 | Mesh scene with instanced props | Reads as a game without a lot of art | Moderate | Fully | Cheapest and most predictable | Rails, carriage, window frame |
-| Diffusion model running in the browser | High per frame | High | Frames do not hold parallax | GB-scale download, seconds per frame (estimate) | Not in v1 |
-| Worlds generated offline by a world model, shipped as splats | High, and surreal on request | Same as the kit | Bounded scenes, not strips | Paid per generation at build time; static files at run time | Where kit pieces and set pieces come from |
+| Diffusion model running in the browser | High per frame | High | Frames do not hold parallax | GB-scale download, seconds per frame (estimate, not checked) | Not in v1 |
+| Worlds generated offline by a world model, shipped as splats | High, and surreal on request | Same as the kit | Bounded scenes, not strips | About $1.26 per world at build time (World Labs standard model); static files at run time | Where kit pieces and set pieces come from |
 
 ### Can splats be procedurally generated?
 
@@ -84,15 +104,26 @@ A splat is only a primitive: a position, three scales, a rotation, a colour and 
 - **Procedural arrangement.** Pieces whose splats came from photos or from a generative model keep their realism when code places, scales and tints them. This is how the view gets its photoreal half.
 - **Procedural matter.** Splats emitted by our own functions (scatter them on a noise terrain, colour them from a palette) look painterly, soft-edged and slightly unstable. That look is the surreal half, and it costs no download.
 
-Spark, the three.js splat renderer from World Labs, appears to support both: a `constructSplats` callback with `pushSplat` for building splats in code, and "dyno" modifiers that rewrite existing splats on the GPU each frame. That is from its docs as surfaced by search; the first spike confirms it.
+Spark, the three.js splat renderer from World Labs, supports both, and both are confirmed by a running test:
+
+- **Building splats in code.** `new SplatMesh({ constructSplats })` hands the callback a buffer, and `pushSplat(center, scales, quaternion, opacity, color)` fills it.
+- **Rewriting splats on the GPU.** `objectModifier` and `worldModifier` take a "dyno" graph that runs per splat, per frame. Spark 2.0 lets several be chained.
+- **Composite worlds.** Spark 2.0 treats many splat objects as one scene, sorts them together and lets them be added and removed at any time. That matches the chunk design below.
 
 ### Why splats suit this camera in particular
 
 The three things that must stay real are nearly free on Gaussians.
 
-- **Motion blur.** For a camera that only translates, blur is the scene smeared along the track by speed times shutter time, at every depth. Stretching each splat along the track axis by that length gives correct, depth-dependent blur with no post-process. When distraction brakes the train, the blur shrinks and the world sharpens to a stop.
+- **Motion blur.** For a camera that only translates, blur is the scene smeared along the track by speed times shutter time, at every depth. On screen that smear is horizontal and its length in pixels is focal length × speed × shutter ÷ depth. Widening each splat by that much gives correct, depth-dependent blur with no post-process. When distraction brakes the train, the blur shrinks and the world sharpens to a stop.
 - **Haze.** Mix each splat's colour toward the sky colour by its distance.
 - **Dissolve.** A splat scene can come apart into its points and reassemble as something else. No other medium does that natively, and it is the obvious thing for music to drive.
+
+How the blur is actually done differs from the first draft, which proposed a dyno modifier:
+
+- **It is one line in the vertex shader.** Spark computes each splat's footprint on screen as a 2D covariance. Adding (blur length)² ÷ 12 to its horizontal term stretches the splat by exactly the smear. Spark accepts a replacement shader through its `vertexShader` and `extraUniforms` options.
+- **A dyno modifier cannot do it.** Modifiers edit a splat's scales and rotation, and a stretch along the track is not expressible that way for a rotated splat. Spark has covariance modifiers that could, but they are marked experimental.
+- **The default shader is not exported.** The test read it from `spark.material.vertexShader` and patched it. That ties the patch to a Spark version, so pin the version and keep the patched shader in the repo.
+- **Thin layers fade when blurred.** The shader lowers a splat's opacity as it spreads. In the test scene at 300 km/h the sparse near ground went almost transparent. The trackside band needs enough density, or a floor on opacity; spike 1 tunes this.
 
 ### On "inside out"
 
@@ -115,32 +146,63 @@ The decisions that shape everything else:
 - **The camera stays at the origin.** The world scrolls past it and chunks are rebased, which avoids float precision trouble on a journey with no end.
 - **It slots in where the video was.** A `TrainWindow.vue` takes the same props as `VideoPlayer.vue`, and the renderer is imported after the Start click.
 
+Two Spark details bear on these decisions:
+
+- **Workers can hand over finished buffers.** `PackedSplats` accepts a prebuilt `packedArray`, so the chunk worker can build the buffer and transfer it. This option is in Spark's types but was not exercised in the test.
+- **The far band may need higher precision.** Spark stores splat positions as 16-bit floats relative to the camera, which its docs put at 0.1% precision. At 3 km that is steps of about 3 m, roughly a pixel, so far splats could shimmer as they slide. `accumExtSplats: true` switches to 32-bit positions; check the far band in spike 1 before paying for it.
+
 ## Music reactivity
 
-The models are not the obstacle; reaching the audio is. Analysis models that fit this job run in the browser, but the page cannot read samples from the SomaFM stream as it is served today. So v1 reacts to metadata, and full reactivity waits on one question to SomaFM.
+Reaching the audio was the expected obstacle, and it is not one. SomaFM's stream servers send the CORS header the browser needs, so the page can analyse the music directly. Analysis models that fit the job run in the browser at acceptable size and speed.
 
-### The blocker
+### Reaching the audio
 
-Web Audio outputs silence for a media element whose source is cross-origin and was not fetched with CORS. The repo's `CROSSORIGIN_FIX.md` records that adding `crossorigin="anonymous"` made SomaFM answer 403, which is why the attribute was removed.
+Web Audio outputs silence for a media element whose source is cross-origin and was not fetched with CORS. The fix is `crossorigin="anonymous"` on the `<audio>` element, provided the server answers with `Access-Control-Allow-Origin`. SomaFM's does.
 
-That finding is not settled. `BRAVE_GPC_ISSUE.md` blames a different header for the same symptom, and I could not test from this environment because the SomaFM hosts are blocked here. One `curl` of a stream URL with an `Origin` header, checking for `Access-Control-Allow-Origin` in the reply, settles it.
+What was tested, in headless Chromium against the live streams:
+
+| Setup | HTTP status | Samples read by `AnalyserNode` |
+| --- | --- | --- |
+| `<audio>` as the app has it today | 200 | Silence (peak 0) |
+| `<audio crossorigin="anonymous">`, AAC 128 kbps | 200 | Real audio (peak 0.78) |
+| Same, MP3 128 and 256 kbps, a second channel | 200 | Real audio |
+| Same, with `Sec-GPC: 1` as Brave sends | 200 | Real audio |
+| Same, without the `no-referrer` meta tag, from `localhost` | 403 | Playback fails |
+
+The repo's two notes on the 403 both misread it. `CROSSORIGIN_FIX.md` blames the `crossorigin` attribute and `BRAVE_GPC_ISSUE.md` blames `Sec-GPC`; neither header changes the response. The servers reject a `Referer` of `localhost` or `github.io`, and the `no-referrer` meta tag in `index.html` is what fixed playback.
+
+What this leaves open:
+
+- **Safari and iOS.** WebKit bug 180696, open since 2017, has live streams playing while the analyser reads zeros. It is confirmed for HLS and only reported for Icecast, so it needs a real device.
+- **Firefox.** Not tested; no known problem.
+- **A failure mode to handle.** With `crossorigin` set, a response that lacks the header fails outright instead of playing silently. If SomaFM ever drops the header, the player must retry without the attribute and fall back to metadata.
+- **Courtesy.** No permission is needed, but a short note to SomaFM saying what the app does costs nothing.
 
 | Route to a signal | What it gives | Cost and risk | Verdict |
 | --- | --- | --- | --- |
-| Channel and track metadata, which we already fetch | Genre, description, artist, title, track-change events | None. No beat, no energy. | v1 |
-| SomaFM allows CORS on streams | Full samples | One email; their decision | Ask now |
-| Our own relay that adds the CORS header | Full samples | New infrastructure; about 58 MB per listener-hour at 128 kbps passes through us; hides listeners from SomaFM's own counts | Only with their blessing |
-| Tab-audio capture | Full samples | A permission prompt every session; patchy browser support | Opt-in at most |
+| Read the stream directly with CORS | Full samples | One attribute plus a fallback path; Safari unproven | Use this |
+| Channel and track metadata, which we already fetch | Genre, description, artist, title, track-change events | None. No beat, no energy. | Keep as the slow clock and the fallback |
+| Our own relay that adds the CORS header | Full samples | New infrastructure; about 58 MB per listener-hour at 128 kbps; hides listeners from SomaFM's own counts | Not needed |
+| Tab-audio capture | Full samples | Desktop Chrome and Edge only; a prompt every session that cannot be remembered; must request video as well | Not needed |
 
-### What runs in the browser once we have samples
+### What runs in the browser
 
 | Tier | Refresh | Tools | Output |
 | --- | --- | --- | --- |
 | Signal | Every frame | `AnalyserNode` or an AudioWorklet | Loudness, brightness, onsets, energy per band |
-| Rhythm | Every few seconds | Essentia.js (WebAssembly) or our own onset tracker | Tempo and beat phase |
-| Mood and style | Every 10–30 s, in a worker | Essentia.js mood and genre classifiers on TensorFlow.js; CLAP through transformers.js | Mood scores; how closely the music matches any text we write |
+| Rhythm | Every few seconds | Our own onset tracker in an AudioWorklet; `realtime-bpm-analyzer` (Apache-2.0) for tempo | Tempo and beat phase |
+| Mood and style | Every 10–30 s, in a worker | CLAP audio encoder through transformers.js (both Apache-2.0) | How closely the music matches any text we write |
 
-CLAP is the one to try first. It places audio and text in the same space, so the last ten seconds of music can be scored against our own biome descriptions ("salt flat at dusk", "neon city in rain") and the best match steers the director. No hand-built genre table. Its download size and speed in a browser are unverified and belong to a spike.
+Essentia.js is dropped from the plan. It is AGPL-3.0, which would require the whole app to be offered under AGPL. Its mood and genre models are CC BY-NC-SA 4.0, which rules out any commercial use. Its last release was in June 2021, and its beat trackers take a whole signal, not a stream.
+
+CLAP is the mood model. It places audio and text in the same space, so the last ten seconds of music can be scored against our own biome descriptions ("salt flat at dusk", "neon city in rain") and the best match steers the director. No hand-built genre table.
+
+- **Size.** The quantized audio encoder is 34 MB, plus 5.6 MB for the ONNX runtime. Load it after playback starts and cache it.
+- **Speed.** A 10 s clip takes 0.4–0.6 s to embed in single-threaded WebAssembly with no GPU, so a refresh every 10–30 s in a worker is cheap.
+- **The text encoder stays out of the browser.** It is 127 MB quantized. Embed the biome descriptions at build time and ship the vectors as JSON.
+- **Not yet checked.** Whether the quantized model's matches are good enough is a listening test, part of spike 4.
+
+For rhythm, `realtime-bpm-analyzer` gives tempo from a live stream; whether it also gives beat positions was not confirmed, so plan on our own onset tracker for phase.
 
 ### Three clocks
 
@@ -150,11 +212,13 @@ CLAP is the one to try first. It places audio and text in the same space, so the
 | Phrase, 5–30 s | Energy, brightness | Density of the near band, weather, haze, the surreal dials |
 | Track, minutes | Mood and style, track change | Biome, palette, time of day; a track change queues a tunnel |
 
-The mapping to build first is masts on the beat: spacing = speed × seconds per bar. At 100 km/h and 120 BPM that is 56 m, close to real overhead-line mast spacing, so the effect is felt without looking staged.
+The mapping to build first is masts on the beat: spacing = speed × seconds per bar. At 100 km/h and 120 BPM that is 56 m. Network Rail's masts normally stand 50–60 m apart, so the effect is felt without looking staged.
 
 This is a focus tool, and the distraction mechanic already punishes fidgeting. Reactivity should be felt more than watched: no strobing, and the slow clocks carry most of the change.
 
-### Metadata-only v1
+### Metadata as the fallback
+
+Where the analyser reads silence, the view still follows the music at track scale:
 
 - Each channel gets a base profile (biomes, palette, surreal level), matched from its description at build time and shipped as JSON.
 - A track change from the existing 45 s poll queues a scene transition.
@@ -162,22 +226,32 @@ This is a focus tool, and the distraction mechanic already punishes fidgeting. R
 
 ## Performance and compatibility budget
 
-Build on WebGL2 first and treat WebGPU as an upgrade. Spark's mainline renderer targets WebGL2, which runs everywhere the current app does; WebGPU is on by default in Chrome, Edge and Safari 26, but Firefox coverage still depends on platform.
+Build on WebGL2 and treat WebGPU as a later option. Spark 2.4.0 draws through three.js's `WebGLRenderer` and targets WebGL2, which runs everywhere the current app does.
+
+WebGPU coverage is still uneven:
+
+| Browser | WebGPU on by default |
+| --- | --- |
+| Chrome and Edge, desktop | Windows, macOS, ChromeOS; on Linux only recent Intel and NVIDIA |
+| Chrome, Android | Android 12 and later on most GPUs |
+| Safari | Version 26 only (macOS, iOS, iPadOS, visionOS) |
+| Firefox | Windows and Apple Silicon Macs; not Intel Macs, Linux or Android |
 
 | Budget | Target | Basis |
 | --- | --- | --- |
 | Frame rate | 60 fps desktop, 30 fps phones | A smooth slide matters more than detail; the eye tracks the parallax |
-| Splats in view | About 1.5 million desktop, 400 thousand phones | My estimate from typical splat viewers; the first spike measures it |
-| Chunk build time | Under 50 ms in the worker | A 200 m chunk is needed every 7 s at 100 km/h, so this leaves wide margin |
-| First view | Under 5 s on broadband | Open on a code-made biome that needs no assets; stream kit pieces behind it |
-| Assets per biome | 30 MB or less | Keeps a session inside a sensible data budget; decides whether Pages is enough |
+| Splats in view | 1.5 million desktop, 750 thousand phones | My starting point. Spark's own defaults are 2.5 million desktop, 1.5 million iOS and 1 million Android, but our splats are all regenerated every frame, which Spark says becomes a bottleneck near 1 million on some systems. Spike 1 measures it. |
+| Chunk build time | Under 50 ms in the worker | A 200 m chunk is needed every 7 s at 100 km/h. The test built 150,000 splats in 68 ms on the main thread. |
+| First view | Under 5 s on broadband | Open on a code-made biome that needs no assets; stream kit pieces behind it. Spark adds 1.0 MB gzipped. |
+| Assets per biome | 30 MB or less | Four World Labs pieces at 500,000 splats each. Decides whether Pages is enough. |
 | Render resolution | Scale down to hold frame rate | Blur and haze hide a lower internal resolution well |
 
 What needs watching:
 
-- **Sorting.** Splats are blended back to front, and a sideways-moving camera changes the order constantly. This is the cost most likely to set the splat budget.
-- **Hosting.** GitHub Pages caps site size and expects modest bandwidth. A kit of several biomes will probably outgrow it and move to object storage with a CDN.
-- **WebGPU extras.** Three.js has merged a native WebGPU splat renderer and World Labs has an experimental WebGPU Spark. Both are new; neither should be on the critical path.
+- **Sorting.** Splats are blended back to front, and Spark sorts on a worker a frame or more behind the picture. A camera that only slides sideways never changes any splat's depth along the view axis, so with `sortRadial: false` the order changes only when chunks arrive or leave. Spark's default, sorting by radial distance, would reorder constantly. The first draft had this backwards.
+- **Per-frame regeneration and overdraw.** These, not sorting, are what Spark's docs name as the limits: about a million modified splats per frame on some systems, and many splats piled into a small area of screen.
+- **Hosting.** GitHub Pages allows a 1 GB site and a soft 100 GB of traffic a month, which is about 3,300 full downloads of a 30 MB biome. Files over 100 MB are blocked and Git LFS does not work with Pages. That is enough to start; a growing audience moves the kit to object storage with a CDN.
+- **WebGPU extras.** three.js r186 added a `GaussianSplat` addon and World Labs published `@sparkjsdev/radix` 0.0.1 in October 2026. Both need three.js's `WebGPURenderer`, so neither can share a canvas with mainline Spark. Neither should be on the critical path.
 - **Fallback.** If the canvas cannot start, keep the current video as the fallback view, so no listener is left with a black screen.
 - **Motion sensitivity.** Honour `prefers-reduced-motion` with a slower train and no beat-driven effects.
 
@@ -185,13 +259,14 @@ What needs watching:
 
 The first risk is aesthetic, not technical: nobody knows yet whether a code-arranged splat world looks good sliding past a window. Spike 1 answers that before anything else is built.
 
-1. **The look.** One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, the motion-stretch and haze modifiers, speed bound to the distraction score.
+1. **The look.** One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, the motion-stretch and haze, speed bound to the distraction score. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
    - Pass: a 20-second recording that someone takes for footage at first glance.
-   - Also yields the real splat budget on a laptop and a phone.
-2. **The audio question.** Run the `curl` test and write to SomaFM. An hour of work, done alongside spike 1; the answer decides what spike 4 builds.
+   - Also yields the real splat budget on a laptop and a phone, and settles the far-band precision and near-field opacity questions.
+2. **Audio on the other engines.** Add `crossorigin="anonymous"` with the retry-without-it fallback, then run `docs/checks/somafm-audio` by hand in Safari on a Mac, Safari on an iPhone and Firefox. An hour of work, done alongside spike 1.
 3. **Endless without seams.** The chunk generator in a worker, deterministic by seed, with two biomes and a tunnel between them.
    - Pass: memory stays flat and no visible pop over a 30-minute run.
-4. **Reactivity.** Channel profiles and track-change transitions from metadata. If samples are available: masts on the beat, then CLAP scoring against biome descriptions.
+4. **Reactivity.** Masts on the beat from our own onset tracker, then CLAP scoring against biome descriptions, with channel profiles and track-change transitions as the fallback.
+   - Pass: someone listening can tell the scenery belongs to the music without being told how.
 5. **Asset pipeline.** Produce a handful of pieces two ways, from a world model and from an image plus depth map, then compress them and judge them from the window. Settles asset size, cost and hosting.
 6. **The glass.** Frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
 
@@ -199,25 +274,40 @@ Ship behind a `?view=generated` flag, with the video as the default until the ge
 
 ## Open questions
 
-- [ ] Does SomaFM send CORS headers on any stream, and if not, would they enable it or permit a relay? This gates audio-driven reactivity.
+Answered by the checks:
+
+- [x] Does SomaFM send CORS headers on its streams? Yes, on every server and format tested. No relay and no request to SomaFM is needed.
+- [x] Is a backend needed for audio? No.
+- [x] Should a copy of this doc live in the repo under `docs/`? Yes: this file.
+
+Still yours to decide, with what the checks add:
+
 - [ ] What did "inside out" mean to you? I took it as a scene built to be seen from within.
-- [ ] Are AI-generated assets acceptable, with a paid generation step at build time, or should the kit be captured and openly licensed only?
-- [ ] Is a backend allowed at all (an asset CDN, possibly a relay), or must the app stay purely static?
-- [ ] Are phones a first-class target or best effort?
+- [ ] Are AI-generated assets acceptable? World Labs' API costs about $1.26 a world, and paying users own the output and may distribute it commercially. One clause in its terms, against storing API responses "beyond the duration specified in Documentation", is unclear for self-hosted files; I would ask them before shipping.
+- [ ] Must the app stay purely static? It can for now: audio needs no server and GitHub Pages covers a few biomes. The question returns only if traffic passes about 100 GB a month.
+- [ ] Are phones a first-class target or best effort? Spark's own phone budgets are healthy. The risk on iPhone is audio analysis, not rendering.
 - [ ] How surreal is the default? Two or three reference films or images would pin this down faster than any description.
 - [ ] Should the carriage be visible (window frame, interior reflections), or is the view full-bleed as it is now?
-- [ ] Should a journey be shareable as a seed in the URL?
-- [x] Should a copy of this doc live in the repo under `docs/`? Yes: this file.
+- [ ] Should a journey be shareable as a seed in the URL? It conflicts with seeding scenery from the track: a shared seed only replays the same journey if the music is ignored. One of the two has to win.
+
+New, raised by the checks:
+
+- [ ] Does audio analysis work in Safari, on iOS and in Firefox? Spike 2.
 
 ## Sources
 
-Found by search and not opened; treat each as a lead to verify.
+Opened and read on 19 November 2026, unless marked.
 
-- Spark docs: [procedural splats](https://sparkjs.dev/docs/procedural-splats/), [dyno overview](https://sparkjs.dev/docs/dyno-overview/), [new in 2.0](https://sparkjs.dev/docs/new-features-2.0/)
-- [Three.js merges a native splat renderer for WebGPU in r186](https://radiancefields.com/three.js-merges-a-native-gaussian-splat-renderer-for-webgpu-in-r186)
-- [Spark Radix, experimental WebGPU splat rendering](https://radiancefields.com/spark-radix-brings-webgpu-splat-rendering-to-threejs)
-- [WebGPU is now supported in major browsers](https://web.dev/blog/webgpu-supported-major-browsers)
-- [CLAP for transformers.js](https://huggingface.co/Xenova/clap-htsat-unfused)
-- [Essentia.js](https://mtg.github.io/essentia.js/)
-- [World Labs API FAQ](https://docs.worldlabs.ai/api/faq)
-- [Chromium: silence for a cross-origin media element source](https://codereview.chromium.org/520433002/)
+- Spark docs: [procedural splats](https://sparkjs.dev/docs/procedural-splats/), [dyno overview](https://sparkjs.dev/docs/dyno-overview/), [new in 2.0](https://sparkjs.dev/docs/new-features-2.0/), [SparkRenderer](https://sparkjs.dev/docs/spark-renderer/), [performance](https://sparkjs.dev/docs/performance/), [level of detail](https://sparkjs.dev/docs/lod-getting-started/)
+- npm: [`@sparkjsdev/spark` 2.4.0](https://www.npmjs.com/package/@sparkjsdev/spark), [`@sparkjsdev/radix` 0.0.1](https://www.npmjs.com/package/@sparkjsdev/radix), [`realtime-bpm-analyzer`](https://www.npmjs.com/package/realtime-bpm-analyzer)
+- [three.js releases](https://github.com/mrdoob/three.js/releases), r186 and r187
+- WebGPU: [web.dev announcement](https://web.dev/blog/webgpu-supported-major-browsers), [gpuweb implementation status](https://github.com/gpuweb/gpuweb/wiki/Implementation-Status)
+- [CLAP for transformers.js](https://huggingface.co/Xenova/clap-htsat-unfused), file sizes from the model repository
+- Essentia: [Essentia.js](https://mtg.github.io/essentia.js/), [licensing](https://essentia.upf.edu/licensing_information.html), [models](https://essentia.upf.edu/models.html)
+- World Labs: [API FAQ](https://docs.worldlabs.ai/api/faq), [pricing](https://docs.worldlabs.ai/api/pricing), [terms of service](https://docs.worldlabs.ai/terms-of-service)
+- [GitHub Pages limits](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)
+- Web Audio and CORS: [Web Audio API spec](https://webaudio.github.io/web-audio-api/), [WebKit bug 180696](https://bugs.webkit.org/show_bug.cgi?id=180696)
+- [Screen Capture spec](https://w3c.github.io/mediacapture-screen-share/), for tab-audio capture
+- [YouTube IFrame API reference](https://developers.google.com/youtube/iframe_api_reference), for playback rates
+- [A Guide to Overhead Electrification](https://alanbaxter.co.uk/s/Scotlands-Railway-Guide-to-Overhead-Line-Equipment-November-2021.pdf), Network Rail and Alan Baxter, for mast spacing
+- SomaFM stream headers: measured directly, see `docs/checks/somafm-audio`

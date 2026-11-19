@@ -1,0 +1,20 @@
+<!doctype html><meta charset=utf-8><title>clap</title><script type="module">
+import { AutoProcessor, ClapAudioModelWithProjection, AutoTokenizer, ClapTextModelWithProjection, env } from '/node_modules/@huggingface/transformers/dist/transformers.min.js';
+const q = new URLSearchParams(location.search); const dtype = q.get('dtype') || 'q8'; const log = (...a) => console.log('CLAP', ...a);
+try {
+  log('threads', navigator.hardwareConcurrency, 'crossOriginIsolated', self.crossOriginIsolated);
+  const id = 'Xenova/clap-htsat-unfused';
+  let t = performance.now();
+  const processor = await AutoProcessor.from_pretrained(id);
+  const audio = await ClapAudioModelWithProjection.from_pretrained(id, { dtype });
+  log('audio encoder loaded', dtype, ((performance.now() - t) / 1000).toFixed(1), 's');
+  const sr = 48000, n = sr * 10, x = new Float32Array(n);
+  for (let i = 0; i < n; i++) x[i] = 0.3 * Math.sin(2 * Math.PI * 220 * i / sr) * (1 + Math.sin(2 * Math.PI * 2 * i / sr)) + 0.05 * (Math.random() - 0.5);
+  const times = [];
+  for (let k = 0; k < 4; k++) { t = performance.now(); const inp = await processor(x); const { audio_embeds } = await audio(inp); times.push(Math.round(performance.now() - t)); if (!k) log('embed dims', audio_embeds.dims); }
+  log('10 s clip -> embedding, ms per run', JSON.stringify(times));
+  if (q.get('text')) { t = performance.now(); const tok = await AutoTokenizer.from_pretrained(id); const tm = await ClapTextModelWithProjection.from_pretrained(id, { dtype });
+    const { text_embeds } = await tm(tok(['salt flat at dusk', 'neon city in rain'], { padding: true, truncation: true })); log('text encoder load+2 prompts', ((performance.now() - t) / 1000).toFixed(1), 's', text_embeds.dims); }
+} catch (e) { log('ERROR', String(e).slice(0, 500)); }
+window.done = true;
+</script>

@@ -1,0 +1,21 @@
+<!doctype html><meta charset=utf-8><meta name="referrer" content="no-referrer"><title>t</title><body><script>
+window.run = async (url, cors, secs=6) => {
+  const a = new Audio(); if (cors) a.crossOrigin = 'anonymous';
+  a.src = url; document.body.appendChild(a);
+  const ctx = new AudioContext(); await ctx.resume();
+  const src = ctx.createMediaElementSource(a);
+  const an = ctx.createAnalyser(); an.fftSize = 2048; src.connect(an); an.connect(ctx.destination);
+  let err = null; a.addEventListener('error', () => err = a.error && (a.error.code+':'+a.error.message));
+  try { await a.play(); } catch (e) { return {url, cors, playErr: String(e), err}; }
+  const buf = new Float32Array(an.fftSize), fb = new Uint8Array(an.frequencyBinCount);
+  let peak = 0, sumsq = 0, n = 0, maxBin = 0; const t0 = performance.now();
+  while (performance.now() - t0 < secs*1000) {
+    an.getFloatTimeDomainData(buf); an.getByteFrequencyData(fb);
+    for (const v of buf) { peak = Math.max(peak, Math.abs(v)); sumsq += v*v; n++; }
+    for (const v of fb) maxBin = Math.max(maxBin, v);
+    await new Promise(r => setTimeout(r, 50));
+  }
+  const res = {url, cors, currentTime: +a.currentTime.toFixed(2), ctxState: ctx.state, peak: +peak.toFixed(4), rms: +Math.sqrt(sumsq/n).toFixed(4), maxFreqBin: maxBin, err};
+  a.pause(); a.src = ''; await ctx.close(); return res;
+};
+</script>

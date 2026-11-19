@@ -1,0 +1,64 @@
+<!doctype html><meta charset=utf-8><title>spark smoke</title><style>body{margin:0;background:#000}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/","@sparkjsdev/spark":"/node_modules/@sparkjsdev/spark/dist/spark.module.js"}}</script>
+<script type="module">
+import * as THREE from "three";
+import { SparkRenderer, SplatMesh, dyno } from "@sparkjsdev/spark";
+const q = new URLSearchParams(location.search);
+const KMH = +(q.get('kmh') ?? 100), SHUTTER = 1/50, N = +(q.get('n') ?? 150000), W = 1200;
+const log = (...a) => console.log('SMOKE', ...a);
+const scene = new THREE.Scene(); const SKY = new THREE.Color(0.62, 0.72, 0.84); scene.background = SKY;
+const camera = new THREE.PerspectiveCamera(50, 16/9, 0.1, 20000); camera.position.set(0, 2.6, 0);
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+renderer.setSize(1280, 720); document.body.appendChild(renderer.domElement);
+log('webgl2', renderer.capabilities.isWebGL2, renderer.getContext().getParameter(renderer.getContext().VERSION));
+
+// --- motion blur: one extra term on the screen-space covariance, via the documented vertexShader hook
+const probe = new SparkRenderer({ renderer }); const base = probe.material.vertexShader; log('default vertex shader chars', base.length); const anchor = 'float detOrig = a * d - b * b;';
+if (!base.includes(anchor)) throw new Error('anchor missing');
+const vertexShader = base
+  .replace('uniform float preBlurAmount;', 'uniform float preBlurAmount;\nuniform float motionMetres;')
+  .replace(anchor, anchor + '\n    { float mpx = focal.x * motionMetres / max(-viewCenter.z, 0.05); a += mpx * mpx / 12.0; }');
+const motion = { value: 0 };
+const spark = new SparkRenderer({ renderer, vertexShader, extraUniforms: { motionMetres: motion }, sortRadial: q.get('radial') === '1' });
+scene.add(spark);
+
+// --- procedural matter: splats emitted by code, no asset download
+let s = 12345; const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+const hgt = (x, z) => 6*Math.sin(x*0.011 + z*0.004) + 3*Math.sin(x*0.037 + 1.7) + (z < -2500 ? 420*Math.pow(Math.abs(Math.sin(x*0.0021 + 0.6)), 1.6) : 0);
+const t0 = performance.now(); let count = 0;
+const mesh = new SplatMesh({ constructSplats: (splats) => {
+  const c = new THREE.Vector3(), sc = new THREE.Vector3(), qt = new THREE.Quaternion(), col = new THREE.Color();
+  for (let i = 0; i < N; i++) {
+    const u = rnd(); const depth = 4 * Math.pow(1500, u);            // log-spaced 4 m .. 6 km
+    const x = (rnd() - 0.5) * W * Math.max(1, depth / 300), z = -depth; const kind = rnd();
+    let y = hgt(x, z) - 3, size = 0.02 * depth + 0.15;
+    if (depth > 2500) { y = rnd() * hgt(x, z); col.setRGB(0.32 + 0.1*rnd(), 0.34 + 0.08*rnd(), 0.40); size = 40; }
+    else if (kind < 0.12 && depth > 12) { y += 1 + rnd() * 7; col.setRGB(0.10 + 0.08*rnd(), 0.28 + 0.2*rnd(), 0.08); size *= 1.6; }   // "trees"
+    else if (kind < 0.13 && depth < 30) { y = -2 + rnd() * 8; col.setRGB(0.2, 0.2, 0.22); size = 0.12; }                               // masts
+    else col.setRGB(0.30 + 0.25*rnd(), 0.42 + 0.2*rnd(), 0.16 + 0.1*rnd());
+    c.set(x, y, z); sc.set(size, size * (0.4 + rnd()), size);
+    splats.pushSplat(c, sc, qt, 0.85, col); count++;
+  }
+}});
+// --- GPU modifier (dyno): scroll the world past a fixed camera with wraparound, and haze by depth
+const scroll = dyno.dynoFloat(0), sky = dyno.dynoVec3(new THREE.Vector3(SKY.r, SKY.g, SKY.b));
+const f = (v) => dyno.dynoConst("float", v);
+mesh.objectModifier = dyno.dynoBlock({ gsplat: dyno.Gsplat }, { gsplat: dyno.Gsplat }, ({ gsplat }) => {
+  const { center, rgb } = dyno.splitGsplat(gsplat).outputs; const { x, y, z } = dyno.split(center).outputs;
+  const span = dyno.mul(f(W), dyno.max(f(1), dyno.div(dyno.neg(z), f(300))));
+  const nx = dyno.sub(dyno.mod(dyno.add(dyno.add(x, scroll), dyno.mul(span, f(0.5))), span), dyno.mul(span, f(0.5)));
+  const haze = dyno.sub(f(1), dyno.exp(dyno.div(z, f(2500))));
+  return { gsplat: dyno.combineGsplat({ gsplat, center: dyno.combine({ vectorType: "vec3", x: nx, y, z }), rgb: dyno.mix(rgb, sky, haze) }) };
+});
+mesh.updateGenerator(); scene.add(mesh);
+await mesh.initialized; log('built', count, 'splats in', (performance.now() - t0).toFixed(0), 'ms');
+
+// --- drive: speed is the only fast coupling
+const speed = KMH / 3.6; motion.value = speed * SHUTTER; let frames = 0, tPrev = performance.now(), acc = 0;
+window.smoke = { frames: 0, fps: 0, setKmh(k) { window.smoke.speed = k / 3.6; motion.value = window.smoke.speed * SHUTTER; }, speed };
+renderer.setAnimationLoop(() => {
+  const now = performance.now(), dt = (now - tPrev) / 1000; tPrev = now; acc += dt;
+  scroll.value += window.smoke.speed * dt; mesh.updateVersion();
+  renderer.render(scene, camera); window.smoke.frames = ++frames; window.smoke.fps = frames / acc;
+});
+</script>
