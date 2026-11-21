@@ -22,6 +22,8 @@ export const KIT_RULES = {
   placeholder: [],
 };
 
+import { clearTags } from './sparkPatch.js';
+
 export function createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl = '/' }) {
   let index = null;                 // id -> piece metadata, once index.json has loaded
   const packs = new Map();          // id -> { packed, ready }
@@ -36,7 +38,8 @@ export function createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl = '/'
     let p = packs.get(id);
     if (!p) {
       p = { packed: new PackedSplats({ url: `${baseUrl}kit/${index.get(id).file}` }), ready: false };
-      p.packed.initialized.then(() => { p.ready = true; }).catch(() => { p.failed = true; });
+      // a file's colour bytes are arbitrary: clear the motion-class bits so nothing in it moves
+      p.packed.initialized.then(() => { clearTags(p.packed); p.ready = true; }).catch(() => { p.failed = true; });
       packs.set(id, p);
     }
     return p;

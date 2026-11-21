@@ -9,7 +9,7 @@ import { getBiome, BIOMES } from './biomes/index.js';
 import { createSky } from './sky.js';
 import { createFrame } from './frame.js';
 import { createDirector, LEVELS, SLOTS } from './director.js';
-import { buildVertexShader, PATCH_UNIFORMS } from './sparkPatch.js';
+import { buildVertexShader, PATCH_UNIFORMS, tagLast } from './sparkPatch.js';
 import { hashInts, makeRng } from './rng.js';
 import { createKit } from './kitPieces.js';
 
@@ -30,6 +30,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   uniforms.uHazeHigh.value = new THREE.Color(0.6, 0.72, 0.86);
   uniforms.uLightTint.value = new THREE.Color(1, 1, 1);
   uniforms.uBlurKeep.value = params.blurKeep;
+  uniforms.uFlowWith.value = new THREE.Vector3(); uniforms.uFlowAgainst.value = new THREE.Vector3();
   // A side-window camera only translates sideways, so depth order never changes: sort by depth.
   const spark = new SparkRenderer({ renderer, sortRadial: false, extraUniforms: uniforms, minSortIntervalMs: params.sortMs });
   const patched = buildVertexShader(spark.material.vertexShader);
@@ -81,15 +82,15 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const c = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion(), col = new THREE.Color();
     for (let x = 0; x < LAMP_SEG; x += 15) {                    // lamps
       c.set(x, CAMERA_HEIGHT + 0.9, TUNNEL_Z + 0.08); s.set(0.16, 0.07, 0.02); col.setRGB(1.0, 0.82, 0.55);
-      packed.pushSplat(c, s, q, 1, col);
+      packed.pushSplat(c, s, q, 1, col); tagLast(packed);
       c.set(x, CAMERA_HEIGHT + 0.9, TUNNEL_Z + 0.06); s.set(0.5, 0.3, 0.02); col.setRGB(1.0, 0.7, 0.4);
-      packed.pushSplat(c, s, q, 0.3, col);
+      packed.pushSplat(c, s, q, 0.3, col); tagLast(packed);
     }
     for (let i = 0; i < 260; i++) {                              // wall grain, so speed still reads
       c.set(rng() * LAMP_SEG, CAMERA_HEIGHT + rng.range(-1.6, 1.6), TUNNEL_Z + 0.04);
       s.set(rng.range(0.05, 0.3), rng.range(0.02, 0.09), 0.02);
       const g = rng.range(0.05, 0.13); col.setRGB(g, g * 0.95, g * 0.9);
-      packed.pushSplat(c, s, q, 0.8, col);
+      packed.pushSplat(c, s, q, 0.8, col); tagLast(packed);
     }
     const mesh = new SplatMesh({ packedSplats: packed });
     scene.add(mesh);
@@ -130,9 +131,10 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const packed = new PackedSplats();
     packed.ensureSplats(Math.ceil(count * 1.12));   // reserve once: growing the buffer as it fills would stall
     let n = 0;
-    const emit = (x, y, z, sx, sy, sz, r, g, b, opacity = 1, qx = 0, qy = 0, qz = 0, qw = 1) => {
+    // kind (15th) is for the checks; move (16th) is the splat's motion class (kit.js MOVE, default none)
+    const emit = (x, y, z, sx, sy, sz, r, g, b, opacity = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = 0, move = 0) => {
       tmp.c.set(x, y, z); tmp.s.set(sx, sy, sz); tmp.q.set(qx, qy, qz, qw); tmp.col.setRGB(r, g, b);
-      packed.pushSplat(tmp.c, tmp.s, tmp.q, opacity, tmp.col); n++;
+      packed.pushSplat(tmp.c, tmp.s, tmp.q, opacity, tmp.col); tagLast(packed, move); n++;
     };
     const ctx = {
       rng: makeRng(hashInts(S.seed, layer.name.length * 131 + layer.name.charCodeAt(0), index)),
@@ -249,6 +251,9 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   document.addEventListener('visibilitychange', onVisible);
 
   let frames = 0, acc = 0, fps = 60, slowFor = 0, fastFor = 0;
+  // motion clock (seconds) and its wraps: 200 pi for phases, 4096 cells of 48 m for traffic
+  let moveT = 0;
+  const MOVE_WRAP = 200 * Math.PI, FLOW_WRAP = 48 * 4096, LANE_SPEED = [33, 29.5, 25];   // m/s, fast lane first
   // hitch meter state
   let frameNote = '', prevWork = { gen: 0, render: 0, cpu: 0, note: '' };
   let worst = { ms: 0, at: 0, gen: 0, render: 0, cpu: 0, note: '' };
@@ -324,6 +329,20 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     uniforms.uBeat.value = S.beat;
     uniforms.uSparkle.value = S.sparkle;
     uniforms.uClock.value = S.time % 1000;
+    uniforms.uMoveDebug.value = params.tags ? 1 : 0;
+    // Things that move (sparkPatch.js): their clock runs only while the train does, so a stopped
+    // train still shows a still picture, and reduced motion switches them off.
+    if (params.moveT >= 0) moveT = params.moveT;
+    else if (running && !(S.speed === 0 && S.rate === 0)) moveT += dt;
+    uniforms.uMove.value = reducedMotion ? 0 : params.move;
+    uniforms.uMoveT.value = moveT % MOVE_WRAP;
+    uniforms.uTravel.value = S.travelled % MOVE_WRAP;
+    for (let l = 0; l < 3; l++) {
+      // where each lane's traffic pattern has got to, wrapped to a whole number of 48 m cells
+      const w = S.travelled - LANE_SPEED[l] * moveT, a = S.travelled + LANE_SPEED[l] * moveT;
+      uniforms.uFlowWith.value.setComponent(l, ((w % FLOW_WRAP) + FLOW_WRAP) % FLOW_WRAP);
+      uniforms.uFlowAgainst.value.setComponent(l, a % FLOW_WRAP);
+    }
 
     manageChunks();
     const tGen0 = performance.now();
@@ -379,7 +398,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
         audio: !!audioProvider,
         // the slowest frame of the last few seconds, and what the frame before it spent its time on
         worst: { ms: Math.round(worst.ms), gen: Math.round(worst.gen), render: Math.round(worst.render), cpu: Math.round(worst.cpu), note: worst.note },
-        hitches: hitchTimes.length, idle: isIdle };
+        hitches: hitchTimes.length, idle: isIdle, moveT: +moveT.toFixed(2) };
     },
     dispose() {
       disposed = true;

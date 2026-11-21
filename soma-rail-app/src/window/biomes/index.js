@@ -20,6 +20,8 @@
 //     quaternion optional (defaults to no rotation)
 //     kind     optional tag from kit.js KIND (mast, wire, tree, ...); the engine ignores it,
 //              scripts/check-biomes.mjs uses it
+//     move     optional 16th argument, a motion class from kit.js MOVE (flag, traffic lane,
+//              vapour): the shader moves the splat. Left out, the splat stays still
 //   It must `yield` at least every ~500 splats so the engine can spread the work over frames, and
 //   emit within about 10% of ctx.count splats.
 //

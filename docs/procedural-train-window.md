@@ -45,6 +45,7 @@ The whole pipeline runs as the app's only view; the YouTube player was removed o
 | World | Four depth bands built in chunks, generated a few milliseconds per frame; a pure function of seed, band and chunk index | `engine.js`, `layers.js`, `terrain.js` |
 | Scenery | Eight biomes written in code on a shared prop kit: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country (limestone towers, paddies, a river, mist), a sand-sea desert (dunes, oases), a high Himalayan valley (tiered villages, monasteries, prayer flags, yaks, the range behind) and an English motorway at night (lit junctions, traffic as light trails, floodlit landmarks). Each has a plausible and a dreamlike version. 1152 generator checks pass. The craft rules learned so far are in the header of `biomes/index.js` | `src/window/biomes/`, `scripts/check-biomes.mjs` |
 | Photo pieces | Six sheets made from CC0 photos are shipped (9.8 MB). Two are switched on, in the farmland biome: a woodland edge and a group of houses. Two looked like pasted cut-outs in place and are off; two are untried | `kitPieces.js`, `public/kit/`, `scripts/photo-to-splats.mjs` |
+| Things that move | Splats can carry a motion class (three bits hidden in the lowest bit of each colour byte) that the vertex shader acts on: flags ripple, vehicles run along traffic trails as brighter dashes, vapour billows. Used so far by the Himalaya's flags, mist and cloud streamers and the motorway's traffic and plume. The motion clock stops with the train; `move=0` switches it off and `tags=1` paints each class a flat colour | `sparkPatch.js`, `kit.js` (`MOVE`), `scripts/motion-frames.cjs` |
 | Sky | One shader: scattering by sun height, sun, moon, stars, two cloud layers; it also sets the land's haze colour and light. A biome can ask for a richer night sky (more and fainter stars, the Milky Way, fewer clouds) and for the horizon to sit lower in the window so the sky has more room; the motorway does both | `src/window/sky.js` |
 | Window frame and glass | A rounded frame with a sill, plus grain, a faint reflection and a vignette | `frame.js`, `TrainWindow.vue` |
 | Director | Speed from the distraction score (distraction brakes the train to a stop; nothing fades to black), two surreal levels, tunnels that hide every change of scenery. Each stretch starts in a time-of-day slot: dawn or dusk about half the time, with a warm grade on the land while the sun is low | `src/window/director.js` |
@@ -72,6 +73,7 @@ Not built yet:
 - **A worker for chunk generation.** Chunks are built on the main thread in small slices.
 - **Glass detail.** No droplets, dirt or real reflections.
 - **Predicted beats.** The pulse reacts to onsets as they happen; nothing anticipates the next beat from the tempo.
+- **More things that move.** Water, smoke from chimneys, trees in wind and the older biomes are not tagged yet; only the two newest biomes use the motion classes.
 - **Weather.**
 
 ### What to look at on a real GPU
@@ -442,7 +444,7 @@ Decided on 21 November 2026:
 | Distraction in the generated view | The train slows to a stop; no fade to black | The stopping train, sharpening as its blur shrinks, is the whole visual penalty. Audio still quietens |
 | Video or generated view | The generated view only; the YouTube player is removed | No flag and no video fallback. A browser without WebGL2 gets a notice and the radio |
 | Compute when nothing changes | Idle when the train is stopped or the tab is hidden | A stopped view is redrawn twice a second; scenery is only generated while moving |
-| Traffic on the night motorway | Long-exposure light trails, not cars | The world is static splats, so nothing can drive. Trails read as traffic at once and need no animation. Moving cars would need a new engine feature |
+| Traffic on the night motorway | Light trails with vehicles running along them as brighter dashes | Splats cannot travel, but the shader can move a pattern of brightness along a trail, which reads as cars. The trail itself stays as a faint ribbon |
 
 Answered earlier by the checks:
 

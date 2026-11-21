@@ -28,7 +28,7 @@
 import { hashInts, hashString, makeRng } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
-  KIND, makeOut, worldSeed, worldRng, cellsAround, detail, shade, jitter, mul3, mix3, smooth,
+  KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, detail, shade, jitter, mul3, mix3, smooth,
   clamp, lerp, norm3, quatYaw, quatUpTo, quatMul, quatAxis, quatPitch, overheadLine, blob, strut, house,
   rotY, SUN,
 } from './kit.js';
@@ -971,8 +971,8 @@ function* flagString(ctx, out, st, dLo, dHi, kind = KIND.OTHER) {
     const yaw = (r1 - 0.5) * 1.1, roll = (r2 - 0.5) * 0.35;
     const q = quatMul(quatYaw(yaw), quatAxis(0, 0, 1, roll));
     const k = 0.85 + 0.25 * r1;
-    out(x, p0[1] - fh * 0.55, -d, fw * 0.48, fh * 0.5, fw * 0.12, c[0] * k, c[1] * k, c[2] * k, 1, q[0], q[1], q[2], q[3], kind);
-    if (d < 90) out(x + 0.02, p0[1] - fh * 0.85, -(d - 0.02), fw * 0.44, fh * 0.22, fw * 0.1, c[0] * k * 0.82, c[1] * k * 0.82, c[2] * k * 0.82, 1, q[0], q[1], q[2], q[3], kind);
+    out(x, p0[1] - fh * 0.55, -d, fw * 0.48, fh * 0.5, fw * 0.12, c[0] * k, c[1] * k, c[2] * k, 1, q[0], q[1], q[2], q[3], kind, MOVE.FLAG);
+    if (d < 90) out(x + 0.02, p0[1] - fh * 0.85, -(d - 0.02), fw * 0.44, fh * 0.22, fw * 0.1, c[0] * k * 0.82, c[1] * k * 0.82, c[2] * k * 0.82, 1, q[0], q[1], q[2], q[3], kind, MOVE.FLAG);
     if (out.due()) yield;
   }
 }
@@ -994,7 +994,7 @@ function* flagPole(ctx, out, W, p, kind = KIND.OTHER) {
       const yy = y + p.h - 0.3 - t * bl;
       const sh = 0.88 + 0.2 * Math.sin(k * 1.7 + p.seed);
       const q = quatYaw(flap + 0.2 * Math.sin(k * 0.9));
-      out(x + bw * 0.55 + 0.05 * Math.sin(k), yy, -d, bw * 0.5, bl / n * 0.6, bw * 0.1, c[0] * sh, c[1] * sh, c[2] * sh, 1, q[0], q[1], q[2], q[3], kind);
+      out(x + bw * 0.55 + 0.05 * Math.sin(k), yy, -d, bw * 0.5, bl / n * 0.6, bw * 0.1, c[0] * sh, c[1] * sh, c[2] * sh, 1, q[0], q[1], q[2], q[3], kind, MOVE.FLAG);
     }
   }
   if (out.due()) yield;
@@ -1487,7 +1487,7 @@ function* mist(ctx, out, W, dLo, dHi, cell, size, op) {
       const high = y > v.fy + 40;
       const sx = size * (0.7 + 0.9 * r()) * (high ? 0.6 : 1), sy = size * (0.08 + 0.07 * r()) * (high ? 0.6 : 1);
       const c = jitter(C.mist, r, 0.02);
-      out(wx - ctx.x0, y, -d, sx, sy, sx * 0.45, c[0], c[1], c[2], op * (0.5 + 0.5 * r()) * a * (high ? 0.6 : 1), 0, 0, 0, 1, KIND.OTHER);
+      out(wx - ctx.x0, y, -d, sx, sy, sx * 0.45, c[0], c[1], c[2], op * (0.5 + 0.5 * r()) * a * (high ? 0.6 : 1), 0, 0, 0, 1, KIND.OTHER, MOVE.VAPOUR);
       if (out.due()) yield;
     }
   }
@@ -1519,7 +1519,7 @@ function* banners(ctx, out, W, dLo, dHi) {
       if (x < -900 || x > ctx.length + 900) continue;
       const w = 60 + 260 * t * (0.6 + 0.6 * r());
       const c = jitter(C.snow, r, 0.02);
-      out(x - 100, sy - 30 - t * 160 * (0.5 + r()) + (r() - 0.5) * 60, -(sd + (r() - 0.5) * 200), w, 25 + 50 * t * r(), w * 0.5, c[0], c[1], c[2], (0.55 - 0.4 * t) * (0.6 + 0.4 * r()), 0, 0, 0, 1, KIND.OTHER);
+      out(x - 100, sy - 30 - t * 160 * (0.5 + r()) + (r() - 0.5) * 60, -(sd + (r() - 0.5) * 200), w, 25 + 50 * t * r(), w * 0.5, c[0], c[1], c[2], (0.55 - 0.4 * t) * (0.6 + 0.4 * r()), 0, 0, 0, 1, KIND.OTHER, MOVE.VAPOUR);
     }
     if (out.due()) yield;
   }

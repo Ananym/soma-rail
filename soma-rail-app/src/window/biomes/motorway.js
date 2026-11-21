@@ -39,7 +39,7 @@
 import { hashInts, hashString, makeRng, noise1, noise2 } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
-  KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, detail, jitter, mul3, mix3, smooth,
+  KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, detail, jitter, mul3, mix3, smooth,
   clamp, lerp, quatXTo, strut, hedge, broadleaf, house, overheadLine, fence, blob, bush, treeSplats,
 } from './kit.js';
 import { downsLayout } from './downs.js';
@@ -626,17 +626,17 @@ function* trails(ctx, out, W, R, Ls, dz) {
         const tx = 1 - 1.9 * A * Math.cos(ph) * (Math.PI * 2 / P), ty = A * Math.sin(ph) * (Math.PI * 2 / P);
         const tl = Math.hypot(tx, ty) || 1;
         const ql = quatXTo(tx / tl, ty / tl, 0);
-        if (inBand(ctx, d)) out(lx, ly, -d, st * 0.75 * tl, r, r, col[0], col[1], col[2], op, ql[0], ql[1], ql[2], ql[3], KIND.LIGHT);
+        if (inBand(ctx, d)) out(lx, ly, -d, st * 0.75 * tl, r, r, col[0], col[1], col[2], op, ql[0], ql[1], ql[2], ql[3], KIND.LIGHT, MOVE.TRAFFIC_0 + k);
         continue;
       }
       if (!inside || !inBand(ctx, d)) continue;
-      out(wx - ctx.x0, y, -d, st * 0.72, r, r, col[0], col[1], col[2], op, q[0], q[1], q[2], q[3], KIND.LIGHT);
+      out(wx - ctx.x0, y, -d, st * 0.72, r, r, col[0], col[1], col[2], op, q[0], q[1], q[2], q[3], KIND.LIGHT, MOVE.TRAFFIC_0 + k);
       // lorries: their marker lights draw a faint amber trail higher up, in the inside lane
       if (k === 2 && noise1(wx / 90 + lane, ws + 64) > 0.62) out(wx - ctx.x0, Y + 3.1, -d, st * 0.72, r * 0.8, r * 0.8, AMBER[0], AMBER[1], AMBER[2], op * 0.45, q[0], q[1], q[2], q[3], KIND.LIGHT);
       if (doubled(wx)) {
         // topology: a second motorway of light running above the first
         const lift = 24 + 8 * topo;
-        out(wx - ctx.x0, y + lift, -d, st * 0.72, r, r, col[0], col[1], col[2], op, q[0], q[1], q[2], q[3], KIND.LIGHT);
+        out(wx - ctx.x0, y + lift, -d, st * 0.72, r, r, col[0], col[1], col[2], op, q[0], q[1], q[2], q[3], KIND.LIGHT, MOVE.TRAFFIC_0 + k);
       }
     }
     if (inside && doubled(wx) && (g % 3 === 0)) {
@@ -1831,8 +1831,8 @@ function* power(ctx, out, W, lm, Ls) {
       for (let i = 0; i < 12; i++) {
         const f = i / 11;
         const py = y + H + 20 + f * 260, px = x + f * f * 220 * drift, rad = 30 + 90 * f;
-        if (on) L(out, px, py, d + 5, rad, rad * 0.8, rad * 0.6, [1.0, 0.72, 0.5], 0.08 * (1 - 0.6 * f));
-        else out(px, py, -(d + 5), rad, rad * 0.8, rad * 0.6, 0.75, 0.75, 0.75, 0.35 * (1 - 0.5 * f), 0, 0, 0, 1, KIND.OTHER);
+        if (on) out(px, py, -(d + 5), rad, rad * 0.8, rad * 0.6, 1.0, 0.72, 0.5, 0.08 * (1 - 0.6 * f), 0, 0, 0, 1, KIND.LIGHT, MOVE.VAPOUR);
+        else out(px, py, -(d + 5), rad, rad * 0.8, rad * 0.6, 0.75, 0.75, 0.75, 0.35 * (1 - 0.5 * f), 0, 0, 0, 1, KIND.OTHER, MOVE.VAPOUR);
       }
     }
   }

@@ -19,6 +19,9 @@ const NUM = {
   gold: 1,           // strength of the warm grade on the land when the sun is low (0 = off)
   beat: 1,           // strength of the swell on each beat (0 = off, 2 = double)
   sparkle: 1,        // strength of the treble shimmer (0 = off)
+  move: 1,           // strength of the moving things (flags, traffic, vapour); 0 = everything still
+  moveT: -1,         // pins the motion clock at this many seconds (screenshot scripts); -1 lets it run
+  tags: 0,           // 1 paints each motion class a flat colour and dims the rest (to check the tagging)
   debug: 0,          // 1 shows a stats readout
   preserve: 0,       // 1 keeps the drawing buffer readable (screenshot scripts only; slower)
 };
