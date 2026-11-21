@@ -1,6 +1,6 @@
 # Soma Rail: Procedural Train Window — Design Doc
 
-Draft of 19 November 2026, fact-checked the same day, decisions recorded 21 November · committed copy of the [living doc](https://claude.ai/artifact/UeqzGYDoiugh3gkaXbHHqP)
+Draft of 19 November 2026, fact-checked the same day; decisions and a first build added 21 November · committed copy of the [living doc](https://claude.ai/artifact/UeqzGYDoiugh3gkaXbHHqP)
 
 ## Summary
 
@@ -10,7 +10,7 @@ Replace the looping YouTube video with a train-window view generated in the brow
 - **The side-window camera makes this tractable.** The world is used once, from one side, and the nearest layer is motion blur.
 - **Music reactivity is unblocked.** SomaFM's streams already allow cross-origin reads: in Chromium the page gets real samples with a one-attribute change. No relay and no permission from SomaFM is needed. Safari and Firefox are still to test.
 - **The distraction mechanic improves.** Train speed becomes continuous, so the world can brake to a halt and sharpen as it does.
-- **Next step: a one-biome look spike.** Nothing else matters until that looks right.
+- **A first draft is built.** Add `?view=generated` to the app's URL. It runs end to end, but its look and frame rate have only been seen on a software renderer, so the next step is yours: open it on a real GPU and judge it.
 
 ## What was checked
 
@@ -30,6 +30,48 @@ Still unverified, because this environment cannot test them:
 - **Audio on Safari, iOS and Firefox.** WebKit has an open bug where live streams play but the analyser reads zeros.
 - **Frame rate.** The test scene ran on a software renderer, so it says nothing about speed on a real GPU.
 - **The look.** That is spike 1.
+
+## What is built
+
+A first draft of the whole pipeline runs behind `?view=generated`; the video is still the default and the fallback. It was built and checked in a headless browser with a software renderer, so every claim below is about behaviour, not looks or speed.
+
+| Part | State | Where |
+| --- | --- | --- |
+| View switch and fallback | Works: both views start cleanly in an end-to-end check | `App.vue`, `TrainWindow.vue`, `scripts/app-check.cjs` |
+| Renderer | three.js and Spark in a lazy chunk (1.1 MB gzipped) loaded after Start; the main bundle grew by about 4 kB gzipped | `src/window/engine.js` |
+| Camera effects | Motion blur, haze toward the sky colour, time-of-day tint and a "dissolve" effect, patched into Spark's vertex shader with checked anchors | `src/window/sparkPatch.js` |
+| World | Four depth bands built in chunks, generated a few milliseconds per frame; a pure function of seed, band and chunk index | `engine.js`, `layers.js`, `terrain.js` |
+| Scenery | Biomes written in code on a shared prop kit: rolling farmland is finished; pine forest, salt flat and night city are being written | `src/window/biomes/` |
+| Photo pieces | Six sheets made from CC0 photos stand on the terrain among the code-made scenery (9.8 MB) | `kitPieces.js`, `public/kit/`, `scripts/photo-to-splats.mjs` |
+| Sky | One shader: scattering by sun height, sun, moon, stars, two cloud layers; it also sets the land's haze colour and light | `src/window/sky.js` |
+| Window frame and glass | A rounded frame with a sill, plus grain, a faint reflection and a vignette | `frame.js`, `TrainWindow.vue` |
+| Director | Speed from the distraction score, time of day, two surreal levels, tunnels that hide every change of scenery | `src/window/director.js` |
+| Music | The stream is loaded with CORS and analysed for loudness, bands, onsets and tempo; each channel has a starting profile; a new track queues a tunnel | `audio.js`, `audioAnalysis.js`, `profiles.json` |
+
+What the music changes today is modest: bass makes the splats breathe slightly, loudness drives the dissolve effect at the dreamlike level, a firm tempo lock sets the mast spacing of the next stretch, and a track or channel change brings new scenery through a tunnel.
+
+Not built yet:
+
+- **CLAP mood matching.** Scenery is chosen from channel profiles and a hash of the track, not from how the music sounds.
+- **A worker for chunk generation.** Chunks are built on the main thread in small slices.
+- **Glass detail.** No droplets, dirt or real reflections.
+- **Beat-phase effects.** Tempo is used, beat timing is not.
+- **Weather.**
+
+### What to look at on a real GPU
+
+Nothing here can judge these; they are the point of the first session with it.
+
+| Question | How to check |
+| --- | --- |
+| Does it pass for footage at a glance? | Open `?view=generated&debug=1` and watch a few minutes of each biome (`b` cycles them) |
+| Does it hold 60 fps? | The debug readout shows fps and the resolution scale it has fallen back to; try `budget=300000` and `budget=1200000` |
+| Is the blur right? | Compare `shutter=0.01`, `0.02` and `0.04`; `blurKeep` trades streak solidity against thinning |
+| Do chunks pop in or hitch? | Watch the far left edge at full speed; raise `slice` if scenery arrives late, lower it if frames drop when it arrives |
+| Do the photo pieces belong? | Compare `kit=1` with `kit=0`; note where a photo's ground or edges show |
+| Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there |
+| Does music analysis work in your browser? | The readout shows `energy` moving and, on rhythmic channels, a `bpm`; Safari and Firefox are untested |
+| Do tunnels read as tunnels? | `t` forces one |
 
 ## Where we are today
 
@@ -267,7 +309,7 @@ Surveyed on 21 November 2026. Ready-made outdoor splats that are free, downloada
 
 | Route | What it gives | What it needs | Status |
 | --- | --- | --- | --- |
-| Photo plus depth map, turned into a sheet of splats | Photoreal one-sided pieces: tree lines, hillsides, villages | Nothing: CC0 photos, an Apache-licensed depth model, CPU only | Pipeline being built in `soma-rail-app/scripts/photo-to-splats.mjs` |
+| Photo plus depth map, turned into a sheet of splats | Photoreal one-sided pieces: tree lines, hillsides, villages | Nothing: CC0 photos, an Apache-licensed depth model, CPU only | Built: `soma-rail-app/scripts/photo-to-splats.mjs` makes a piece in about 20 seconds; six are in the app |
 | SuperSplat gallery ([superspl.at](https://superspl.at)) | About 3,100 downloadable community scenes, many of them outdoor captures | Your free PlayCanvas account; downloads return 401 without one | Not fetched; candidates listed below |
 | Free object generators on Hugging Face | Single props (a tree, a barn) as splats | A few minutes of free GPU quota a day; a free account raises it | Not run |
 
@@ -343,18 +385,18 @@ Hugging Face gives 2 minutes of GPU a day without an account and 5 with a free o
 
 The first risk is aesthetic, not technical: nobody knows yet whether a code-arranged splat world looks good sliding past a window. Spike 1 answers that before anything else is built.
 
-1. **The look.** One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, a plain window frame, the motion-stretch and haze, speed bound to the distraction score. Build it at two surreal levels. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
+1. **The look.** *Built; needs judging on a real GPU.* One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, a plain window frame, the motion-stretch and haze, speed bound to the distraction score. Build it at two surreal levels. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
    - Pass: a 20-second recording that someone takes for footage at first glance.
    - Also yields the real splat budget on a laptop and a phone, and settles the far-band precision and near-field opacity questions.
-2. **Audio on the other engines.** Add `crossorigin="anonymous"` with the retry-without-it fallback, then run `docs/checks/somafm-audio` by hand in Safari on a Mac, Safari on an iPhone and Firefox. An hour of work, done alongside spike 1.
-3. **Endless without seams.** The chunk generator in a worker, deterministic by seed, with two biomes and a tunnel between them.
+2. **Audio on the other engines.** *The attribute and the fallback are built; the other browsers are untested.* Then run `docs/checks/somafm-audio` by hand in Safari on a Mac, Safari on an iPhone and Firefox. An hour of work, done alongside spike 1.
+3. **Endless without seams.** *Chunks, biomes and tunnels are built, on the main thread; the 30-minute run is not done.* The chunk generator in a worker, deterministic by seed, with two biomes and a tunnel between them.
    - Pass: memory stays flat and no visible pop over a 30-minute run.
-4. **Reactivity.** Masts on the beat from our own onset tracker, then CLAP scoring against biome descriptions, with channel profiles and track-change transitions as the fallback.
+4. **Reactivity.** *Analysis, channel profiles and track-change tunnels are built; CLAP is not.* Masts on the beat from our own onset tracker, then CLAP scoring against biome descriptions, with channel profiles and track-change transitions as the fallback.
    - Pass: someone listening can tell the scenery belongs to the music without being told how.
-5. **Asset pipeline.** Build the kit from the routes in "Free splat sources": photo-plus-depth sheets first, then SuperSplat downloads and generated props. Record each piece's licence and attribution. Where nothing is good enough, make the piece in code. Compress them and judge them from the window. Settles what the kit weighs. Nothing is bought.
-6. **The glass.** The finished frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
+5. **Asset pipeline.** *The photo route is built with six pieces; nothing from SuperSplat or the generators yet.* Build the kit from the routes in "Free splat sources": photo-plus-depth sheets first, then SuperSplat downloads and generated props. Record each piece's licence and attribution. Where nothing is good enough, make the piece in code. Compress them and judge them from the window. Settles what the kit weighs. Nothing is bought.
+6. **The glass.** *Frame, grain, a faint reflection and a vignette are built.* The finished frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
 
-Ship behind a `?view=generated` flag, with the video as the default until the generated view is clearly better.
+It ships behind a `?view=generated` flag, with the video as the default until the generated view is clearly better.
 
 ## Decisions and open questions
 
@@ -381,7 +423,8 @@ Still open:
 - [ ] Does audio analysis work in Safari, on iOS and in Firefox? Spike 2.
 - [x] Which free splat sources exist? Surveyed; see "Free splat sources". A free World Labs account cannot export splats, so that route is closed.
 - [ ] Are found or photo-made pieces good enough from a train window? The few files that could be rendered here are judged in "Free splat sources"; the real test is on a GPU.
-- [ ] What are the surreal levels called, and can the listener switch between them? Spike 1 proposes them.
+- [x] What are the surreal levels called? "Plausible" and "dreamlike". The channel picks one; `level=` in the URL overrides it.
+- [ ] Should the listener be able to switch level from the page, and where does the control go?
 
 ## Sources
 
