@@ -3,7 +3,7 @@
 // so three.js and Spark stay out of the main bundle.
 import * as THREE from 'three';
 import { SparkRenderer, SplatMesh, PackedSplats } from '@sparkjsdev/spark';
-import { LAYERS, CAMERA_HEIGHT, neededChunks, expectedActive } from './layers.js';
+import { LAYERS, CAMERA_HEIGHT, neededChunks, expectedActive, shareOf } from './layers.js';
 import { makeTerrain } from './terrain.js';
 import { getBiome, BIOMES } from './biomes/index.js';
 import { createSky } from './sky.js';
@@ -127,7 +127,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
 
   function startChunk(layer, index) {
     const x0 = index * layer.chunkLen;
-    const count = Math.max(200, Math.round((params.budget * layer.share) / expectedActive(layer, tanHalfHfov, LEAD)));
+    const count = Math.max(200, Math.round((params.budget * shareOf(layer, biome)) / expectedActive(layer, tanHalfHfov, LEAD)));
     const packed = new PackedSplats();
     packed.ensureSplats(Math.ceil(count * 1.12));   // reserve once: growing the buffer as it fills would stall
     let n = 0;
