@@ -62,10 +62,11 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | Script | What it does |
 | --- | --- |
 | `node scripts/window-shot.cjs out.png "seed=1&hour=12"` | Screenshot the view on its own (`window-harness.html`) |
-| `npm run build && node scripts/app-check.cjs` | Start the built app in four cases (the bare URL, a tuned run, no WebGL2, streams refusing CORS) and check each runs. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
+| `npm run build && node scripts/app-check.cjs` | Start the built app in four cases (the bare URL, a tuned run, no WebGL2, streams refusing CORS) and check each runs. The tuned run also moves the mouse and takes focus away, and times the train braking and pulling away again. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
 | `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |
 | `node scripts/check-biomes.mjs` | Test the scenery generators |
 | `node scripts/check-audio.mjs` | Test the music analysis |
+| `node scripts/check-distraction.mjs` | Test the distraction score: the same timing as at 60 fps however rarely the page updates |
 | `node scripts/check-sky.mjs out.png` | Render the sky at a range of hours |
 | `node scripts/build-profiles.mjs` | Regenerate the channel profiles from SomaFM's channel list |
 | `node scripts/photo-to-splats.mjs` | Rebuild the photo pieces from their CC0 sources |

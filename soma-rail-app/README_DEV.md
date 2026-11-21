@@ -63,7 +63,8 @@ The application has been built and is running at: http://localhost:5173/
 
 Edit `src/config.js` to adjust:
 - `JITTER_THRESHOLD`: Mouse movement sensitivity (default: 5px)
-- `DISTRACTION_INCREMENT`: How fast distraction builds up (default: 15)
+- `DISTRACTION_RISE_PER_SECOND`: How fast distraction builds up (default: 68.75 points a second, so about 1.5 s to the maximum of 100)
+- `RECOVERY_DELAY`: How long to stay calm before recovery starts (default: 2000ms)
 - `RECOVERY_DURATION`: How long recovery takes (default: 5000ms)
 - `UI_FADE_DELAY`: When UI fades out (default: 3000ms)
 - `YOUTUBE_VIDEO_ID`: The train video to use

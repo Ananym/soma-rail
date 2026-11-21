@@ -1,112 +1,104 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { CONFIG } from '../config';
+import { createDistractionModel, createSteppedClock } from '../utils/distractionModel';
 
 export function useInteraction() {
   const mousePosition = ref({ x: 0, y: 0 });
-  const lastMousePosition = ref({ x: 0, y: 0 });
   const isFocused = ref(true);
   const distractionScore = ref(0);
   // Initialize to 10 seconds in the past so UI starts faded out
   const lastMouseMoveTime = ref(Date.now() - 10000);
   const isMouseMoving = ref(false);
-  const lastDistractionIncreaseTime = ref(Date.now());
-  const gracePeriodEnd = ref(Date.now() + 2000); // 2 second grace period on start
+
+  // The score is a function of elapsed time (see utils/distractionModel.js), so it rises and falls
+  // at the same pace whether this page gets sixty updates a second or two. The clock is
+  // performance.now(), with any one gap counted as at most DISTRACTION_MAX_STEP.
+  const clock = createSteppedClock(CONFIG.DISTRACTION_MAX_STEP, performance.now());
+  const model = createDistractionModel(CONFIG, clock.time(performance.now()));
+  let gracePeriodEnd = clock.time(performance.now()) + 2000; // 2 second grace period on start
 
   let updateIntervalId = null;
-  let mouseMoveThrottle = null;
+  let rawMoves = null;
 
   /**
-   * Calculate distance between two points
+   * Model time now or, given an event, when that event happened. A busy page runs handlers late,
+   * so the event's own timestamp is used where it is on the performance.now() timeline.
    */
-  function distance(x1, y1, x2, y2) {
-    return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+  function modelTime(event) {
+    const now = performance.now();
+    const stamp = event ? event.timeStamp : now;
+    return clock.time(now, stamp > 0 && stamp <= now ? stamp : now);
+  }
+
+  /**
+   * Publish the model's current values to the refs
+   */
+  function updateDistractionScore() {
+    const { score, moving } = model.at(modelTime());
+    distractionScore.value = score;
+    isMouseMoving.value = moving;
+  }
+
+  /**
+   * The browser hands over at most one mousemove per frame. On a slow frame that one event stands
+   * for many pointer positions; a pointermove carries them all, each with its own time, and is
+   * dispatched just before the mousemove made from the same input. Keep them for handleMouseMove.
+   */
+  function handlePointerMove(event) {
+    rawMoves = null;
+    if (event.pointerType !== 'mouse' || typeof event.getCoalescedEvents !== 'function') return;
+    const list = event.getCoalescedEvents();
+    if (list.length > 1) rawMoves = { stamp: event.timeStamp, list };
   }
 
   /**
    * Handle mouse movement
    */
   function handleMouseMove(event) {
-    // Ignore mouse movement during grace period
-    const now = Date.now();
-    if (now < gracePeriodEnd.value) {
-      return;
+    const raw = rawMoves;
+    rawMoves = null;
+    const samples = raw && Math.abs(raw.stamp - event.timeStamp) <= 1 ? raw.list : [event];
+
+    let taken = false;
+    for (const sample of samples) {
+      const t = modelTime(sample);
+      // Ignore mouse movement during grace period
+      if (t < gracePeriodEnd) continue;
+      // Samples closer together than MOUSE_MOVEMENT_SAMPLE_RATE are dropped by the model
+      if (model.pointerMoved(sample.clientX, sample.clientY, t)) taken = true;
     }
+    if (!taken) return;
 
-    // Throttle mouse move events
-    if (mouseMoveThrottle) return;
+    mousePosition.value = { x: event.clientX, y: event.clientY };
+    lastMouseMoveTime.value = Date.now();
+    updateDistractionScore();
+  }
 
-    mouseMoveThrottle = setTimeout(() => {
-      mouseMoveThrottle = null;
-    }, CONFIG.MOUSE_MOVEMENT_SAMPLE_RATE);
-
-    const newPos = { x: event.clientX, y: event.clientY };
-    mousePosition.value = newPos;
-    lastMouseMoveTime.value = now;
-
-    // Check if movement exceeds jitter threshold
-    const dist = distance(
-      newPos.x,
-      newPos.y,
-      lastMousePosition.value.x,
-      lastMousePosition.value.y
-    );
-
-    if (dist > CONFIG.JITTER_THRESHOLD) {
-      isMouseMoving.value = true;
-      lastMousePosition.value = { ...newPos };
-    }
+  function setFocused(focused, event) {
+    isFocused.value = focused;
+    model.setFocused(focused, modelTime(event));
+    updateDistractionScore();
   }
 
   /**
    * Handle window focus
    */
-  function handleFocus() {
-    isFocused.value = !document.hidden;
+  function handleFocus(event) {
+    setFocused(!document.hidden, event);
   }
 
   /**
    * Handle window blur
    */
-  function handleBlur() {
-    isFocused.value = false;
+  function handleBlur(event) {
+    setFocused(false, event);
   }
 
   /**
    * Handle visibility change
    */
-  function handleVisibilityChange() {
-    isFocused.value = !document.hidden;
-  }
-
-  /**
-   * Update distraction score based on current state
-   */
-  function updateDistractionScore() {
-    const now = Date.now();
-    const timeSinceLastMove = now - lastMouseMoveTime.value;
-
-    // If mouse has been still for a bit, mark as not moving
-    if (timeSinceLastMove > 100) {
-      isMouseMoving.value = false;
-    }
-
-    // Increase distraction if mouse is moving or window is not focused
-    if (isMouseMoving.value || !isFocused.value) {
-      // Increase with activity
-      distractionScore.value = Math.min(
-        distractionScore.value + CONFIG.DISTRACTION_INCREMENT,
-        CONFIG.DISTRACTION_MAX
-      );
-      lastDistractionIncreaseTime.value = now;
-    } else {
-      // Only start recovery after 2 seconds of being calm
-      const timeSinceLastDistraction = now - lastDistractionIncreaseTime.value;
-      if (timeSinceLastDistraction > 2000) {
-        // Linear decrease when calm
-        const recoveryRate = CONFIG.DISTRACTION_MAX / (CONFIG.RECOVERY_DURATION / 16);
-        distractionScore.value = Math.max(0, distractionScore.value - recoveryRate);
-      }
-    }
+  function handleVisibilityChange(event) {
+    setFocused(!document.hidden, event);
   }
 
   /**
@@ -114,14 +106,16 @@ export function useInteraction() {
    */
   function startMonitoring() {
     // Check initial focus state
-    isFocused.value = document.hasFocus() && !document.hidden;
+    setFocused(document.hasFocus() && !document.hidden);
 
+    document.addEventListener('pointermove', handlePointerMove);
     document.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('focus', handleFocus);
     window.addEventListener('blur', handleBlur);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Start the update loop with setInterval (runs even when tab is hidden, unlike requestAnimationFrame)
+    // Publish the score with setInterval (runs even when tab is hidden, unlike requestAnimationFrame).
+    // How often this fires only sets how smoothly the score is seen to move, not how fast it moves.
     updateIntervalId = setInterval(updateDistractionScore, 16); // ~60fps
   }
 
@@ -129,6 +123,7 @@ export function useInteraction() {
    * Stop monitoring interactions
    */
   function stopMonitoring() {
+    document.removeEventListener('pointermove', handlePointerMove);
     document.removeEventListener('mousemove', handleMouseMove);
     window.removeEventListener('focus', handleFocus);
     window.removeEventListener('blur', handleBlur);
@@ -152,7 +147,7 @@ export function useInteraction() {
    * Reset grace period (used when starting the app)
    */
   function resetGracePeriod() {
-    gracePeriodEnd.value = Date.now() + 2000;
+    gracePeriodEnd = modelTime() + 2000;
     lastMouseMoveTime.value = Date.now() - 10000;
   }
 

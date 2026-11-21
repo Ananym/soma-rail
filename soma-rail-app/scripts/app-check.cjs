@@ -1,7 +1,8 @@
 // End-to-end smoke check of the built app in headless Chromium.
 //   npm run build && node scripts/app-check.cjs [out-dir]
 // Runs four cases, clicking Start in each: the plain address, the same with tuning parameters (and a
-// check that distraction brakes the train), a browser without WebGL2 (a notice, radio still playing)
+// check that moving the mouse or losing focus brakes the train on time, and that it pulls away
+// again on time), a browser without WebGL2 (a notice, radio still playing)
 // and streams refusing CORS (must keep playing, without analysis). No case may contact YouTube.
 // It talks to the real SomaFM servers, so it needs network access (HTTPS_PROXY is honoured).
 // Headless Chromium renders in software here: this checks wiring, never frame rate or looks.
@@ -62,21 +63,66 @@ const outDir = process.argv[2] || '.';
         tap: window.__trainWindowAudio ? window.__trainWindowAudio() : null,
       };
     });
-    // Distraction in the generated view brakes the train instead of fading to black. Check the wiring:
-    // losing focus must lower the rate the director runs at, and nothing may draw a black overlay.
-    // (How fast it brakes cannot be judged here: on a software renderer the page's timers starve,
-    // so the distraction score climbs far more slowly than on a real machine.)
+    // Distraction in the generated view brakes the train instead of fading to black, and how fast it
+    // brakes and pulls away is set by the clock, not by how often the page gets a turn. So this holds
+    // even here, where a software renderer leaves seconds between frames:
+    //   - moving the mouse, with the window still focused, stops the train in about 1.5 s;
+    //   - once the mouse is still it holds for 2 s and is back to full speed 5 s later;
+    //   - losing focus stops it in about 1.5 s as well;
+    // and nothing may draw a black overlay. Every time is taken inside the page, from the input's
+    // own timestamp to the moment the director is given the rate. The page can only act when it
+    // gets a turn, so each may run late by a frame or two (SLACK), never early.
     let brake = null;
     if (c.distraction) {
+      const SLACK = 7500, STOP = 1455, AWAY = 7050;   // ms; AWAY = 100 until the mouse counts as still + 2000 + 99% of 5000
       const rate = () => page.evaluate(() => window.__trainWindow.director.state.rate);
       const before = await rate();
-      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
-      await page.waitForTimeout(15000);
-      const after = await rate();
+      await page.evaluate(() => {
+        const d = window.__trainWindow.director, set = d.setRate.bind(d);
+        window.__rates = [];
+        d.setRate = (r) => { window.__rates.push([performance.now(), r]); set(r); };
+        window.__firstMove = window.__lastMove = 0;
+        document.addEventListener('pointermove', (e) => {
+          const raw = e.getCoalescedEvents();
+          if (!window.__firstMove) window.__firstMove = raw.length ? raw[0].timeStamp : e.timeStamp;
+          window.__lastMove = e.timeStamp;
+        }, true);
+      });
+      // First time, in ms after `since`, that the director was given a rate passing `test`.
+      const reached = async (since, test, patience) => {
+        for (const t0 = Date.now(); ;) {
+          const ms = await page.evaluate(([since, test]) => {
+            const from = window[since];
+            const hit = from && window.__rates.find(([t, r]) => t >= from && (test === 'stopped' ? r <= 0.02 : r >= 0.99));
+            return hit ? Math.round(hit[0] - from) : null;
+          }, [since, test]);
+          if (ms !== null || Date.now() - t0 > patience) return ms;
+          await page.waitForTimeout(500);
+        }
+      };
+      // The mouse moves as a hand would, sixty times a second whatever the page is doing: the moves
+      // are sent without waiting for the page to take each one (page.mouse.move would wait).
+      const cdp = await ctx.newCDPSession(page);
+      const sends = [];
+      let moving = true;
+      const hand = (async () => {
+        for (let i = 0; moving; i++) {
+          sends.push(cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 340 + (i % 50) * 12, y: 260 + (i % 7) * 20 }).catch(() => {}));
+          await new Promise((r) => setTimeout(r, 16));
+        }
+      })();
+      const mouseStopMs = await reached('__firstMove', 'stopped', 20000);
+      moving = false; await hand; await Promise.all(sends);
+      const pullAwayMs = await reached('__lastMove', 'moving', 25000);
+      await page.evaluate(() => { const e = new Event('blur'); window.__blurAt = e.timeStamp; window.dispatchEvent(e); });
+      const blurStopMs = await reached('__blurAt', 'stopped', 20000);
       const overlay = await page.evaluate(() => !!document.querySelector('.window-container .distraction-overlay'));
-      brake = { rateBefore: +before.toFixed(2), rateAfterBlur: +after.toFixed(2), overlay, ok: after < before - 0.03 && !overlay };
-      // With IDLE=1, hold the distraction until the train has stopped (minutes on a software renderer)
-      // and require the engine to go idle and the music effects to rest. Off by default for its length.
+      const within = (ms, ideal) => ms !== null && ms >= ideal - 60 && ms <= ideal + SLACK;
+      brake = { rateBefore: +before.toFixed(2), mouseStopMs, pullAwayMs, blurStopMs, moves: sends.length, overlay,
+        ok: before >= 0.99 && within(mouseStopMs, STOP) && within(pullAwayMs, AWAY) && within(blurStopMs, STOP) && !overlay };
+      // With IDLE=1, hold the distraction until the train itself has come to rest (the rate is zero
+      // at once, but the brake is slow on a software renderer) and require the engine to go idle and
+      // the music effects to rest. Off by default for its length.
       if (process.env.IDLE === '1') {
         const t0 = Date.now();
         while (Date.now() - t0 < 420000 && (await rate()) > 0) await page.waitForTimeout(5000);
@@ -106,7 +152,7 @@ const outDir = process.argv[2] || '.';
       : c.tap ? !!(state.tap && (c.tap === 'attached' || state.tap.active) && state.tap.context === 'running' && state.audio.crossOrigin === 'anonymous')
         : !state.tap && state.audio.crossOrigin === null;
     const ok = state.startGone && audioOk && viewOk && tapOk && !ours.length && (!brake || brake.ok);
-    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk})`); if (!ok) failed = true;
+    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk}${brake ? `, brake ${brake.ok}` : ''})`); if (!ok) failed = true;
     await ctx.close();
   }
   await browser.close(); server.httpServer.close();
