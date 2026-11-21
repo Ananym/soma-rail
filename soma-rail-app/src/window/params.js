@@ -1,0 +1,34 @@
+// Tuning knobs for the generated view, all settable from the URL so the look can be tuned on a real GPU
+// without rebuilding. Example: ?view=generated&level=1&budget=900000&kmh=120&shutter=0.02
+const NUM = {
+  level: 0,          // surreal level: 0 = plausible, 1 = dreamlike
+  budget: 600000,    // total splats across all bands
+  kmh: 100,          // cruising speed with no distraction
+  shutter: 1 / 50,   // seconds; motion blur length = speed * shutter
+  blurKeep: 0.6,     // 0..1: how much opacity a splat keeps when smeared (0 = energy conserving, thins out)
+  fov: 50,           // vertical field of view, degrees
+  scale: 1,          // resolution scale cap (the engine lowers it further to hold frame rate)
+  slice: 5,          // ms of chunk generation allowed per frame
+  hour: -1,          // fixed time of day 0..24, or -1 to let it run
+  audio: 1,          // 0 disables audio analysis
+  frame: 1,          // 0 hides the window frame
+  debug: 0,          // 1 shows a stats readout
+};
+const STR = { seed: '', biome: '' };
+
+export function readParams(search = (typeof location !== 'undefined' ? location.search : '')) {
+  const q = new URLSearchParams(search);
+  const p = { ...NUM, ...STR };
+  for (const k of Object.keys(NUM)) {
+    if (q.has(k)) { const v = Number(q.get(k)); if (Number.isFinite(v)) p[k] = v; }
+  }
+  for (const k of Object.keys(STR)) if (q.has(k)) p[k] = q.get(k);
+  p.levelFixed = q.has('level');   // an explicit level in the URL overrides the channel's
+  p.level = Math.max(0, Math.min(1, Math.round(p.level)));
+  p.budget = Math.max(20000, Math.min(4000000, Math.round(p.budget)));
+  return p;
+}
+
+export function wantsGeneratedView(search = (typeof location !== 'undefined' ? location.search : '')) {
+  return new URLSearchParams(search).get('view') === 'generated';
+}

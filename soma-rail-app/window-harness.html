@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Train window harness</title>
+    <style>html, body { margin: 0; height: 100%; background: #000; overflow: hidden; } canvas { display: block; width: 100vw; height: 100vh; }</style>
+  </head>
+  <body>
+    <!-- Development only: runs the generated view on its own, with no audio and no SomaFM.
+         Open through the Vite dev server: /window-harness.html?seed=1&level=0&kmh=100
+         Extra harness parameters: rate (0..1 train speed), jump (metres to skip ahead). -->
+    <canvas id="c"></canvas>
+    <script type="module">
+      import { readParams } from '/src/window/params.js';
+      import { createEngine } from '/src/window/engine.js';
+      const q = new URLSearchParams(location.search);
+      const params = readParams();
+      window.harness = { ready: false, error: null, frames: 0 };
+      try {
+        const engine = createEngine({ canvas: document.getElementById('c'), params, reducedMotion: q.get('reduced') === '1' });
+        window.harness.engine = engine;
+        engine.setRate(q.has('rate') ? Number(q.get('rate')) : 1);
+        if (q.has('jump')) engine.director.state.travelled = Number(q.get('jump'));
+        await engine.ready;
+        engine.start();
+        window.harness.ready = true;
+        const count = () => { window.harness.frames++; requestAnimationFrame(count); };
+        requestAnimationFrame(count);
+      } catch (e) {
+        window.harness.error = String(e && e.stack || e);
+        console.error(e);
+      }
+    </script>
+  </body>
+</html>

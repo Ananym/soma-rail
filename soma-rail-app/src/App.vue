@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue';
 import VideoPlayer from './components/VideoPlayer.vue';
+import TrainWindow from './components/TrainWindow.vue';
 import AudioPlayer from './components/AudioPlayer.vue';
 import ChannelSelector from './components/ChannelSelector.vue';
 import NowPlaying from './components/NowPlaying.vue';
@@ -9,6 +10,7 @@ import { useSomaFM } from './composables/useSomaFM';
 import { useInteraction } from './composables/useInteraction';
 import { usePlaybackControl } from './composables/usePlaybackControl';
 import { useLocalStorage } from './composables/useLocalStorage';
+import { wantsGeneratedView } from './window/params';
 
 // Soma FM integration
 const {
@@ -53,6 +55,10 @@ const audioPlayerRef = ref(null);
 const audioElement = ref(null);
 const hasStarted = ref(false);
 
+// The generated train window is opt-in with ?view=generated; the video stays the default.
+// If the generated view cannot start, we fall back to the video.
+const useGenerated = ref(wantsGeneratedView());
+
 // Initialize
 onMounted(async () => {
   // Fetch channels
@@ -81,6 +87,14 @@ async function handleChannelSelect(channelId) {
 // Handle YouTube player ready
 function handlePlayerReady(player) {
   setYoutubePlayer(player);
+  // If we fell back from the generated view after Start, the video has to be started here.
+  if (hasStarted.value && videoPlayerRef.value) videoPlayerRef.value.play();
+}
+
+// The generated view could not start (no WebGL2, or it failed to load): show the video instead.
+function handleWindowFailed(err) {
+  console.warn('Generated view unavailable, falling back to video:', err);
+  useGenerated.value = false;
 }
 
 // Handle audio element ready
@@ -111,7 +125,19 @@ onMounted(() => {
 
 <template>
   <div class="app">
+    <TrainWindow
+      v-if="useGenerated"
+      ref="videoPlayerRef"
+      :visible="hasStarted"
+      :distraction-score="distractionScore"
+      :rate="playbackRate"
+      :audio-element="audioElement"
+      :channel="currentChannel"
+      :song="currentSong"
+      @failed="handleWindowFailed"
+    />
     <VideoPlayer
+      v-else
       ref="videoPlayerRef"
       :visible="hasStarted"
       :distraction-score="distractionScore"
