@@ -38,12 +38,19 @@ export function createDirector({ params, reducedMotion = false }) {
   const listeners = { swap: [] };
 
   // A biome may prefer part of the day (a night city, a dawn marsh): { hours: [from, to] }.
+  // Called whenever the scenery changes.
   function placeHour() {
     const b = BIOMES[state.biome];
-    if (params.hour >= 0 || !b || !b.hours) return;
-    const [from, to] = b.hours;
-    const span = (to - from + 24) % 24;
-    state.hour = (from + span * ((state.seed >>> 8) % 1000) / 1000) % 24;
+    if (params.hour >= 0 || !b) return;
+    const roll = ((state.seed >>> 8) % 1000) / 1000;
+    if (b.hours) {
+      const [from, to] = b.hours;
+      state.hour = (from + ((to - from + 24) % 24) * roll) % 24;
+    } else if (state.level === 0 && (state.hour < 6.5 || state.hour > 19.5)) {
+      // Leaving a night biome at the plausible level: come out of the tunnel into daylight rather
+      // than spend an hour of real time in the dark. (The dreamlike level cycles the day quickly.)
+      state.hour = 8 + 9 * roll;
+    }
   }
 
   function chooseBiome(seed) {
