@@ -47,6 +47,7 @@ Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
 | `blurKeep` | `0.6` | How solid blurred splats stay, 0 to 1 |
 | `slot` | drawn per scenery | Start every stretch at one time of day: `dawn`, `day`, `dusk` or `night` |
 | `hour` | runs | Pin the time of day, 0 to 24 |
+| `horizon` | the scenery's own | How far the horizon sits below the middle of the window, `0` to `0.6`; higher gives the sky more room |
 | `gold` | `1` | Strength of the warm light at dawn and dusk; `0` turns it off |
 | `beat` | `1` | Strength of the swell on each beat; `0` turns it off |
 | `sparkle` | `1` | Strength of the treble shimmer and twinkle; `0` turns it off |

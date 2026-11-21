@@ -49,17 +49,21 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   scene.add(sky.object3d);
   // Below the horizon and behind the splats: a ground-coloured backdrop, so any thin spot in the
   // land reads as more land and never as sky. The camera is level, so the horizon is mid-screen.
-  const underlayUniforms = { uGround: { value: new THREE.Color(0.3, 0.38, 0.2) }, uHaze: uniforms.uHazeColor, uTint: uniforms.uLightTint };
+  const underlayUniforms = { uGround: { value: new THREE.Color(0.3, 0.38, 0.2) }, uHaze: uniforms.uHazeColor, uTint: uniforms.uLightTint, uShift: { value: 0 } };
   const underlay = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
     uniforms: underlayUniforms, depthTest: false, depthWrite: false,   // opaque pass, right after the sky
-    vertexShader: 'varying float vDown; void main() { vDown = 0.5 - 0.5 * position.y; gl_Position = vec4(position.x, position.y * 0.5 - 0.5, 1.0, 1.0); }',
+    vertexShader: 'varying float vDown; uniform float uShift; void main() { vDown = 0.5 - 0.5 * position.y; gl_Position = vec4(position.x, -1.0 + (position.y + 1.0) * 0.5 * (1.0 - uShift), 1.0, 1.0); }',
     fragmentShader: 'varying float vDown; uniform vec3 uGround; uniform vec3 uHaze; uniform vec3 uTint; void main() { vec3 c = mix(uHaze, uGround * uTint, smoothstep(0.0, 0.3, vDown)); gl_FragColor = vec4(c, 1.0); }',
   }));
   underlay.frustumCulled = false; underlay.renderOrder = -999;
   scene.add(underlay);
   const setUnderlay = (b) => { const g = (b.palette && (b.palette.underlay || b.palette.ground)) || [0.3, 0.38, 0.2]; underlayUniforms.uGround.value.setRGB(g[0], g[1], g[2]); };
   const frame = createFrame(THREE);
-  if (params.frame) camera.add(frame.object3d);
+  // The frame hangs from a mount whose matrix undoes the lowered horizon (see setHorizon), so the
+  // window frame stays put while the view through it shifts.
+  const frameMount = new THREE.Group(); frameMount.matrixAutoUpdate = false;
+  camera.add(frameMount);
+  if (params.frame) frameMount.add(frame.object3d);
   const director = createDirector({ params, reducedMotion });
   if (profile) director.setProfile(profile, { immediate: true });   // the channel picks where the journey starts
   const S = director.state;
@@ -193,7 +197,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     for (const key of [...chunks.keys()]) dropChunk(key);
     biome = getBiome(S.biome);
     terrain = makeTerrain(S.seed, biome.terrain);
-    setUnderlay(biome);
+    setUnderlay(biome); setHorizon(biome);
     worldBeat = S.beatMetres;
     if (kit) kit.reset();
     rebuilding = true;
@@ -205,6 +209,24 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   const kit = params.kit ? createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl: import.meta.env.BASE_URL }) : null;
 
   // --- sizing and adaptive resolution -------------------------------------------------------------
+  // A biome may lower the horizon in the frame to give the sky more room (biome.horizon, a fraction
+  // of the half-height; horizon= in the URL overrides it). The camera stays level: this is a lens
+  // shift, an off-centre projection, so verticals stay vertical and nothing else needs to know
+  // except the sky and the backdrop, which draw in screen space.
+  let horizonShift = 0;
+  function applyHorizon() {
+    const tanHalf = Math.tan((params.fov * Math.PI) / 360);
+    camera.projectionMatrix.elements[9] = horizonShift;
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    frameMount.matrix.identity(); frameMount.matrix.elements[9] = -horizonShift * tanHalf;
+    frameMount.matrixWorldNeedsUpdate = true;
+    underlayUniforms.uShift.value = horizonShift;
+  }
+  function setHorizon(b) {
+    const h = params.horizon >= 0 ? params.horizon : (b.horizon || 0);
+    horizonShift = Math.max(0, Math.min(0.6, h));
+    applyHorizon();
+  }
   let resScale = Math.min(1, params.scale);
   let width = 1, height = 1;
   function resize() {
@@ -213,10 +235,12 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
     camera.aspect = width / height; camera.updateProjectionMatrix();
+    applyHorizon();
     tanHalfHfov = Math.tan((params.fov * Math.PI) / 360) * camera.aspect;
     frame.resize(camera.aspect, params.fov);
   }
   resize();
+  setHorizon(biome);
   window.addEventListener('resize', resize);
   const onVisible = () => { last = performance.now(); };   // a hidden tab is not a hitch
   document.addEventListener('visibilitychange', onVisible);
@@ -272,7 +296,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     if (audioProvider) director.setAudio(audioProvider(dt));
     director.update(running ? dt : 0);
 
-    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: S.beat, sparkle: S.sparkle, sky: biome.sky });
+    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: S.beat, sparkle: S.sparkle, sky: biome.sky, shift: horizonShift });
     const inTunnel = S.tunnel && S.tunnel.phase === 'inside';
     uniforms.uMotionMetres.value = S.speed * params.shutter * (reducedMotion ? 0.5 : 1);
     uniforms.uHazeColor.value.copy(sky.horizonColor);

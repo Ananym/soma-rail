@@ -109,7 +109,7 @@ void main() { vUv = uv; gl_Position = vec4(position.xy, 1.0, 1.0); }   // at the
 
 const fragmentShader = /* glsl */`
 varying vec2 vUv;
-uniform float uTanHalf, uAspect, uTime, uExposure;
+uniform float uTanHalf, uAspect, uTime, uExposure, uShift;
 uniform vec3 uTauR, uTauM;
 uniform vec3 uSunDir, uSunLow, uSunHigh, uSunDirect;     // light colours: low/high atmosphere, at clouds
 uniform vec3 uMoonDir, uMoonLow, uMoonHigh, uMoonDirect;
@@ -248,7 +248,7 @@ vec4 cirrus(vec3 d, vec3 skyCol, float px) {
 }
 
 void main() {
-  vec3 dir = normalize(vec3((vUv.x * 2.0 - 1.0) * uTanHalf * uAspect, (vUv.y * 2.0 - 1.0) * uTanHalf, -1.0));
+  vec3 dir = normalize(vec3((vUv.x * 2.0 - 1.0) * uTanHalf * uAspect, (vUv.y * 2.0 - 1.0 + uShift) * uTanHalf, -1.0));   // uShift: a lowered horizon
   float px = length(fwidth(dir));                      // radians per pixel
 
   // Below the horizon the sky continues as the horizon colour of the same column.
@@ -399,7 +399,7 @@ export function createSky(THREE) {
   const C3 = () => new THREE.Color(0, 0, 0);
   const uniforms = {
     uTanHalf: { value: Math.tan((25 * Math.PI) / 180) }, uAspect: { value: 16 / 9 },
-    uTime: { value: 0 }, uExposure: { value: 1 },
+    uTime: { value: 0 }, uExposure: { value: 1 }, uShift: { value: 0 },
     uTauR: { value: new THREE.Vector3(...TAU_R) }, uTauM: { value: new THREE.Vector3(...TAU_M) },
     uSunDir: { value: V3() }, uSunLow: { value: C3() }, uSunHigh: { value: C3() }, uSunDirect: { value: C3() },
     uMoonDir: { value: V3() }, uMoonLow: { value: C3() }, uMoonHigh: { value: C3() }, uMoonDirect: { value: C3() },
@@ -491,7 +491,8 @@ export function createSky(THREE) {
   }
 
   function update(state) {
-    const { hour = 12, level = 0, dials = {}, time = 0, dt = 0, aspect = 16 / 9, fovDeg = 50, travelled = 0, energy = 0, beat = 0, sparkle = 0, sky: hint = null } = state;
+    const { hour = 12, level = 0, dials = {}, time = 0, dt = 0, aspect = 16 / 9, fovDeg = 50, travelled = 0, energy = 0, beat = 0, sparkle = 0, sky: hint = null, shift = 0 } = state;
+    U.uShift.value = shift;
     // A biome may ask for a richer night sky: { stars: brightness x, deep: 0..1 extra faint stars,
     // milkyWay: 0..1, clear: 0..1 fewer clouds }. All default to the plain sky.
     const skyHint = hint || {};

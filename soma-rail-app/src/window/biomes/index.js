@@ -4,6 +4,7 @@
 //   terrain   overrides for DEFAULT_TERRAIN in terrain.js
 //   hazeDist  metres at which haze reaches 63% (the far band needs height and contrast to survive it)
 //   hours     optional [from, to] time of day the biome prefers
+//   horizon   optional 0..0.6: lowers the horizon in the frame to give the sky more room
 //   sky       optional night-sky hint { stars, deep, milkyWay, clear }: brighter stars, a second field
 //             of faint ones, the Milky Way, fewer clouds (see sky.js update)
 //

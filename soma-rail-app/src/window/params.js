@@ -12,6 +12,7 @@ const NUM = {
   sortMs: 0,         // least time between splat sorts, ms (0 = every frame). Depth order barely changes for
                      // this camera, so a value such as 100 may cut per-frame stalls; untested on a real GPU
   hour: -1,          // fixed time of day 0..24, or -1 to let it run
+  horizon: -1,       // how far the horizon sits below mid-frame, 0..0.6 of the half-height; -1 = the biome's own
   audio: -1,         // music analysis: 1 on, 0 off, -1 automatic (off in Safari and on iOS, see audioWanted)
   frame: 1,          // 0 hides the window frame
   kit: 1,            // 0 leaves out the photo pieces (code-made scenery only)
