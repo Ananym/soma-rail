@@ -13,7 +13,10 @@ export const PATCH_UNIFORMS = () => ({
   uHazeDist: { value: 2500 },       // metres at which haze reaches 63%
   uLightTint: { value: null },      // THREE.Color multiplied into every splat
   uDissolve: { value: 0 },          // 0..1, scatters splats ("matter" dial)
-  uBreath: { value: 0 },            // small scale pulse from the music
+  uBreath: { value: 0 },            // small scale pulse from the bass
+  uBeat: { value: 0 },              // 0..1, jumps on each onset (kick, snare) and decays in a fraction of a second
+  uSparkle: { value: 0 },           // 0..1, follows the treble (hi-hats, cymbals, air)
+  uClock: { value: 0 },             // seconds, for the sparkle's flicker
 });
 
 const EDITS = [
@@ -27,7 +30,10 @@ uniform vec3 uHazeHigh;
 uniform float uHazeDist;
 uniform vec3 uLightTint;
 uniform float uDissolve;
-uniform float uBreath;`,
+uniform float uBreath;
+uniform float uBeat;
+uniform float uSparkle;
+uniform float uClock;`,
   },
   {
     // scatter and breathe, before the splat is moved into view space
@@ -40,7 +46,18 @@ uniform float uBreath;`,
         vec3 hsh = fract(sin(vec3(center.z) * vec3(12.9898, 78.233, 37.719)) * 43758.5453) - 0.5;
         center += hsh * uDissolve * (0.05 * length(center) + 0.3);
     }
-    scales *= 1.0 + uBreath;`,
+    // Music. center is relative to the eye, so center.y / distance is the elevation: raised picks
+    // out what stands above eye level (trees, buildings, towers, mesas) and leaves the ground alone.
+    // On each beat those things, and every light, swell a little and fall back; the bass adds a slower
+    // breath to everything. The treble makes raised things shimmer and lights twinkle (see below).
+    float raised = smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
+    float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
+    scales *= 1.0 + uBreath + uBeat * (0.075 * raised + 0.32 * isLight);
+    float shimmer = 1.0;
+    if (uSparkle > 0.0) {
+        float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
+        shimmer = 1.0 + uSparkle * (tw - 0.5) * (0.2 * raised + 0.6 * isLight);
+    }`,
   },
   {
     // light and haze: tint, then mix toward the horizon colour with distance
@@ -53,7 +70,7 @@ uniform float uBreath;`,
         float hz = 1.0 - exp(viewCenter.z / max(uHazeDist, 1.0));
         // haze toward the sky colour at the splat's own elevation, so far hills meet the sky at twilight
         vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
-        vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow), hazeCol, hz * (1.0 - 0.5 * glow));
+        vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow) * shimmer, hazeCol, hz * (1.0 - 0.5 * glow));
     }`,
   },
   {

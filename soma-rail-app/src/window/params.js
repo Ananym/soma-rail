@@ -14,6 +14,8 @@ const NUM = {
   frame: 1,          // 0 hides the window frame
   kit: 1,            // 0 leaves out the photo pieces (code-made scenery only)
   gold: 1,           // strength of the warm grade on the land when the sun is low (0 = off)
+  beat: 1,           // strength of the swell on each beat (0 = off, 2 = double)
+  sparkle: 1,        // strength of the treble shimmer (0 = off)
   debug: 0,          // 1 shows a stats readout
   preserve: 0,       // 1 keeps the drawing buffer readable (screenshot scripts only; slower)
 };

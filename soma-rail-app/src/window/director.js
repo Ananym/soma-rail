@@ -33,7 +33,10 @@ export function createDirector({ params, reducedMotion = false }) {
     biome: BIOMES[params.biome] ? params.biome : DEFAULT_BIOME,
     profile: null,
     dissolve: 0,            // shader "matter" amount, 0..1
-    breath: 0,              // shader scale pulse
+    breath: 0,              // shader scale pulse from the bass
+    beat: 0,                // 0..1, jumps on each onset and decays quickly
+    sparkle: 0,             // 0..1, follows the treble
+    trebleNow: 0,
     beatMetres: 56,         // mast spacing; follows tempo when audio is available
     energy: 0,              // slow loudness, 0..1
     bpm: 0,                 // last trusted tempo, for the debug readout
@@ -107,9 +110,14 @@ export function createDirector({ params, reducedMotion = false }) {
 
     // Per-frame audio features, or null when there is no signal. See audio.js.
     setAudio(f) {
-      if (!f || !f.active) { state.energy *= 0.98; state.breath *= 0.9; return; }
+      if (!f || !f.active) { state.energy *= 0.98; state.breath *= 0.9; state.trebleNow = 0; return; }
       state.energy += (f.level - state.energy) * 0.02;
-      if (!reducedMotion) state.breath = 0.035 * f.bass;
+      if (!reducedMotion) {
+        state.breath = 0.035 * f.bass;
+        // an onset (kick, snare, a struck note) starts a pulse; a harder hit starts a bigger one
+        if (f.onset) state.beat = Math.max(state.beat, (0.55 + 0.45 * Math.min(1, f.flux * 2.5)) * params.beat);
+        state.trebleNow = f.treble * params.sparkle;
+      }
       if (f.bpm > 40 && f.confidence > 0.6 && state.speed > 1) {   // tempo on real music is shaky: trust only firm locks
         // one mast per bar of four beats at the current speed, kept inside a believable range
         let m = state.cruise * (240 / f.bpm);
@@ -133,6 +141,8 @@ export function createDirector({ params, reducedMotion = false }) {
 
       // the clock: about an hour every 20 minutes at the plausible level, every 20 seconds at the dreamlike one
       if (params.hour < 0) state.hour = (state.hour + dt * (state.dials.time * 0.05 + 0.0002)) % 24;
+      state.beat *= Math.exp(-dt / 0.17);                                   // a beat is over in a few frames
+      state.sparkle += (state.trebleNow - state.sparkle) * (1 - Math.exp(-dt / 0.1));
       const wantDissolve = reducedMotion ? 0 : state.dials.matter * Math.max(0, state.energy - 0.35) * 0.9;
       state.dissolve += (wantDissolve - state.dissolve) * Math.min(1, dt * 0.5);
 

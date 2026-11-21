@@ -34,12 +34,16 @@ import { downsBiome } from './downs.js';
 import { saltflatBiome } from './saltflat.js';
 import { nightcityBiome } from './nightcity.js';
 import { pinewoodBiome } from './pinewood.js';
+import { karstBiome } from './karst.js';
+import { dunesBiome } from './dunes.js';
 
 export const BIOMES = {
   downs: downsBiome,
   pinewood: pinewoodBiome,
   saltflat: saltflatBiome,
   nightcity: nightcityBiome,
+  karst: karstBiome,
+  dunes: dunesBiome,
   placeholder: placeholderBiome,
 };
 

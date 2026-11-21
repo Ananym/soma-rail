@@ -235,7 +235,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     if (audioProvider) director.setAudio(audioProvider(dt));
     director.update(running ? dt : 0);
 
-    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy });
+    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: S.beat, sparkle: S.sparkle });
     const inTunnel = S.tunnel && S.tunnel.phase === 'inside';
     uniforms.uMotionMetres.value = S.speed * params.shutter * (reducedMotion ? 0.5 : 1);
     uniforms.uHazeColor.value.copy(sky.horizonColor);
@@ -252,6 +252,9 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     uniforms.uHazeDist.value = biome.hazeDist || 3000;
     uniforms.uDissolve.value = S.dissolve;
     uniforms.uBreath.value = S.breath;
+    uniforms.uBeat.value = S.beat;
+    uniforms.uSparkle.value = S.sparkle;
+    uniforms.uClock.value = S.time % 1000;
 
     manageChunks();
     const allDone = generate(running ? params.slice : 12);
@@ -294,7 +297,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
       let splats = 0, pending = 0;
       for (const ch of chunks.values()) { if (ch.done) splats += ch.count(); else pending++; }
       return { fps: Math.round(fps), at: Math.round(S.travelled), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres), photos: kit ? kit.stats().pieces : 0,
-        levelName: LEVELS[S.level].name, slot: S.slot, tint: uniforms.uLightTint.value.toArray().map((v) => +v.toFixed(2)), dissolve: +S.dissolve.toFixed(2),
+        levelName: LEVELS[S.level].name, slot: S.slot, beat: +S.beat.toFixed(2), sparkle: +S.sparkle.toFixed(2), tint: uniforms.uLightTint.value.toArray().map((v) => +v.toFixed(2)), dissolve: +S.dissolve.toFixed(2),
         next: S.tunnel ? { biome: S.tunnel.next.biome, levelName: LEVELS[S.tunnel.next.level].name, phase: S.tunnel.phase } : null,
         audio: !!audioProvider };
     },

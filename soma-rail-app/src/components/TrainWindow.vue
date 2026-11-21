@@ -113,7 +113,7 @@ function readout(s) {
   }
   lines.push(`scenery: ${s.biome}   time: ${hh}:${mm} (${s.slot || 'pinned'})   ${s.kmh} km/h`);
   lines.push(`${s.fps} fps   ${Math.round(s.splats / 1000)}k splats   resolution x${s.resScale}   photo pieces ${s.photos}`);
-  lines.push(s.audio ? `music: energy ${s.energy}   ${s.bpm ? s.bpm + ' bpm' : 'no tempo lock'}   masts every ${s.mast} m   dissolve ${s.dissolve}` : 'music: not analysed');
+  lines.push(s.audio ? `music: energy ${s.energy}   beat ${'#'.repeat(Math.round(s.beat * 8)).padEnd(8, '.')}   sparkle ${s.sparkle}\n       ${s.bpm ? s.bpm + ' bpm' : 'no tempo lock'}   masts every ${s.mast} m   dissolve ${s.dissolve}` : 'music: not analysed');
   if (!s.patched) lines.push('WARNING: shader patch not applied (no blur or haze)');
   return lines.join('\n');
 }

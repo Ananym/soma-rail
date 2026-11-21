@@ -31,8 +31,8 @@ What it does today:
 - **Scenery** is generated ahead of the train in chunks and thrown away behind it. Changes of scenery happen inside tunnels.
 - **Distraction brakes the train.** Fidget and it slows to a stop, the motion blur shrinking until the view stands sharp and still; settle and it pulls away again. There is no fade to black in this view. The audio still quietens.
 - **Time of day** is drawn afresh for each stretch of scenery: dawn and dusk (golden hour) about half the time, full day the rest, and night in the city.
-- **Music** changes the view. Each SomaFM channel starts in scenery that suits it, a new track queues a tunnel and new scenery, and the audio itself drives small effects.
-- **Four kinds of scenery** are written in code: rolling farmland, pine forest with lakes, salt flat with mesas, and a city at night. Each has a plausible and a dreamlike version.
+- **Music** changes the view. Each SomaFM channel starts in scenery that suits it, and a new track queues a tunnel and new scenery. The audio is analysed live: each kick or snare makes trees, buildings and lights swell briefly, the treble makes foliage shimmer and lights and stars twinkle, and the bass makes everything breathe.
+- **Six kinds of scenery** are written in code: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country with limestone towers and paddies, and a sand-sea desert with oases. Each has a plausible and a dreamlike version.
 - **Photo pieces** made from CC0 photographs stand among the code-made farmland (`soma-rail-app/public/kit/`, credits in its `index.json`).
 
 Tuning parameters, added to the URL after `?view=generated`:
@@ -40,7 +40,7 @@ Tuning parameters, added to the URL after `?view=generated`:
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `level` | from the channel | Surreal level: `0` plausible, `1` dreamlike |
-| `biome` | from the channel | Force one biome: `downs`, `pinewood`, `saltflat` or `nightcity` |
+| `biome` | from the channel | Force one biome: `downs`, `pinewood`, `saltflat`, `nightcity`, `karst` or `dunes` |
 | `budget` | `600000` | Total splats; lower it if the view stutters |
 | `kmh` | `100` | Cruising speed |
 | `shutter` | `0.02` | Motion-blur length in seconds |
@@ -48,6 +48,8 @@ Tuning parameters, added to the URL after `?view=generated`:
 | `slot` | drawn per scenery | Start every stretch at one time of day: `dawn`, `day`, `dusk` or `night` |
 | `hour` | runs | Pin the time of day, 0 to 24 |
 | `gold` | `1` | Strength of the warm light at dawn and dusk; `0` turns it off |
+| `beat` | `1` | Strength of the swell on each beat; `0` turns it off |
+| `sparkle` | `1` | Strength of the treble shimmer and twinkle; `0` turns it off |
 | `seed` | random | A tuning aid: the same seed starts in the same scenery (track changes still alter it) |
 | `kit` | `1` | `0` leaves out the photo pieces |
 | `audio` | `1` | `0` turns off music analysis |

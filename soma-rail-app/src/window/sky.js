@@ -1,6 +1,7 @@
 // Sky: one full-screen shader behind everything, plus the light it implies for the land.
 // createSky(THREE) -> { object3d, update(state), horizonColor, hazeHighColor, lightTint, sunDir }
-//   state = { hour (0..24), level (0|1), dials, time (seconds), dt, aspect, fovDeg, travelled (m), speed (m/s), energy (0..1) }
+//   state = { hour (0..24), level (0|1), dials, time (seconds), dt, aspect, fovDeg, travelled (m), speed (m/s),
+//             energy (0..1 slow loudness), beat (0..1 pulse on each onset), sparkle (0..1 treble) }
 //   horizonColor: THREE.Color the land hazes toward; lightTint: THREE.Color multiplied into splats.
 //
 // How it works
@@ -460,7 +461,7 @@ export function createSky(THREE) {
   }
 
   function update(state) {
-    const { hour = 12, level = 0, dials = {}, time = 0, dt = 0, aspect = 16 / 9, fovDeg = 50, travelled = 0, energy = 0 } = state;
+    const { hour = 12, level = 0, dials = {}, time = 0, dt = 0, aspect = 16 / 9, fovDeg = 50, travelled = 0, energy = 0, beat = 0, sparkle = 0 } = state;
     const L1 = level >= 1 ? 1 : 0;
     const scaleDial = L1 * (dials.scale || 0), topo = L1 * (dials.topology || 0), timeDial = dials.time || 0;
     U.uTime.value = time;
@@ -489,7 +490,8 @@ export function createSky(THREE) {
     U.uSunDisc.value = 40 * smoothstep(-0.02, 0.0, sy + 0.01);
     U.uMoonRadius.value = 0.0047 * (1 + 8 * smoothstep(0, 1, scaleDial));
     U.uMoonDisc.value = mix(0.35, 1.5, night) * smoothstep(-0.03, 0.01, moonDir.y);
-    U.uStars.value = smoothstep(-0.07, -0.2, sy) * (1 - 0.35 * smoothstep(0, 0.3, moonDir.y)) * (1 + 0.4 * L1);
+    // the stars brighten with the treble, so hi-hats make the night sky glitter
+    U.uStars.value = smoothstep(-0.07, -0.2, sy) * (1 - 0.35 * smoothstep(0, 0.3, moonDir.y)) * (1 + 0.4 * L1) * (1 + 0.9 * sparkle);
     U.uSun2Disc.value = s2 * (0.4 + 0.6 * smoothstep(-0.25, 0.1, sy));
 
     // ---- clouds: wind drift plus true parallax of the layer as the train moves (+x)
@@ -501,7 +503,8 @@ export function createSky(THREE) {
     lo.y = (lo.y + dt * 0.0012 * windK) % 256;
     hi.x = (hi.x + (dTrav / 9000) * 0.3 + dt * 0.0012 * windK) % 256;
     hi.y = (hi.y + dt * 0.0004 * windK) % 256;
-    U.uCloudGain.value = 1 + 0.18 * L1 * energy;
+    // clouds catch a little light on each beat, at both levels
+    U.uCloudGain.value = 1 + 0.18 * L1 * energy + 0.06 * beat;
 
     // ---- level-1 overhead land and aurora
     U.uTopo.value = 0.9 * smoothstep(0, 1, topo);

@@ -41,14 +41,26 @@ A first draft of the whole pipeline runs behind `?view=generated`; the video is 
 | Renderer | three.js and Spark in a lazy chunk (1.2 MB gzipped) loaded after Start; the main bundle grew by about 4 kB gzipped | `src/window/engine.js` |
 | Camera effects | Motion blur, haze toward the sky colour, time-of-day tint and a "dissolve" effect, patched into Spark's vertex shader with checked anchors | `src/window/sparkPatch.js` |
 | World | Four depth bands built in chunks, generated a few milliseconds per frame; a pure function of seed, band and chunk index | `engine.js`, `layers.js`, `terrain.js` |
-| Scenery | Four biomes written in code on a shared prop kit: rolling farmland, pine forest with lakes, salt flat with mesas, and a city at night. Each has a plausible and a dreamlike version. 640 generator checks pass | `src/window/biomes/`, `scripts/check-biomes.mjs` |
+| Scenery | Six biomes written in code on a shared prop kit: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country (limestone towers, paddies, a river, mist) and a sand-sea desert (dunes, oases). Each has a plausible and a dreamlike version. 896 generator checks pass | `src/window/biomes/`, `scripts/check-biomes.mjs` |
 | Photo pieces | Six sheets made from CC0 photos are shipped (9.8 MB). Two are switched on, in the farmland biome: a woodland edge and a group of houses. Two looked like pasted cut-outs in place and are off; two are untried | `kitPieces.js`, `public/kit/`, `scripts/photo-to-splats.mjs` |
 | Sky | One shader: scattering by sun height, sun, moon, stars, two cloud layers; it also sets the land's haze colour and light | `src/window/sky.js` |
 | Window frame and glass | A rounded frame with a sill, plus grain, a faint reflection and a vignette | `frame.js`, `TrainWindow.vue` |
 | Director | Speed from the distraction score (distraction brakes the train to a stop; nothing fades to black), two surreal levels, tunnels that hide every change of scenery. Each stretch starts in a time-of-day slot: dawn or dusk about half the time, with a warm grade on the land while the sun is low | `src/window/director.js` |
 | Music | The stream is loaded with CORS and analysed for loudness, bands, onsets and tempo; each channel has a starting profile; a new track queues a tunnel | `audio.js`, `audioAnalysis.js`, `profiles.json` |
 
-What the music changes today is modest: bass makes the splats breathe slightly, loudness drives the dissolve effect at the dreamlike level, a firm tempo lock sets the mast spacing of the next stretch, and a track or channel change brings new scenery through a tunnel. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
+What the music changes:
+
+| Signal | What it changes |
+| --- | --- |
+| Channel | Starting biomes and surreal level, from a table of all 51 channels |
+| Track change | A tunnel, then scenery, terrain and time of day picked from a hash of artist and title |
+| Onsets (kick, snare, a struck note) | A beat pulse: everything standing above eye level swells by up to 7.5% and falls back in a fraction of a second, lights swell by up to a third, and clouds catch a little light |
+| Treble (hi-hats, cymbals, air) | A sparkle: raised scenery shimmers, lights twinkle one by one, and the stars brighten |
+| Bass | A slow breath: every splat swells by up to 3.5% |
+| Loudness | At the dreamlike level, layers of the scene drift apart (the dissolve); clouds and aurora brighten |
+| Tempo, when the lock is firm | Mast or pole spacing of the next stretch, one per bar |
+
+The beat pulse follows detected onsets, not a predicted beat, so it lands on what is heard and needs no tempo lock. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
 
 Three failure paths were run in a headless browser and work: without WebGL2 the app falls back to the video; if the streams refuse CORS the radio keeps playing without analysis; and the audio context runs when started from the Start click with no autoplay override.
 
@@ -57,7 +69,7 @@ Not built yet:
 - **CLAP mood matching.** Scenery is chosen from channel profiles and a hash of the track, not from how the music sounds.
 - **A worker for chunk generation.** Chunks are built on the main thread in small slices.
 - **Glass detail.** No droplets, dirt or real reflections.
-- **Beat-phase effects.** Tempo is used, beat timing is not.
+- **Predicted beats.** The pulse reacts to onsets as they happen; nothing anticipates the next beat from the tempo.
 - **Weather.**
 
 ### What to look at on a real GPU
@@ -76,6 +88,8 @@ Nothing here can judge these; they are the point of the first session with it.
 | Is golden hour right? | `g` steps through dawn, day, dusk and night; `gold=0.5` halves the warm grade |
 | Do buildings hold together as you pass? | Farm buildings turned away from the line used to show an open back; they now have a back wall and roof. Watch a farmstead from approach to departure |
 | Is the dissolve dreamlike or distracting? | At the dreamlike level, loud music makes layers of the scene drift apart. It has only been seen in stills; watch it move on a spacey channel such as Drone Zone |
+| Is the beat pulse subtle enough? | On a rhythmic channel, trees, buildings and lights should swell with each hit and the readout's `beat` bar should jump. `beat=0.5` halves it, `beat=0` turns it off |
+| Does the treble sparkle read as shimmer or as noise? | Watch foliage, lit windows and stars on a track with hi-hats. `sparkle=0` turns it off |
 | Is the bass "breath" felt or seen? | Splats swell by up to 3.5% with the bass, at both levels; it should be barely noticeable |
 | Does music analysis work in your browser? | The readout shows `energy` moving and, on rhythmic channels, a `bpm`; Safari and Firefox are untested |
 | Do tunnels read as tunnels? | `t` forces one |
@@ -392,13 +406,13 @@ Hugging Face gives 2 minutes of GPU a day without an account and 5 with a free o
 
 The first risk is aesthetic, not technical: nobody knows yet whether a code-arranged splat world looks good sliding past a window. Spike 1 answers that before anything else is built.
 
-1. **The look.** *Built, for four biomes; needs judging on a real GPU.* One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, a plain window frame, the motion-stretch and haze, speed bound to the distraction score. Build it at two surreal levels. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
+1. **The look.** *Built, for six biomes; needs judging on a real GPU.* One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, a plain window frame, the motion-stretch and haze, speed bound to the distraction score. Build it at two surreal levels. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
    - Pass: a 20-second recording that someone takes for footage at first glance.
    - Also yields the real splat budget on a laptop and a phone, and settles the far-band precision and near-field opacity questions.
 2. **Audio on the other engines.** *The attribute and the fallback are built; the other browsers are untested.* Then run `docs/checks/somafm-audio` by hand in Safari on a Mac, Safari on an iPhone and Firefox. An hour of work, done alongside spike 1.
 3. **Endless without seams.** *Chunks, biomes and tunnels are built, on the main thread; the 30-minute run is not done.* The chunk generator in a worker, deterministic by seed, with two biomes and a tunnel between them.
    - Pass: memory stays flat and no visible pop over a 30-minute run.
-4. **Reactivity.** *Analysis, channel profiles and track-change tunnels are built; CLAP is not.* Masts on the beat from our own onset tracker, then CLAP scoring against biome descriptions, with channel profiles and track-change transitions as the fallback.
+4. **Reactivity.** *Analysis, channel profiles, track-change tunnels, a beat pulse and a treble sparkle are built; CLAP is not.* Masts on the beat from our own onset tracker, then CLAP scoring against biome descriptions, with channel profiles and track-change transitions as the fallback.
    - Pass: someone listening can tell the scenery belongs to the music without being told how.
 5. **Asset pipeline.** *The photo route is built: six pieces made, two in use; nothing from SuperSplat or the generators yet.* Build the kit from the routes in "Free splat sources": photo-plus-depth sheets first, then SuperSplat downloads and generated props. Record each piece's licence and attribution. Where nothing is good enough, make the piece in code. Compress them and judge them from the window. Settles what the kit weighs. Nothing is bought.
 6. **The glass.** *Frame, grain, a faint reflection and a vignette are built.* The finished frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
