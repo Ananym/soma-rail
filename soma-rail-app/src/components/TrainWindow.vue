@@ -6,19 +6,20 @@
     <div class="reflection"></div>
     <div class="glass"></div>
     <pre v-if="params.debug" class="stats">{{ statsText }}</pre>
-    <div class="distraction-overlay" :style="{ opacity: overlayOpacity }"></div>
   </div>
 </template>
 
 <script setup>
 // The generated train window: a drop-in for VideoPlayer.vue behind ?view=generated.
 // The heavy renderer (three.js + Spark) is imported only when play() is called, after the Start click.
-import { ref, computed, watch, onUnmounted } from 'vue';
+import { ref, watch, onUnmounted } from 'vue';
 import { readParams } from '../window/params';
 import { getProfile } from '../window/profiles';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
+  // Accepted so this is a drop-in for VideoPlayer, but not drawn: here distraction does not fade
+  // the picture to black, it brakes the train (see `rate`), and the view sharpens as it stops.
   distractionScore: { type: Number, default: 0 },
   rate: { type: Number, default: 1 },            // 0..1 train speed from the distraction mechanic
   audioElement: { type: Object, default: null },
@@ -32,7 +33,6 @@ const params = readParams();
 const canvasEl = ref(null);
 const ready = ref(false);
 const statsText = ref('');
-const overlayOpacity = computed(() => props.distractionScore / 100);
 
 let engine = null;
 let statsTimer = null;
@@ -253,14 +253,5 @@ canvas {
   background: rgba(0, 0, 0, 0.5);
   padding: 6px 8px;
   pointer-events: none;
-}
-
-.distraction-overlay {
-  position: absolute;
-  inset: 0;
-  background: #000;
-  pointer-events: none;
-  z-index: 1;
-  transition: opacity 0.1s linear;
 }
 </style>

@@ -22,7 +22,7 @@ const outDir = process.argv[2] || '.';
   const GEN = '?view=generated&debug=1&budget=120000&seed=check';
   const cases = [
     { name: 'video', query: '', wait: 4000, expect: 'video' },
-    { name: 'generated', query: GEN, wait: 20000, expect: 'generated', tap: true },
+    { name: 'generated', query: GEN, wait: 20000, expect: 'generated', tap: true, distraction: true },
     // No WebGL2: the generated view must hand over to the video without disturbing the radio.
     { name: 'no-webgl2', query: GEN, wait: 8000, expect: 'video',
       init: () => { const orig = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (type, ...rest) { return type === 'webgl2' ? null : orig.call(this, type, ...rest); }; } },
@@ -58,10 +58,25 @@ const outDir = process.argv[2] || '.';
         tap: window.__trainWindowAudio ? window.__trainWindowAudio() : null,
       };
     });
+    // Distraction in the generated view brakes the train instead of fading to black. Check the wiring:
+    // losing focus must lower the rate the director runs at, and nothing may draw a black overlay.
+    // (How fast it brakes cannot be judged here: on a software renderer the page's timers starve,
+    // so the distraction score climbs far more slowly than on a real machine.)
+    let brake = null;
+    if (c.distraction) {
+      const rate = () => page.evaluate(() => window.__trainWindow.director.state.rate);
+      const before = await rate();
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      await page.waitForTimeout(15000);
+      const after = await rate();
+      const overlay = await page.evaluate(() => !!document.querySelector('.window-container .distraction-overlay'));
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      brake = { rateBefore: +before.toFixed(2), rateAfterBlur: +after.toFixed(2), overlay, ok: after < before - 0.03 && !overlay };
+    }
     await page.screenshot({ path: path.join(outDir, `app-${name}.png`), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
     // YouTube's embed logs its own noise, and the cases that break things on purpose log theirs.
     const ours = errors.filter((e) => !/youtube|googlevideo|doubleclick|ERR_BLOCKED|net::ERR|Permissions policy|Failed to load resource|Audio error|server attempts/i.test(e));
-    console.log(`\n== ${name}`); console.log(JSON.stringify(state));
+    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log('brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }
     const audioOk = state.audio && !state.audio.paused && state.audio.time > 0.5;
     const viewOk = c.expect === 'video'
@@ -70,7 +85,7 @@ const outDir = process.argv[2] || '.';
     const tapOk = c.tap === undefined ? true
       : c.tap ? !!(state.tap && state.tap.active && state.tap.context === 'running' && state.audio.crossOrigin === 'anonymous')
         : !state.tap && state.audio.crossOrigin === null;
-    const ok = state.startGone && audioOk && viewOk && tapOk && !ours.length;
+    const ok = state.startGone && audioOk && viewOk && tapOk && !ours.length && (!brake || brake.ok);
     console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk})`); if (!ok) failed = true;
     await ctx.close();
   }

@@ -29,7 +29,7 @@ Add `?view=generated` to the URL to swap the YouTube video for a train-window vi
 What it does today:
 
 - **Scenery** is generated ahead of the train in chunks and thrown away behind it. Changes of scenery happen inside tunnels.
-- **Speed** follows the distraction score: fidget and the train brakes; settle and it pulls away.
+- **Distraction brakes the train.** Fidget and it slows to a stop, the motion blur shrinking until the view stands sharp and still; settle and it pulls away again. There is no fade to black in this view. The audio still quietens.
 - **Music** changes the view. Each SomaFM channel starts in scenery that suits it, a new track queues a tunnel and new scenery, and the audio itself drives small effects.
 - **Four kinds of scenery** are written in code: rolling farmland, pine forest with lakes, salt flat with mesas, and a city at night. Each has a plausible and a dreamlike version.
 - **Photo pieces** made from CC0 photographs stand among the code-made farmland (`soma-rail-app/public/kit/`, credits in its `index.json`).

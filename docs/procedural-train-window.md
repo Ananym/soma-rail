@@ -45,7 +45,7 @@ A first draft of the whole pipeline runs behind `?view=generated`; the video is 
 | Photo pieces | Six sheets made from CC0 photos are shipped (9.8 MB). Two are switched on, in the farmland biome: a woodland edge and a group of houses. Two looked like pasted cut-outs in place and are off; two are untried | `kitPieces.js`, `public/kit/`, `scripts/photo-to-splats.mjs` |
 | Sky | One shader: scattering by sun height, sun, moon, stars, two cloud layers; it also sets the land's haze colour and light | `src/window/sky.js` |
 | Window frame and glass | A rounded frame with a sill, plus grain, a faint reflection and a vignette | `frame.js`, `TrainWindow.vue` |
-| Director | Speed from the distraction score, time of day, two surreal levels, tunnels that hide every change of scenery | `src/window/director.js` |
+| Director | Speed from the distraction score (distraction brakes the train to a stop; nothing fades to black), time of day, two surreal levels, tunnels that hide every change of scenery | `src/window/director.js` |
 | Music | The stream is loaded with CORS and analysed for loudness, bands, onsets and tempo; each channel has a starting profile; a new track queues a tunnel | `audio.js`, `audioAnalysis.js`, `profiles.json` |
 
 What the music changes today is modest: bass makes the splats breathe slightly, loudness drives the dissolve effect at the dreamlike level, a firm tempo lock sets the mast spacing of the next stretch, and a track or channel change brings new scenery through a tunnel. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
@@ -416,6 +416,7 @@ Decided on 21 November 2026:
 | Assets | Anything free to use, with code-made pieces to fill gaps; nothing is bought | Paid generation is out. Non-commercial licences are acceptable, since the project is not commercial; each piece's licence is still recorded. |
 | Hosting | Stay static on GitHub Pages for now | Revisit only if traffic nears 100 GB a month |
 | Seed or music | Music leads; no shared journeys | No seed in the URL in the first version |
+| Distraction in the generated view | The train slows to a stop; no fade to black | The stopping train, sharpening as its blur shrinks, is the whole visual penalty. Audio still quietens |
 
 Answered earlier by the checks:
 
