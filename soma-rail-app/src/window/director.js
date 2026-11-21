@@ -30,6 +30,7 @@ export function createDirector({ params, reducedMotion = false }) {
     breath: 0,              // shader scale pulse
     beatMetres: 56,         // mast spacing; follows tempo when audio is available
     energy: 0,              // slow loudness, 0..1
+    bpm: 0,                 // last trusted tempo, for the debug readout
     tunnel: null,           // { x0, x1, phase: 'approach' | 'inside' | 'leaving', next: {biome, seed} }
     queued: null,           // a change waiting for the current tunnel to finish
     time: 0,
@@ -89,12 +90,13 @@ export function createDirector({ params, reducedMotion = false }) {
       if (!f || !f.active) { state.energy *= 0.98; state.breath *= 0.9; return; }
       state.energy += (f.level - state.energy) * 0.02;
       if (!reducedMotion) state.breath = 0.035 * f.bass;
-      if (f.bpm > 40 && state.speed > 1) {
+      if (f.bpm > 40 && f.confidence > 0.6 && state.speed > 1) {   // tempo on real music is shaky: trust only firm locks
         // one mast per bar of four beats at the current speed, kept inside a believable range
         let m = state.cruise * (240 / f.bpm);
         while (m > 80) m /= 2;
         while (m < 28) m *= 2;
         state.beatMetres = m;
+        state.bpm = f.bpm;
       }
     },
 

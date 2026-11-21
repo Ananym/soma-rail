@@ -38,6 +38,34 @@ let engine = null;
 let statsTimer = null;
 let lastSongKey = null;
 let startChannelId = null;
+let tap = null;            // music analysis (window/audio.js), only when the stream was loaded with CORS
+let tapElement = null;
+
+// Analyse the radio's audio element, but only one that was loaded with CORS: routing a non-CORS
+// element through Web Audio would silence it for the listener.
+async function connectAudio() {
+  const el = props.audioElement;
+  if (!engine || !params.audio || !props.audioCors || !el || el.crossOrigin !== 'anonymous' || el === tapElement) return;
+  try {
+    const { createAudioTap } = await import('../window/audio.js');
+    if (tap) tap.dispose();
+    tap = createAudioTap();
+    if (!tap.attachElement(el)) { tap = null; return; }
+    tapElement = el;
+    tap.resume();
+    let features = null;
+    engine.setAudioProvider((dt) => (features = tap.update(dt)));
+    if (typeof window !== 'undefined') window.__trainWindowAudio = () => (features ? { ...features } : null);   // for checks and tuning
+  } catch (err) {
+    console.warn('Music analysis unavailable:', err);
+    tap = null;
+  }
+}
+function disconnectAudio() {
+  if (engine) engine.setAudioProvider(null);
+  if (tap) tap.dispose();
+  tap = null; tapElement = null;
+}
 
 // With ?debug=1 a few keys drive the director, for tuning on a real GPU.
 const DEBUG_KEYS = '\n\nkeys: t new scenery   b next biome   l surreal level\n      h +1 hour   [ ] speed -/+ 10 km/h';
@@ -64,6 +92,7 @@ async function play() {
     await engine.ready;
     engine.start();
     ready.value = true;
+    connectAudio();
     if (params.debug) {
       statsTimer = setInterval(() => { statsText.value = JSON.stringify(engine.stats(), null, 1) + DEBUG_KEYS; }, 500);
       window.addEventListener('keydown', onDebugKey);
@@ -76,6 +105,12 @@ async function play() {
 }
 
 watch(() => props.rate, (r) => { if (engine) engine.setRate(r); });
+
+// The audio element is replaced if CORS loading fails; follow it, and drop analysis if CORS is off.
+watch(() => [props.audioElement, props.audioCors], () => {
+  if (!props.audioCors || props.audioElement !== tapElement) disconnectAudio();
+  connectAudio();
+});
 
 // A new channel changes the kind of scenery, behind a tunnel.
 watch(() => props.channel && props.channel.id, (id) => {
@@ -96,6 +131,7 @@ watch(() => props.song, (song) => {
 onUnmounted(() => {
   if (statsTimer) clearInterval(statsTimer);
   window.removeEventListener('keydown', onDebugKey);
+  disconnectAudio();
   if (engine) engine.dispose();
 });
 
