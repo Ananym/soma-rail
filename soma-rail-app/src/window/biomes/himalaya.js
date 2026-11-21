@@ -492,13 +492,14 @@ function makeHerd(W, i) {
   if (r() > 0.5) return null;
   const wx = (i + 0.2 + 0.6 * r()) * YCELL;
   const v = valleyAt(W.ws, wx);
-  // close enough to be animals and not dots, far enough to escape the blur: mostly 38-90 m out
-  const d = 38 + (Math.min(v.bf - 30, 170) - 38) * Math.pow(r(), 1.8);
+  // close enough to be animals and not dots, yet far enough to clear the blur and the bottom edge
+  // of the window (the ground falls away steeply here): mostly 52-100 m out
+  const d = 52 + (Math.min(v.bf - 30, 170) - 52) * Math.pow(r(), 1.8);
   const n = 3 + Math.floor(r() * 9);
   const hd = { i, wx, d, seed, yaks: [] };
   const flow = (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.6;
   for (let k = 0; k < n; k++) {
-    const yx = wx + (r() - 0.5) * (14 + 4 * n), yd = Math.max(34, d + (r() - 0.5) * (8 + 1.6 * n));
+    const yx = wx + (r() - 0.5) * (14 + 4 * n), yd = Math.max(47, d + (r() - 0.5) * (8 + 1.6 * n));
     const yv = valleyAt(W.ws, yx);
     if (yd > yv.bn && yd < yv.bf && channelAt(W, yx, (yd - yv.bn) / (yv.bf - yv.bn), yv.bf - yv.bn)) continue;
     hd.yaks.push({
