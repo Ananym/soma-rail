@@ -76,10 +76,10 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const rng = makeRng(hashInts(S.seed, 99, Math.floor(x0)));
     const c = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion(), col = new THREE.Color();
     for (let x = 0; x < LAMP_SEG; x += 15) {                    // lamps
-      c.set(x, CAMERA_HEIGHT + 0.9, TUNNEL_Z + 0.08); s.set(0.07, 0.05, 0.02); col.setRGB(1.0, 0.82, 0.55);
+      c.set(x, CAMERA_HEIGHT + 0.9, TUNNEL_Z + 0.08); s.set(0.16, 0.07, 0.02); col.setRGB(1.0, 0.82, 0.55);
       packed.pushSplat(c, s, q, 1, col);
-      c.set(x, CAMERA_HEIGHT + 0.9, TUNNEL_Z + 0.06); s.set(0.3, 0.22, 0.02); col.setRGB(0.5, 0.36, 0.2);
-      packed.pushSplat(c, s, q, 0.35, col);
+      c.set(x, CAMERA_HEIGHT + 0.9, TUNNEL_Z + 0.06); s.set(0.5, 0.3, 0.02); col.setRGB(1.0, 0.7, 0.4);
+      packed.pushSplat(c, s, q, 0.3, col);
     }
     for (let i = 0; i < 260; i++) {                              // wall grain, so speed still reads
       c.set(rng() * LAMP_SEG, CAMERA_HEIGHT + rng.range(-1.6, 1.6), TUNNEL_Z + 0.04);
