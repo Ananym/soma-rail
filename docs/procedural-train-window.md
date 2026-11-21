@@ -4,13 +4,13 @@ Draft of 19 November 2026, fact-checked the same day; decisions and a first buil
 
 ## Summary
 
-Replace the looping YouTube video with a train-window view generated in the browser: layered Gaussian splats for the land, a shader for the sky and a glass-and-camera pass on top, all steered by a slow "director".
+The view is a train window generated in the browser, which has replaced the looping YouTube video the app began with: layered Gaussian splats for the land, a shader for the sky and a glass-and-camera pass on top, all steered by a slow "director".
 
 - **Splats can be generated procedurally, at two levels.** Code arranges photoreal pieces, and code also writes splats of its own. The first gives the photographic half of the look, the second the surreal half. Both ran here on Spark 2.4.
 - **The side-window camera makes this tractable.** The world is used once, from one side, and the nearest layer is motion blur.
 - **Music reactivity is unblocked.** SomaFM's streams already allow cross-origin reads: in Chromium the page gets real samples with a one-attribute change. No relay and no permission from SomaFM is needed. Safari and Firefox are still to test.
 - **The distraction mechanic improves.** Train speed becomes continuous, so the world can brake to a halt and sharpen as it does.
-- **A first draft is built.** Add `?view=generated` to the app's URL. It runs end to end, but its look and frame rate have only been seen on a software renderer, so the next step is yours: open it on a real GPU and judge it.
+- **It is built, and it is now the app.** The video and its player are gone; the generated window is what every listener sees. It has been watched on a real GPU and judged good enough to be the default. Add `?debug=1` for a readout and tuning keys.
 
 ## What was checked
 
@@ -33,11 +33,13 @@ Still unverified, because this environment cannot test them:
 
 ## What is built
 
-A first draft of the whole pipeline runs behind `?view=generated`; the video is still the default and the fallback. It was built and checked in a headless browser with a software renderer, so every claim below is about behaviour, not looks or speed.
+The whole pipeline runs as the app's only view; the YouTube player was removed once the generated window was judged good enough on a real GPU. It is built and checked in a headless browser with a software renderer, so every claim below is about behaviour, not looks or speed.
 
 | Part | State | Where |
 | --- | --- | --- |
-| View switch and fallback | Works: both views start cleanly in an end-to-end check | `App.vue`, `TrainWindow.vue`, `scripts/app-check.cjs` |
+| Starting and failing | The view starts from the bare URL. Without WebGL2 a short notice takes its place and the radio plays on. An end-to-end check covers both, and fails if anything is requested from YouTube | `App.vue`, `TrainWindow.vue`, `scripts/app-check.cjs` |
+| Idling | A stopped train is redrawn twice a second, generates nothing and pauses the film grain; a hidden tab is not drawn at all | `engine.js`, `TrainWindow.vue` |
+| Hitch meter | The debug readout counts frames over 25 ms in the last 10 seconds and says what the worst one spent its time on (generating, rendering, or neither, which points at the GPU) | `engine.js`, `TrainWindow.vue` |
 | Renderer | three.js and Spark in a lazy chunk (1.2 MB gzipped) loaded after Start; the main bundle grew by about 4 kB gzipped | `src/window/engine.js` |
 | Camera effects | Motion blur, haze toward the sky colour, time-of-day tint and a "dissolve" effect, patched into Spark's vertex shader with checked anchors | `src/window/sparkPatch.js` |
 | World | Four depth bands built in chunks, generated a few milliseconds per frame; a pure function of seed, band and chunk index | `engine.js`, `layers.js`, `terrain.js` |
@@ -62,7 +64,7 @@ What the music changes:
 
 The beat pulse follows detected onsets, not a predicted beat, so it lands on what is heard and needs no tempo lock. On the live stream it fired six times in 30 seconds in a headless browser running at 3 frames a second, which shows it is wired but says nothing about how it feels. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
 
-Three failure paths were run in a headless browser and work: without WebGL2 the app falls back to the video; if the streams refuse CORS the radio keeps playing without analysis; and the audio context runs when started from the Start click with no autoplay override.
+Three failure paths were run in a headless browser and work: without WebGL2 the app shows a notice in place of the view and the radio plays on; if the streams refuse CORS the radio keeps playing without analysis; and the audio context runs when started from the Start click with no autoplay override.
 
 Not built yet:
 
@@ -78,12 +80,13 @@ Nothing here can judge these; they are the point of the first session with it.
 
 | Question | How to check |
 | --- | --- |
-| Does it pass for footage at a glance? | Open `?view=generated&debug=1` and watch a few minutes of each biome (`b` cycles them) |
+| Does it pass for footage at a glance? | Open `?debug=1` and watch a few minutes of each biome (`b` cycles them) |
 | Does it hold 60 fps? | The debug readout shows fps and the resolution scale it has fallen back to; try `budget=300000` and `budget=1200000` |
 | Is the blur right? | Compare `shutter=0.01`, `0.02` and `0.04`; `blurKeep` trades streak solidity against thinning |
 | Do chunks pop in or hitch? | Watch the far left edge at full speed; raise `slice` if scenery arrives late, lower it if frames drop when it arrives |
 | Do the photo pieces belong? | In the farmland biome, compare `kit=1` with `kit=0`. In software stills the houses are convincing and the woodland edge stands correctly, but both are much sharper than the painterly scenery around them |
-| Is the radio ever silent in the generated view? | Add `audio=0` to turn analysis off, and note the browser: Safari and Firefox are untested |
+| Is the radio ever silent? | Analysis is off by default in Safari and on iOS, where a tapped stream can go silent; `audio=1` forces it on there and `audio=0` turns it off anywhere. Firefox is untested |
+| What causes the hitches? | The readout's hitch line names what the worst frame spent its time on. Mostly "generate": move chunk generation to a worker. Mostly neither: it is the GPU upload or the sort, so try `sortMs=100` and a lower `budget` |
 | Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there. The readout names the current level and what is coming |
 | Is golden hour right? | `g` steps through dawn, day, dusk and night; `gold=0.5` halves the warm grade |
 | Do buildings hold together as you pass? | Buildings turned away from the line used to show an open back, in the farmland and in karst country; they now have a back wall and roof. Watch a farmstead or village from approach to departure |
@@ -97,7 +100,9 @@ Nothing here can judge these; they are the point of the first session with it.
 
 ## Where we are today
 
-Soma Rail is a static Vue 3 + Vite app on GitHub Pages that plays a SomaFM stream over a muted, full-screen YouTube embed of one train journey. Nothing is rendered by us, and nothing listens to the audio.
+*This section describes the app before the generated window was built, as the starting point the design worked from. The video player it describes has since been removed.*
+
+Soma Rail was a static Vue 3 + Vite app on GitHub Pages that played a SomaFM stream over a muted, full-screen YouTube embed of one train journey. Nothing was rendered by us, and nothing listened to the audio.
 
 | Piece | How it works now | What it means for the redesign |
 | --- | --- | --- |
@@ -210,7 +215,7 @@ The decisions that shape everything else:
 - **Scene changes happen out of sight.** A tunnel, a cutting, a passing freight train or a bank of fog covers each swap of biome or asset set. These are the natural cuts of a train journey.
 - **Speed is the one fast coupling.** The world advances by speed times frame time, and the blur stretch uses the same number. Distraction lowers speed; nothing else needs to know.
 - **The camera stays at the origin.** The world scrolls past it and chunks are rebased, which avoids float precision trouble on a journey with no end.
-- **It slots in where the video was.** A `TrainWindow.vue` takes the same props as `VideoPlayer.vue`, and the renderer is imported after the Start click.
+- **It slots in where the video was.** `TrainWindow.vue` took over the video player's place in the page, and the renderer is imported after the Start click.
 
 The window frame is part of the picture. The view is framed by a visible carriage window, drawn as a mesh in front of the glass. It sets the composition, so it is there from spike 1.
 
@@ -322,7 +327,7 @@ What needs watching:
 - **Per-frame regeneration and overdraw.** These, not sorting, are what Spark's docs name as the limits: about a million modified splats per frame on some systems, and many splats piled into a small area of screen.
 - **Hosting.** GitHub Pages allows a 1 GB site and a soft 100 GB of traffic a month, which is about 3,300 full downloads of a 30 MB biome. Files over 100 MB are blocked and Git LFS does not work with Pages. That is enough to start; a growing audience moves the kit to object storage with a CDN.
 - **WebGPU extras.** three.js r186 added a `GaussianSplat` addon and World Labs published `@sparkjsdev/radix` 0.0.1 in October 2026. Both need three.js's `WebGPURenderer`, so neither can share a canvas with mainline Spark. Neither should be on the critical path.
-- **Fallback.** If the canvas cannot start, keep the current video as the fallback view, so no listener is left with a black screen.
+- **Fallback.** If the canvas cannot start, say so in a short notice and keep the radio playing, so no listener is left with an unexplained black screen. (The video was the fallback until it was removed.)
 - **Motion sensitivity.** Honour `prefers-reduced-motion` with a slower train and no beat-driven effects.
 
 ## Free splat sources
@@ -418,7 +423,7 @@ The first risk is aesthetic, not technical: nobody knows yet whether a code-arra
 5. **Asset pipeline.** *The photo route is built: six pieces made, two in use; nothing from SuperSplat or the generators yet.* Build the kit from the routes in "Free splat sources": photo-plus-depth sheets first, then SuperSplat downloads and generated props. Record each piece's licence and attribution. Where nothing is good enough, make the piece in code. Compress them and judge them from the window. Settles what the kit weighs. Nothing is bought.
 6. **The glass.** *Frame, grain, a faint reflection and a vignette are built.* The finished frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
 
-It ships behind a `?view=generated` flag, with the video as the default until the generated view is clearly better.
+It shipped behind a `?view=generated` flag at first, with the video as the default. On 21 November 2026 the generated view became the only view and the flag was dropped.
 
 ## Decisions and open questions
 
@@ -434,6 +439,8 @@ Decided on 21 November 2026:
 | Hosting | Stay static on GitHub Pages for now | Revisit only if traffic nears 100 GB a month |
 | Seed or music | Music leads; no shared journeys | No seed in the URL in the first version |
 | Distraction in the generated view | The train slows to a stop; no fade to black | The stopping train, sharpening as its blur shrinks, is the whole visual penalty. Audio still quietens |
+| Video or generated view | The generated view only; the YouTube player is removed | No flag and no video fallback. A browser without WebGL2 gets a notice and the radio |
+| Compute when nothing changes | Idle when the train is stopped or the tab is hidden | A stopped view is redrawn twice a second; scenery is only generated while moving |
 
 Answered earlier by the checks:
 

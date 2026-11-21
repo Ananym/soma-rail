@@ -1,5 +1,5 @@
 // Tuning knobs for the generated view, all settable from the URL so the look can be tuned on a real GPU
-// without rebuilding. Example: ?view=generated&level=1&budget=900000&kmh=120&shutter=0.02
+// without rebuilding. Example: ?level=1&budget=900000&kmh=120&shutter=0.02
 const NUM = {
   level: 0,          // surreal level: 0 = plausible, 1 = dreamlike
   budget: 600000,    // total splats across all bands
