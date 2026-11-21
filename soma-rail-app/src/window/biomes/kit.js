@@ -52,11 +52,17 @@ export const NOMINAL = { trackside: 49000, near: 57000, mid: 33000, far: 20000 }
 export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 5, FENCE: 6, ROCK: 7, LIGHT: 8, SURREAL: 9, OTHER: 10 };
 // Motion classes: an optional 16th emit argument. The shader moves a tagged splat (sparkPatch.js):
 //   FLAG      flutters, by an amount in proportion to its own size (flags, banners, pennants)
-//   TRAFFIC_n a light trail over lane n (0 = fast lane): vehicles run along it as brighter dashes;
-//             a red trail runs the train's way, any other colour against it. Must be KIND.LIGHT.
+//   TRAFFIC_n a continuous line of small light splats over lane n (0 = fast lane, 2 = lorries).
+//             The shader lights only the splats under a vehicle's lamps, and the vehicles run
+//             along the line. A red line runs the train's way, any other colour against it.
+//             Must be KIND.LIGHT, about 1.2 m apart, with no gaps (a gap swallows vehicles).
 //   VAPOUR    billows slowly (plumes, mist, cloud streamers, smoke)
+//   BEAT      does not move, but swells and brightens on each beat of the music. By default
+//             everything above eye level answers the beat; a biome that sets beatKinds (a list
+//             of KINDs, e.g. [KIND.TREE, KIND.BUILDING]) switches that off and has those kinds,
+//             plus anything tagged BEAT by hand, answer it instead. Lights always do.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, VAPOUR: 5 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, VAPOUR: 5, BEAT: 6 };
 
 // Direction toward the sun for baked shading: high, to the left (-x) and on the camera's side
 // (+z), so the faces the window sees are lit and tops are brightest.

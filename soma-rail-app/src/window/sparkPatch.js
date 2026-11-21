@@ -17,6 +17,7 @@ export const PATCH_UNIFORMS = () => ({
   uBeat: { value: 0 },              // 0..1, jumps on each onset (kick, snare) and decays in a fraction of a second
   uSparkle: { value: 0 },           // 0..1, follows the treble (hi-hats, cymbals, air)
   uClock: { value: 0 },             // seconds, for the sparkle's flicker
+  uBeatRaised: { value: 1 },        // 1: everything above eye level swells on the beat; 0: only splats tagged for it
   uMove: { value: 0 },              // strength of the motion classes (flags, traffic, vapour); 0 = everything still
   uMoveT: { value: 0 },             // seconds of motion time; stands still while the train does
   uTravel: { value: 0 },            // metres travelled (wrapped), so patterns can be pinned to the world
@@ -40,6 +41,7 @@ uniform float uBreath;
 uniform float uBeat;
 uniform float uSparkle;
 uniform float uClock;
+uniform float uBeatRaised;
 uniform float uMove;
 uniform float uMoveT;
 uniform float uTravel;
@@ -70,20 +72,34 @@ uniform vec3 uFlowAgainst;`,
             center.y += amp * 0.3 * sin(1.7 * ph + 1.3);
             scales.x *= 1.0 + 0.35 * min(uMove, 1.0) * gust * sin(1.3 * ph + 2.0);
         } else if (mv <= 4) {
-            // Traffic: the trail stays as a faint ribbon and vehicles run along it as brighter, thicker
-            // dashes. One candidate per 48 m of lane, in the traffic's own frame (the CPU sends where
-            // that frame has got to). Red trails are tail lights going the train's way, the rest come
-            // towards it. Only alpha and thickness change: dimming the colour would unmake the light.
+            // Traffic. Each lane is a continuous line of small light splats, and the shader lights
+            // only those that fall on a vehicle's lamps: white headlamps and a short pool of beam
+            // at the front, red tail lamps at the back, and along a lorry's flank a row of amber
+            // markers. One vehicle at most per 48 m of lane, placed in the traffic's own frame (the
+            // CPU sends where that frame has got to), so vehicles follow every bend of the road.
+            // The lane's baked colour says which way it runs (red: the train's way) and is read
+            // before it is replaced. Every lamp colour keeps red at 1, so each stays a light.
             int lane = mv - 2;
-            bool tail = rgba.g < 0.4 * rgba.r;
-            float u = (center.x + (tail ? uFlowWith[lane] : uFlowAgainst[lane])) / 48.0;
+            bool sameWay = rgba.g < 0.4 * rgba.r;
+            float dirS = sameWay ? 1.0 : -1.0;
+            float u = (center.x + (sameWay ? uFlowWith[lane] : uFlowAgainst[lane])) / 48.0;
             float cell = mod(floor(u), 4096.0);
-            vec2 hc = fract(sin(vec2(cell * 12.9898 + float(lane) * 37.7 + (tail ? 5.0 : 0.0), cell * 78.233 + float(lane) * 11.3)) * 43758.5453);
-            float du = (fract(u) - (0.2 + 0.6 * hc.y)) * 48.0;
-            float car = step(0.4, hc.x) * exp(-du * du / 14.0);
+            vec3 hc = fract(sin(vec3(cell * 12.9898 + float(lane) * 37.7 + (sameWay ? 5.0 : 0.0), cell * 78.233 + float(lane) * 11.3, cell * 37.719 + float(lane) * 3.1)) * 43758.5453);
+            float present = step(0.42, hc.x);
+            float lorry = step(lane == 2 ? 0.45 : 0.92, hc.z);
+            float halfL = mix(2.1, 6.5, lorry);
+            float f = (fract(u) - (0.25 + 0.5 * hc.y)) * 48.0 * dirS;      // metres ahead of the vehicle's middle
+            float head = exp(-(f - halfL) * (f - halfL) / 0.9);
+            float tail = exp(-(f + halfL) * (f + halfL) / 0.7);
+            float beam = 0.3 * step(halfL, f) * exp(-(f - halfL) / 5.0);
+            float side = lorry * 0.22 * step(abs(f), halfL - 0.9) * (0.5 + 0.5 * cos(f * 2.6));
+            float sum = head + tail + beam + side;
+            vec3 lamp = (vec3(1.0, 0.97, 0.88) * (head + beam) + vec3(1.0, 0.1, 0.07) * tail + vec3(1.0, 0.6, 0.15) * side) / max(sum, 0.001);
             float k = min(uMove, 1.0);
-            rgba.a *= mix(1.0, min(1.0, 0.25 + 0.95 * car), k);
-            scales.yz *= mix(1.0, 0.75 + 0.6 * car, k);
+            rgba.rgb = mix(rgba.rgb, lamp, k);
+            rgba.a = mix(rgba.a, present * min(1.0, sum), k);
+            scales.x *= mix(1.0, 0.6, k);
+            scales.yz *= mix(1.0, 0.7 + 0.8 * head + 0.3 * tail, k);
         } else if (mv == 5) {
             // Vapour (plumes, mist, cloud streamers): a slow billow, each splat on its own phase.
             float sz = max(scales.x, max(scales.y, scales.z));
@@ -107,13 +123,18 @@ uniform vec3 uFlowAgainst;`,
     // out what stands above eye level (trees, buildings, towers, mesas) and leaves the ground alone.
     // On each beat those things, and every light, swell a little and fall back; the bass adds a slower
     // breath to everything. The treble makes raised things shimmer and lights twinkle (see below).
-    float raised = smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
+    // A biome whose high ground is the scenery itself (limestone towers, dunes) turns the raised rule
+    // off and names what should answer the beat instead (class 6, see kit.js MOVE.BEAT and a biome's
+    // beatKinds). A swell alone hardly shows on a mass of overlapping splats, so the chosen things
+    // also brighten for the length of the beat: still below the level that would make them lights.
+    float raised = uBeatRaised * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
-    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight);
-    float shimmer = 1.0;
+    float picked = mv == 6 ? 1.0 : 0.0;
+    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.2 * picked);
+    float shimmer = 1.0 + 0.38 * uBeat * picked * (1.0 - isLight);
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
-        shimmer = 1.0 + uSparkle * (tw - 0.5) * (0.2 * raised + 0.6 * isLight);
+        shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, picked) + 0.6 * isLight);
     }`,
   },
   {

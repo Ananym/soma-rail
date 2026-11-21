@@ -8,7 +8,10 @@ import { hashInts } from './rng.js';
 // `push` a range of extra distance from the track, `chance` how many slots are filled.
 export const KIT_RULES = {
   downs: [
-    { id: 'treeline-meadow', every: 900, push: [0, 90], chance: 0.8 },
+    // The woodland edge is a sheet cut from a panorama, and its right-hand end is a straight cut
+    // through the trees. `mirror` stands a reflected copy against that end, so the wood closes
+    // with its own ragged left edge on both sides.
+    { id: 'treeline-meadow', every: 900, push: [0, 90], chance: 0.8, mirror: 'right' },
     { id: 'town-edge', every: 1900, push: [0, 60], chance: 0.75 },
   ],
   // Only pieces that were looked at in place are switched on. Tried and left out: 'orchard-field'
@@ -22,7 +25,7 @@ export const KIT_RULES = {
   placeholder: [],
 };
 
-import { clearTags } from './sparkPatch.js';
+import { clearTags, tagLast } from './sparkPatch.js';
 
 export function createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl = '/' }) {
   let index = null;                 // id -> piece metadata, once index.json has loaded
@@ -34,12 +37,30 @@ export function createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl = '/'
     .then((d) => { index = new Map(d.pieces.map((p) => [p.id, p])); })
     .catch((e) => { failed = true; console.warn('[train window] photo kit unavailable:', e); });
 
-  function pack(id) {
+  // A reflected copy of a pack about its own right-hand (or left-hand) end. The end is taken a
+  // little inside the outermost splats, so the two halves overlap and no seam shows.
+  function mirrored(src, side) {
+    const xs = [];
+    src.forEachSplat((i, c) => { if (i % 16 === 0) xs.push(c.x); });
+    xs.sort((a, b) => a - b);
+    const edge = side === 'left' ? xs[Math.floor(xs.length * 0.01)] : xs[Math.floor(xs.length * 0.99)];
+    const out = new PackedSplats();
+    out.ensureSplats(src.numSplats);
+    const c2 = new THREE.Vector3(), q2 = new THREE.Quaternion();
+    src.forEachSplat((i, c, sc, q, opacity, color) => {
+      if (side === 'left' ? c.x < edge : c.x > edge) return;       // beyond the mirror line: leave out
+      c2.set(2 * edge - c.x, c.y, c.z); q2.set(q.x, -q.y, -q.z, q.w);   // reflect in x: position and rotation
+      out.pushSplat(c2, sc, q2, opacity, color); tagLast(out);
+    });
+    return out;
+  }
+
+  function pack(id, mirror) {
     let p = packs.get(id);
     if (!p) {
       p = { packed: new PackedSplats({ url: `${baseUrl}kit/${index.get(id).file}` }), ready: false };
       // a file's colour bytes are arbitrary: clear the motion-class bits so nothing in it moves
-      p.packed.initialized.then(() => { clearTags(p.packed); p.ready = true; }).catch(() => { p.failed = true; });
+      p.packed.initialized.then(() => { clearTags(p.packed); if (mirror) p.mirror = mirrored(p.packed, mirror); p.ready = true; }).catch(() => { p.failed = true; });
       packs.set(id, p);
     }
     return p;
@@ -48,6 +69,7 @@ export function createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl = '/'
   function drop(key) {
     const inst = live.get(key);
     if (inst.mesh) { scene.remove(inst.mesh); inst.mesh.dispose(); }
+    if (inst.mesh2) { scene.remove(inst.mesh2); inst.mesh2.dispose(); }
     live.delete(key);
   }
 
@@ -78,25 +100,27 @@ export function createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl = '/'
             // ground there; far pieces without one simply sit at the terrain's height.
             const ground = terrain.height(x, depth);
             const y = meta.groundY != null ? ground - meta.groundY : ground;
-            live.set(key, { id: rule.id, x, y, z: -push, mesh: null });
+            live.set(key, { id: rule.id, x, y, z: -push, mesh: null, mesh2: null, mirror: rule.mirror || null });
           }
         }
       }
       for (const key of [...live.keys()]) if (!wanted.has(key)) drop(key);
       for (const inst of live.values()) {
         if (!inst.mesh) {
-          const p = pack(inst.id);
+          const p = pack(inst.id, inst.mirror);
           if (!p.ready) continue;
           inst.mesh = new SplatMesh({ packedSplats: p.packed });
           scene.add(inst.mesh);
+          if (p.mirror) { inst.mesh2 = new SplatMesh({ packedSplats: p.mirror }); scene.add(inst.mesh2); }
         }
         inst.mesh.position.set(inst.x - travelled, inst.y, inst.z);
+        if (inst.mesh2) inst.mesh2.position.copy(inst.mesh.position);
       }
     },
     // The world changed (new biome or seed): every placement is stale.
     reset() { for (const key of [...live.keys()]) drop(key); },
     stats() { let n = 0; for (const i of live.values()) if (i.mesh) n++; return { pieces: n, failed }; },
     instances() { return [...live.values()].map((i) => ({ id: i.id, x: Math.round(i.x), y: +i.y.toFixed(1), push: Math.round(-i.z), loaded: !!i.mesh })); },
-    dispose() { this.reset(); for (const p of packs.values()) p.packed.dispose(); packs.clear(); },
+    dispose() { this.reset(); for (const p of packs.values()) { p.packed.dispose(); if (p.mirror) p.mirror.dispose(); } packs.clear(); },
   };
 }

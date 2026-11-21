@@ -5,6 +5,10 @@
 //   hazeDist  metres at which haze reaches 63% (the far band needs height and contrast to survive it)
 //   hours     optional [from, to] time of day the biome prefers
 //   holdHours optional: true keeps the clock inside `hours` for as long as the biome lasts
+//   beatKinds optional list of kit.js KINDs that swell and brighten on the beat. Without it,
+//             everything above eye level does, which suits flat country but not a biome whose
+//             high ground is the scenery (towers, dunes): there, name the things that should
+//             answer the music (trees, buildings, tents, boats). MOVE.BEAT tags single splats.
 //   horizon   optional 0..0.6: lowers the horizon in the frame to give the sky more room
 //   sky       optional night-sky hint { stars, deep, milkyWay, clear }: brighter stars, a second field
 //             of faint ones, the Milky Way, fewer clouds (see sky.js update)

@@ -131,9 +131,11 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const packed = new PackedSplats();
     packed.ensureSplats(Math.ceil(count * 1.12));   // reserve once: growing the buffer as it fills would stall
     let n = 0;
+    const beatKinds = biome.beatKinds ? new Set(biome.beatKinds) : null;   // kinds that answer the beat here
     // kind (15th) is for the checks; move (16th) is the splat's motion class (kit.js MOVE, default none)
     const emit = (x, y, z, sx, sy, sz, r, g, b, opacity = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = 0, move = 0) => {
       tmp.c.set(x, y, z); tmp.s.set(sx, sy, sz); tmp.q.set(qx, qy, qz, qw); tmp.col.setRGB(r, g, b);
+      if (!move && beatKinds && beatKinds.has(kind)) move = 6;   // MOVE.BEAT
       packed.pushSplat(tmp.c, tmp.s, tmp.q, opacity, tmp.col); tagLast(packed, move); n++;
     };
     const ctx = {
@@ -309,7 +311,8 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
       applyHorizon();
     }
 
-    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: S.beat, sparkle: S.sparkle, sky: biome.sky, shift: horizonShift });
+    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: params.beatPin >= 0 ? params.beatPin : S.beat, sparkle: S.sparkle, sky: biome.sky, shift: horizonShift,
+      motionT: moveT, moving: !(S.speed === 0 && S.rate === 0), twinkle: reducedMotion ? 0 : Math.min(1, params.move) });
     const inTunnel = S.tunnel && S.tunnel.phase === 'inside';
     uniforms.uMotionMetres.value = S.speed * params.shutter * (reducedMotion ? 0.5 : 1);
     uniforms.uHazeColor.value.copy(sky.horizonColor);
@@ -326,7 +329,8 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     uniforms.uHazeDist.value = biome.hazeDist || 3000;
     uniforms.uDissolve.value = S.dissolve;
     uniforms.uBreath.value = S.breath;
-    uniforms.uBeat.value = S.beat;
+    uniforms.uBeat.value = params.beatPin >= 0 ? params.beatPin : S.beat;
+    uniforms.uBeatRaised.value = biome.beatKinds ? 0 : 1;
     uniforms.uSparkle.value = S.sparkle;
     uniforms.uClock.value = S.time % 1000;
     uniforms.uMoveDebug.value = params.tags ? 1 : 0;
