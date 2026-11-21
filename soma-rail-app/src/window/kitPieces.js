@@ -17,6 +17,8 @@ export const KIT_RULES = {
   pinewood: [],
   saltflat: [],
   nightcity: [],
+  himalaya: [],
+  motorway: [],
   placeholder: [],
 };
 

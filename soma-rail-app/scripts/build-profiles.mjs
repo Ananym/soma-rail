@@ -18,7 +18,7 @@ const URL_CHANNELS = 'https://api.somafm.com/channels.json';
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'window', 'profiles.json');
 
-const BIOMES = ['downs', 'pinewood', 'saltflat', 'nightcity', 'karst', 'dunes'];
+const BIOMES = ['downs', 'pinewood', 'saltflat', 'nightcity', 'karst', 'dunes', 'himalaya', 'motorway'];
 const DEFAULT = { biomes: ['downs', 'pinewood'], level: 0 };
 
 // ---- Rule table: first match wins, so order is priority. -------------------
@@ -40,54 +40,54 @@ const RULES = [
 // ---- Per-channel overrides (reviewed by hand against each description). ----
 const o = (biomes, level, why) => ({ biomes, level, why });
 const OVERRIDES = {
-  beatblender: o(['nightcity', 'saltflat'], 0, 'late-night deep house and downtempo'),
+  beatblender: o(['nightcity', 'motorway', 'saltflat'], 0, 'late-night deep house and downtempo'),
   bossa: o(['downs'], 0, 'laid-back Brazilian bossa nova and samba'),
   covers: o(['downs'], 0, 'familiar songs, warm and earthly'),
-  dubstep: o(['nightcity'], 0, 'dubstep, dub and deep bass'),
+  dubstep: o(['nightcity', 'motorway'], 0, 'dubstep, dub and deep bass'),
   folkfwd: o(['downs'], 0, 'indie folk and alt-folk'),
-  indiepop: o(['downs'], 0, 'bright indie pop'),
+  indiepop: o(['downs', 'motorway'], 0, 'bright indie pop'),
   poptron: o(['nightcity', 'downs'], 0, 'electropop and indie dance rock'),
   reggae: o(['downs'], 0, 'reggae, ska and rocksteady, sunny and earthy'),
   bootliquor: o(['saltflat', 'dunes', 'downs'], 0, 'americana roots: dusty flats, desert and farmland'),
   brfm: o(['dunes', 'saltflat', 'nightcity'], 1, 'Black Rock playa: desert by day, lights by night'),
   christmas: o(['pinewood', 'downs'], 0, 'chilled winter lounge'),
-  chillits: o(['pinewood', 'karst', 'downs'], 0, 'chill and camping: forest, misty valleys'),
+  chillits: o(['pinewood', 'karst', 'himalaya', 'downs'], 0, 'chill and camping: forest, misty valleys'),
   cliqhop: o(['nightcity', 'saltflat'], 1, 'glitchy IDM blips and beats'),
-  darkzone: o(['pinewood', 'dunes', 'saltflat'], 1, 'dark deep ambient, staring into the abyss'),
-  deepspaceone: o(['saltflat', 'dunes', 'pinewood'], 1, 'deep ambient and space music: empty country'),
+  darkzone: o(['pinewood', 'himalaya', 'dunes', 'saltflat'], 1, 'dark deep ambient, staring into the abyss'),
+  deepspaceone: o(['saltflat', 'motorway', 'himalaya', 'dunes'], 1, 'deep ambient and space music: empty country'),
   defcon: o(['nightcity'], 0, 'hacker music, neon and screens'),
   deptstore: o(['downs', 'nightcity'], 0, 'vintage elevator music, shop windows'),
-  digitalis: o(['downs', 'nightcity'], 0, 'calm, slightly electric analog rock'),
+  digitalis: o(['downs', 'motorway', 'nightcity'], 0, 'calm, slightly electric analog rock'),
   doomed: o(['nightcity', 'pinewood'], 1, 'dark industrial ambient for tortured souls'),
-  dronezone: o(['pinewood', 'karst', 'saltflat'], 1, 'atmospheric drone textures: forest and mist'),
+  dronezone: o(['pinewood', 'himalaya', 'karst', 'saltflat'], 1, 'atmospheric drone textures: forest and mist'),
   dz2: o(['karst', 'pinewood', 'saltflat'], 1, 'eclectic atmospheric drone textures: mist and stone'),
   fluid: o(['nightcity'], 0, 'instrumental hip hop, future soul, liquid trap'),
   groovesalad: o(['downs', 'karst', 'pinewood'], 0, 'chilled ambient downtempo'),
-  groovesalad2: o(['karst', 'downs', 'saltflat'], 0, 'chilled ambient downtempo, other mix'),
-  gsclassic: o(['downs', 'nightcity'], 0, 'early-2000s chilled downtempo'),
+  groovesalad2: o(['karst', 'himalaya', 'downs', 'saltflat'], 0, 'chilled ambient downtempo, other mix'),
+  gsclassic: o(['downs', 'motorway', 'nightcity'], 0, 'early-2000s chilled downtempo'),
   illstreet: o(['nightcity', 'saltflat'], 0, 'bachelor-pad lounge and exotica'),
   insound: o(['downs', 'saltflat'], 1, '60s/70s psychedelic Euro pop'),
   jollysoul: o(['downs', 'pinewood'], 0, 'holiday soul'),
   live: o(['nightcity', 'downs'], 0, 'live events, mixed bag'),
-  lush: o(['karst', 'nightcity', 'downs'], 0, 'mellow vocals with electronic edges: soft, misty'),
+  lush: o(['karst', 'motorway', 'nightcity', 'downs'], 0, 'mellow vocals with electronic edges: soft, misty'),
   metal: o(['nightcity', 'pinewood'], 0, 'metal from black to doom to industrial'),
   missioncontrol: o(['saltflat', 'dunes'], 1, 'NASA and space exploration: other-worldly ground'),
-  n5md: o(['pinewood', 'karst', 'saltflat'], 1, 'post-rock, ambient and experimental electronic'),
+  n5md: o(['pinewood', 'himalaya', 'karst', 'saltflat'], 1, 'post-rock, ambient and experimental electronic'),
   scanner: o(['nightcity'], 0, 'San Francisco police scanner'),
   seventies: o(['downs', 'saltflat'], 0, 'mellow West Coast 70s album rock'),
   sf1033: o(['nightcity'], 0, 'ambient mixed with San Francisco emergency radio'),
   sfinsf: o(['pinewood', 'nightcity'], 1, 'sci-fi, fantasy and horror readings'),
   sonicuniverse: o(['nightcity', 'saltflat'], 1, 'avant-garde, eclectic jazz'),
   specials: o(['downs', 'nightcity'], 0, 'varied specials: jazz, surf, dub'),
-  spacestation: o(['dunes', 'saltflat', 'nightcity'], 1, 'spaced-out ambient and mid-tempo electronica'),
-  suburbsofgoa: o(['dunes', 'saltflat', 'downs'], 0, 'Desi-influenced world beats'),
-  synphaera: o(['saltflat', 'dunes', 'pinewood'], 1, 'modern electronic ambient and space music'),
-  thetrip: o(['nightcity', 'dunes', 'saltflat'], 0, 'progressive house and trance'),
+  spacestation: o(['dunes', 'motorway', 'saltflat', 'nightcity'], 1, 'spaced-out ambient and mid-tempo electronica'),
+  suburbsofgoa: o(['himalaya', 'dunes', 'saltflat'], 0, 'Desi-influenced world beats'),
+  synphaera: o(['saltflat', 'himalaya', 'dunes', 'pinewood'], 1, 'modern electronic ambient and space music'),
+  thetrip: o(['nightcity', 'motorway', 'dunes', 'saltflat'], 0, 'progressive house and trance'),
   tikitime: o(['saltflat', 'downs'], 0, 'tiki exotica and island rhythms'),
-  u80s: o(['nightcity'], 0, 'early 80s synthpop and new wave'),
+  u80s: o(['nightcity', 'motorway'], 0, 'early 80s synthpop and new wave'),
   vaporwaves: o(['nightcity', 'saltflat'], 1, 'all vaporwave'),
-  xmasinfrisko: o(['nightcity', 'pinewood'], 0, 'wacky eclectic holiday mix'),
-  xmasrocks: o(['pinewood', 'nightcity'], 0, 'indie/alternative holiday rock'),
+  xmasinfrisko: o(['nightcity', 'pinewood', 'himalaya'], 0, 'wacky eclectic holiday mix'),
+  xmasrocks: o(['pinewood', 'himalaya', 'nightcity'], 0, 'indie/alternative holiday rock'),
   '7soul': o(['downs', 'nightcity'], 0, 'vintage 45 RPM soul'),
 };
 
@@ -135,7 +135,7 @@ const problems = [];
 for (const ch of channels) {
   const p = out[ch.id];
   if (!p) { problems.push(`missing ${ch.id}`); continue; }
-  if (!p.biomes.length || p.biomes.length > 3 || p.biomes.some((b) => !BIOMES.includes(b))) problems.push(`bad biomes for ${ch.id}`);
+  if (!p.biomes.length || p.biomes.length > 4 || p.biomes.some((b) => !BIOMES.includes(b))) problems.push(`bad biomes for ${ch.id}`);
   if (p.level !== 0 && p.level !== 1) problems.push(`bad level for ${ch.id}`);
 }
 for (const id of Object.keys(OVERRIDES)) if (!channels.some((c) => c.id === id)) problems.push(`override for unknown channel ${id}`);

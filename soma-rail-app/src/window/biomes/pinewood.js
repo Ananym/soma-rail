@@ -21,7 +21,7 @@ import { hashInts, makeRng, noise1, noise2, fbm2 } from '../rng.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, house, church,
   overheadLine, fence, lamp, floatingIsland, wires, jitter, mul3, mix3, shade, smooth, clamp, lerp,
-  quatYaw, quatRoll, quatUpTo, norm3, Q_ID, SUN,
+  quatYaw, quatRoll, quatUpTo, quatXTo, strut, norm3, Q_ID, SUN,
 } from './kit.js';
 
 const PAL = {
@@ -401,13 +401,6 @@ function* fillSurface(ctx, out, W, opts = {}) {
 // With n <= 4 each draws a cheap distant version, so forests of thousands stay in budget.
 // ---------------------------------------------------------------------------------------------
 
-// Rotation taking +x to the unit vector v: an elongated splat lying along v (ellipsoids are
-// symmetric, so v and -v are the same splat).
-function quatXTo(vx, vy, vz) {
-  if (vx < 0) { vx = -vx; vy = -vy; vz = -vz; }
-  const w = 1 + vx, l = Math.hypot(vz, vy, w);
-  return [0, -vz / l, vy / l, w / l];
-}
 // How many splats a tree of height H and width W at distance d deserves at this budget.
 export function coniferSplats(out, d, H, W) {
   const r = Math.max(0.03, 0.0032 * d * out.detailK / Math.sqrt(out.density)) * 1.25;
@@ -1011,15 +1004,6 @@ function* powerLines(ctx, out, W, dLo, dHi) {
         }
       }
     }
-  }
-}
-// A straight steel member from a to b: n elongated splats laid end to end along it, r thick.
-function strut(out, ax, ay, az, bx, by, bz, r, c, n, alpha = 1) {
-  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
-  const q = quatXTo(dx / len, dy / len, dz / len), sl = (len / n) * 0.45;   // short enough that the ends do not spike past the joints
-  for (let i = 0; i < n; i++) {
-    const t = (i + 0.5) / n;
-    out(ax + dx * t, ay + dy * t, az + dz * t, sl, r, r, c[0], c[1], c[2], alpha, q[0], q[1], q[2], q[3], KIND.MAST);
   }
 }
 // A lattice suspension tower, 30 m: four legs tapering from a 6 m square base to a narrow waist and

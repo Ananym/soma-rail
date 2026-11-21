@@ -41,6 +41,7 @@
 //   fence(ctx, out, d, opts)                 post-and-wire fence on world-x posts
 //   lamp(ctx, out, x, y, d, color, opts)     a light source (ignores the time-of-day tint)
 //   rock(ctx, out, x, d, r, opts)
+//   strut(out, ax, ay, az, bx, by, bz, r, c, n)   a thin straight member; quatXTo(vx, vy, vz)
 //   floatingIsland(ctx, out, x, y, d, r, opts); monolith(ctx, out, x, d, opts)   surreal pieces
 import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
 
@@ -88,6 +89,26 @@ export function quatUpTo(nx, ny, nz) {
   return [nz / l, 0, -nx / l, w / l];
 }
 // Rotate a vector (x, z) in the ground plane by yaw a (matching quatYaw).
+// Rotation taking +x to the unit vector v: an elongated splat lying along v (ellipsoids are
+// symmetric, so v and -v are the same splat).
+export function quatXTo(vx, vy, vz) {
+  if (vx < 0) { vx = -vx; vy = -vy; vz = -vz; }
+  const w = 1 + vx, l = Math.hypot(vz, vy, w);
+  return [0, -vz / l, vy / l, w / l];
+}
+// A straight thin member from a to b (chunk-local x, y, z): n elongated splats laid end to end
+// along it, r thick. Use it for anything thin and straight: lattice steel, cords, poles, rails,
+// gantries, lamp columns. Size r from distance (about 0.0005 * d, with a floor near 0.05 m) so the
+// member stays a line at any range; a thin thing drawn as round blobs or as a translucent panel
+// turns to fuzz. c is [r, g, b]; kind defaults to KIND.MAST.
+export function strut(out, ax, ay, az, bx, by, bz, r, c, n = 2, alpha = 1, kind = KIND.MAST) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 1e-6;
+  const q = quatXTo(dx / len, dy / len, dz / len), sl = (len / n) * 0.45;   // short enough that the ends do not spike past the joints
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    out(ax + dx * t, ay + dy * t, az + dz * t, sl, r, r, c[0], c[1], c[2], alpha, q[0], q[1], q[2], q[3], kind);
+  }
+}
 export function rotY(x, z, a) { const c = Math.cos(a), s = Math.sin(a); return [c * x + s * z, -s * x + c * z]; }
 
 // ---------------------------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 // confirm in the browser with window-shot.cjs.
 //   node scripts/biome-preview.mjs out.png "seed=7&biome=downs&level=0&budget=300000&jump=4000&kmh=0" [WxH]
 //   extra options: beat=<mast spacing m>, tint=r,g,b (time-of-day tint), hour=<0..24 passed to generators>
+//   night: add  tint=0.2,0.22,0.3&haze=0.02,0.03,0.06&hour=23  (splats with a channel >= 0.97 are lights and keep their colour)
 import fs from 'fs';
 import zlib from 'zlib';
 const APP = new URL('../src/window', import.meta.url).href;
@@ -29,7 +30,7 @@ const tanV = Math.tan((fov * Math.PI) / 360), tanH = tanV * (W / H);
 const f = (H / 2) / tanV;
 const terrain = makeTerrain(seed, biome.terrain);
 const hazeDist = biome.hazeDist || 3000;
-const haze = [0.72, 0.8, 0.88];
+const haze = q.has('haze') ? q.get('haze').split(',').map(Number) : [0.72, 0.8, 0.88];
 const tint = q.has('tint') ? q.get('tint').split(',').map(Number) : [1, 1, 1];
 const motion = (kmh / 3.6) * shutter;
 

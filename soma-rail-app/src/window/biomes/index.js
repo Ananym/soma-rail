@@ -29,6 +29,27 @@
 // palette.ground (or palette.underlay), an [r, g, b], also colours the backdrop the engine draws
 // below the horizon behind the splats.
 // kit.js holds the shared props (ground fill, trees, hedges, buildings, masts, wires, fences, ...).
+//
+// Craft rules, each learned from something that looked wrong on a real GPU:
+// - The scene is only ever seen from a train moving along +x, looking sideways (towards -z), and
+//   mostly in motion. Judge a prop over a whole pass (from 60 m before it to 60 m after), not in one
+//   still: a building turned away from the line needs its back wall and back roof slope, and every
+//   face that comes into view needs splats.
+// - Thin straight things (poles, cords, lattice steel, gantries, lamp columns, rails) are kit
+//   strut()s sized from distance, never stacked round blobs and never a translucent panel standing
+//   in for fine detail. Both turn to fuzz.
+// - No large flat or featureless shapes floating in view. A dreamlike variation alters objects the
+//   viewer can already name (taller, repeated, floating, misplaced); a new slab of colour reads as a
+//   rendering fault. Every element should be nameable from a single still.
+// - Anything that crosses a chunk or band border is placed from world hashes (worldRng,
+//   cellsAround) and drawn piecewise by every band it passes through; ctx.rng is per chunk.
+// - Things meant to be looked at stand 40 to 400 m out. Closer than about 30 m the motion blur
+//   eats them; keep the trackside band to ground, fences, masts and blur-friendly shapes.
+// - At night the land is tinted to about a fifth of its colour, so unlit things go nearly black.
+//   Whatever must be seen at night is a light (a channel >= 0.97, KIND.LIGHT) or stands lit beside
+//   one, with the lit surface painted bright by hand. See nightcity.js.
+// - Generators run on the main thread in slices. Stay near 2 to 3 microseconds a splat
+//   (scripts/check-biomes.mjs prints it): no per-splat searches, cache per-chunk layout once.
 import { placeholderBiome } from './placeholder.js';
 import { downsBiome } from './downs.js';
 import { saltflatBiome } from './saltflat.js';
@@ -36,6 +57,8 @@ import { nightcityBiome } from './nightcity.js';
 import { pinewoodBiome } from './pinewood.js';
 import { karstBiome } from './karst.js';
 import { dunesBiome } from './dunes.js';
+import { himalayaBiome } from './himalaya.js';
+import { motorwayBiome } from './motorway.js';
 
 export const BIOMES = {
   downs: downsBiome,
@@ -44,6 +67,8 @@ export const BIOMES = {
   nightcity: nightcityBiome,
   karst: karstBiome,
   dunes: dunesBiome,
+  himalaya: himalayaBiome,
+  motorway: motorwayBiome,
   placeholder: placeholderBiome,
 };
 
