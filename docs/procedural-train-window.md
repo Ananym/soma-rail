@@ -38,7 +38,7 @@ A first draft of the whole pipeline runs behind `?view=generated`; the video is 
 | Part | State | Where |
 | --- | --- | --- |
 | View switch and fallback | Works: both views start cleanly in an end-to-end check | `App.vue`, `TrainWindow.vue`, `scripts/app-check.cjs` |
-| Renderer | three.js and Spark in a lazy chunk (1.1 MB gzipped) loaded after Start; the main bundle grew by about 4 kB gzipped | `src/window/engine.js` |
+| Renderer | three.js and Spark in a lazy chunk (1.2 MB gzipped) loaded after Start; the main bundle grew by about 4 kB gzipped | `src/window/engine.js` |
 | Camera effects | Motion blur, haze toward the sky colour, time-of-day tint and a "dissolve" effect, patched into Spark's vertex shader with checked anchors | `src/window/sparkPatch.js` |
 | World | Four depth bands built in chunks, generated a few milliseconds per frame; a pure function of seed, band and chunk index | `engine.js`, `layers.js`, `terrain.js` |
 | Scenery | Four biomes written in code on a shared prop kit: rolling farmland, pine forest with lakes, salt flat with mesas, and a city at night. Each has a plausible and a dreamlike version. 640 generator checks pass | `src/window/biomes/`, `scripts/check-biomes.mjs` |
@@ -73,6 +73,8 @@ Nothing here can judge these; they are the point of the first session with it.
 | Do the photo pieces belong? | In the farmland biome, compare `kit=1` with `kit=0`. In software stills the houses are convincing and the woodland edge stands correctly, but both are much sharper than the painterly scenery around them |
 | Is the radio ever silent in the generated view? | Add `audio=0` to turn analysis off, and note the browser: Safari and Firefox are untested |
 | Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there |
+| Is the dissolve dreamlike or distracting? | At the dreamlike level, loud music makes layers of the scene drift apart. It has only been seen in stills; watch it move on a spacey channel such as Drone Zone |
+| Is the bass "breath" felt or seen? | Splats swell by up to 3.5% with the bass, at both levels; it should be barely noticeable |
 | Does music analysis work in your browser? | The readout shows `energy` moving and, on rhythmic channels, a `bpm`; Safari and Firefox are untested |
 | Do tunnels read as tunnels? | `t` forces one |
 

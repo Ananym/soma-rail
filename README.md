@@ -45,7 +45,7 @@ Tuning parameters, added to the URL after `?view=generated`:
 | `shutter` | `0.02` | Motion-blur length in seconds |
 | `blurKeep` | `0.6` | How solid blurred splats stay, 0 to 1 |
 | `hour` | runs | Pin the time of day, 0 to 24 |
-| `seed` | random | Fix the journey |
+| `seed` | random | A tuning aid: the same seed starts in the same scenery (track changes still alter it) |
 | `kit` | `1` | `0` leaves out the photo pieces |
 | `audio` | `1` | `0` turns off music analysis |
 | `frame` | `1` | `0` hides the window frame |
@@ -56,7 +56,7 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | Script | What it does |
 | --- | --- |
 | `node scripts/window-shot.cjs out.png "seed=1&hour=12"` | Screenshot the generated view on its own (`window-harness.html`) |
-| `npm run build && node scripts/app-check.cjs` | Start the built app in both views and check they run |
+| `npm run build && node scripts/app-check.cjs` | Start the built app in four cases (video, generated, no WebGL2, streams refusing CORS) and check each runs |
 | `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |
 | `node scripts/check-biomes.mjs` | Test the scenery generators |
 | `node scripts/check-audio.mjs` | Test the music analysis |

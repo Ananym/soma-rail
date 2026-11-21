@@ -34,7 +34,10 @@ uniform float uBreath;`,
     anchor: 'rgba.rgb = max(rgba.rgb, vec3(0.0));',
     insert: `
     if (uDissolve > 0.0) {
-        vec3 hsh = fract(sin(vec3(float(splatIndex)) * vec3(12.9898, 78.233, 37.719)) * 43758.5453) - 0.5;
+        // Keyed to the splat's distance from the track, which never changes as the world scrolls:
+        // the scatter is steady, and things at one distance (a facade, a wire) drift together.
+        // (Keying it to the splat's index would re-roll everything each time a chunk came or went.)
+        vec3 hsh = fract(sin(vec3(center.z) * vec3(12.9898, 78.233, 37.719)) * 43758.5453) - 0.5;
         center += hsh * uDissolve * (0.05 * length(center) + 0.3);
     }
     scales *= 1.0 + uBreath;`,

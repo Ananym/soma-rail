@@ -28,7 +28,7 @@ const SEEDS = ['7', 'downs-check'];
 const INDICES = [-1, 0, 3, 41];
 const BUDGETS = [150000, 600000, 2400000];
 
-function run(biome, layer, seedStr, level, index, budget, beatMetres = 56) {
+function run(biome, layer, seedStr, level, index, budget, beatMetres = 56, hour = 12) {
   const seed = hashString(seedStr);
   const terrain = makeTerrain(seed, biome.terrain);
   const splats = [];
@@ -41,7 +41,7 @@ function run(biome, layer, seedStr, level, index, budget, beatMetres = 56) {
     rng: makeRng(hashInts(seed, layer.name.length * 131 + layer.name.charCodeAt(0), index)),
     x0: index * layer.chunkLen, length: layer.chunkLen, zNear: layer.zNear, zFar: layer.zFar,
     count: countFor(layer, budget), index, terrain, palette: biome.palette, dials: { ...LEVELS[level] },
-    level, beatMetres, layer: layer.name,
+    level, beatMetres, layer: layer.name, seed, hour,
   };
   const gen = (biome.generators[layer.name] || biome.generators.near)(ctx, emit);
   const t0 = performance.now();
@@ -68,7 +68,9 @@ for (const [name, biome] of Object.entries(BIOMES)) {
             const what = `${name}/${layer.name} seed=${seedStr} level=${level} index=${index} budget=${budget}`;
             // one odd mast spacing per combination set, as the music would give
             const beat = index === 3 ? 47.3 : 56;
-            const a = run(biome, layer, seedStr, level, index, budget, beat);
+            // day on most chunks, night on two, so lit windows and lamps are exercised as well
+            const hour = index === 41 ? 22 : index === -1 ? 1 : 12;
+            const a = run(biome, layer, seedStr, level, index, budget, beat, hour);
             runs++;
             const { splats, ctx, maxSince, ms } = a;
             (timing[layer.name] ||= []).push(ms / Math.max(1, splats.length) * 1000);
@@ -95,7 +97,7 @@ for (const [name, biome] of Object.entries(BIOMES)) {
             }
             // determinism (at the default budget only, to keep the run short)
             if (budget === 600000) {
-              const b2 = run(biome, layer, seedStr, level, index, budget, beat).splats;
+              const b2 = run(biome, layer, seedStr, level, index, budget, beat, hour).splats;
               if (b2.length !== n || b2.some((s, i) => s.some((v, j) => v !== splats[i][j]))) fail(what, 'not deterministic');
             }
             if (verbose) {
