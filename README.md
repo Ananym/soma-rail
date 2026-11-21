@@ -30,9 +30,9 @@ What it does today:
 
 - **Scenery** is generated ahead of the train in chunks and thrown away behind it. Changes of scenery happen inside tunnels.
 - **Distraction brakes the train.** Fidget and it slows to a stop, the motion blur shrinking until the view stands sharp and still; settle and it pulls away again. The audio quietens with it. A stopped train costs almost nothing to show: the clock and the music's effects rest, the view is redrawn twice a second, and a hidden tab is not drawn at all.
-- **Time of day** is drawn afresh for each stretch of scenery: dawn and dusk (golden hour) about half the time, full day the rest, and night in the city.
+- **Time of day** is drawn afresh for each stretch of scenery: dawn and dusk (golden hour) about half the time, full day the rest, and night in the city and on the motorway.
 - **Music** changes the view. Each SomaFM channel starts in scenery that suits it, and a new track queues a tunnel and new scenery. The audio is analysed live: each kick or snare makes trees, buildings and lights swell briefly, the treble makes foliage shimmer and lights and stars twinkle, and the bass makes everything breathe. In Safari and on iPhones and iPads the analysis is off unless you add `audio=1`, because those browsers can go silent when a radio stream is analysed; the channel and track changes still steer the view there.
-- **Six kinds of scenery** are written in code: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country with limestone towers and paddies, and a sand-sea desert with oases. Each has a plausible and a dreamlike version.
+- **Eight kinds of scenery** are written in code: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country with limestone towers and paddies, a sand-sea desert with oases, a high Himalayan valley (tiered villages, prayer flags, yaks, the snow range behind), and an English motorway at night (lamp-lit junctions, traffic as long-exposure light trails, floodlit landmarks on a low horizon, and a sky of stars and the Milky Way filling most of the window). Each has a plausible and a dreamlike version.
 - **Photo pieces** made from CC0 photographs stand among the code-made farmland (`soma-rail-app/public/kit/`, credits in its `index.json`).
 
 Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
@@ -40,7 +40,7 @@ Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `level` | from the channel | Surreal level: `0` plausible, `1` dreamlike |
-| `biome` | from the channel | Force one biome: `downs`, `pinewood`, `saltflat`, `nightcity`, `karst` or `dunes` |
+| `biome` | from the channel | Force one biome: `downs`, `pinewood`, `saltflat`, `nightcity`, `karst`, `dunes`, `himalaya` or `motorway` |
 | `budget` | `600000` | Total splats; lower it if the view stutters |
 | `kmh` | `100` | Cruising speed |
 | `shutter` | `0.02` | Motion-blur length in seconds |

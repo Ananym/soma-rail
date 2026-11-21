@@ -43,9 +43,9 @@ The whole pipeline runs as the app's only view; the YouTube player was removed o
 | Renderer | three.js and Spark in a lazy chunk (1.2 MB gzipped) loaded after Start; the main bundle grew by about 4 kB gzipped | `src/window/engine.js` |
 | Camera effects | Motion blur, haze toward the sky colour, time-of-day tint and a "dissolve" effect, patched into Spark's vertex shader with checked anchors | `src/window/sparkPatch.js` |
 | World | Four depth bands built in chunks, generated a few milliseconds per frame; a pure function of seed, band and chunk index | `engine.js`, `layers.js`, `terrain.js` |
-| Scenery | Six biomes written in code on a shared prop kit: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country (limestone towers, paddies, a river, mist) and a sand-sea desert (dunes, oases). Each has a plausible and a dreamlike version. 896 generator checks pass | `src/window/biomes/`, `scripts/check-biomes.mjs` |
+| Scenery | Eight biomes written in code on a shared prop kit: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country (limestone towers, paddies, a river, mist), a sand-sea desert (dunes, oases), a high Himalayan valley (tiered villages, monasteries, prayer flags, yaks, the range behind) and an English motorway at night (lit junctions, traffic as light trails, floodlit landmarks). Each has a plausible and a dreamlike version. 1152 generator checks pass. The craft rules learned so far are in the header of `biomes/index.js` | `src/window/biomes/`, `scripts/check-biomes.mjs` |
 | Photo pieces | Six sheets made from CC0 photos are shipped (9.8 MB). Two are switched on, in the farmland biome: a woodland edge and a group of houses. Two looked like pasted cut-outs in place and are off; two are untried | `kitPieces.js`, `public/kit/`, `scripts/photo-to-splats.mjs` |
-| Sky | One shader: scattering by sun height, sun, moon, stars, two cloud layers; it also sets the land's haze colour and light | `src/window/sky.js` |
+| Sky | One shader: scattering by sun height, sun, moon, stars, two cloud layers; it also sets the land's haze colour and light. A biome can ask for a richer night sky (more and fainter stars, the Milky Way, fewer clouds) and for the horizon to sit lower in the window so the sky has more room; the motorway does both | `src/window/sky.js` |
 | Window frame and glass | A rounded frame with a sill, plus grain, a faint reflection and a vignette | `frame.js`, `TrainWindow.vue` |
 | Director | Speed from the distraction score (distraction brakes the train to a stop; nothing fades to black), two surreal levels, tunnels that hide every change of scenery. Each stretch starts in a time-of-day slot: dawn or dusk about half the time, with a warm grade on the land while the sun is low | `src/window/director.js` |
 | Music | The stream is loaded with CORS and analysed for loudness, bands, onsets and tempo; each channel has a starting profile; a new track queues a tunnel | `audio.js`, `audioAnalysis.js`, `profiles.json` |
@@ -90,6 +90,7 @@ Nothing here can judge these; they are the point of the first session with it.
 | Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there. The readout names the current level and what is coming |
 | Is golden hour right? | `g` steps through dawn, day, dusk and night; `gold=0.5` halves the warm grade |
 | Do buildings hold together as you pass? | Buildings turned away from the line used to show an open back, in the farmland and in karst country; they now have a back wall and roof. Watch a farmstead or village from approach to departure |
+| Do the two newest biomes hold up in motion? | `biome=himalaya` and `biome=motorway` have only been seen as stills. Watch the yaks and flag strings pass, and on the motorway the lamp rows, the trails and the sky; `horizon=0` puts the motorway's horizon back at mid-window for comparison |
 | Is the dissolve dreamlike or distracting? | At the dreamlike level, loud music makes layers of the scene drift apart. It has only been seen in stills; watch it move on a spacey channel such as Drone Zone |
 | Is the beat pulse subtle enough? | On a rhythmic channel, trees, buildings and lights should swell with each hit and the readout's `beat` bar should jump. `beat=0.5` halves it, `beat=0` turns it off |
 | Does the sand-sea desert hitch? | It generates two to three times slower than the other biomes. Watch `biome=dunes` at full speed; lower `slice` if frames drop when scenery arrives |
@@ -441,6 +442,7 @@ Decided on 21 November 2026:
 | Distraction in the generated view | The train slows to a stop; no fade to black | The stopping train, sharpening as its blur shrinks, is the whole visual penalty. Audio still quietens |
 | Video or generated view | The generated view only; the YouTube player is removed | No flag and no video fallback. A browser without WebGL2 gets a notice and the radio |
 | Compute when nothing changes | Idle when the train is stopped or the tab is hidden | A stopped view is redrawn twice a second; scenery is only generated while moving |
+| Traffic on the night motorway | Long-exposure light trails, not cars | The world is static splats, so nothing can drive. Trails read as traffic at once and need no animation. Moving cars would need a new engine feature |
 
 Answered earlier by the checks:
 
