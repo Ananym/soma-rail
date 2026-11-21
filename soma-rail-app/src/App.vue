@@ -63,6 +63,7 @@ const useGenerated = ref(wantsGeneratedView());
 // touch the audio path; if CORS loading fails we remount a plain audio element and carry on.
 const audioCors = ref(useGenerated.value && readParams().audio !== 0);
 const audioKey = ref(0);
+const fellBack = ref(false);
 function handleCorsFailed() {
   console.warn('Stream refused CORS loading; continuing without music analysis');
   audioCors.value = false;
@@ -105,8 +106,8 @@ function handlePlayerReady(player) {
 function handleWindowFailed(err) {
   console.warn('Generated view unavailable, falling back to video:', err);
   useGenerated.value = false;
-  // The video needs no music analysis: go back to the plain audio path.
-  if (audioCors.value) { audioCors.value = false; audioKey.value++; }
+  fellBack.value = true;
+  // The audio element is left alone: it is already playing, and replacing it mid-start would stop it.
 }
 
 // Handle audio element ready
@@ -120,6 +121,8 @@ function handleStarted() {
   hasStarted.value = true;
   // Reset grace period to ignore residual mouse movement from the click
   resetGracePeriod();
+  // After a fallback the video player may have become ready before playback started.
+  if (fellBack.value && videoPlayerRef.value) videoPlayerRef.value.play();
 }
 
 // Watch volume changes and save to localStorage

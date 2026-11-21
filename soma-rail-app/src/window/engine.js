@@ -273,6 +273,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     director,
     start() { running = true; last = performance.now(); },
     setRate(r) { director.setRate(r); },
+    kitInstances() { return kit ? kit.instances() : []; },   // for the harness and tuning
     biomeNames() { return Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1); },
     setAudioProvider(fn) { audioProvider = fn; },
     stats() {

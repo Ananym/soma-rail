@@ -41,30 +41,60 @@ let startChannelId = null;
 let tap = null;            // music analysis (window/audio.js), only when the stream was loaded with CORS
 let tapElement = null;
 
-// Analyse the radio's audio element, but only one that was loaded with CORS: routing a non-CORS
-// element through Web Audio would silence it for the listener.
-async function connectAudio() {
+// --- music analysis ---------------------------------------------------------------------------
+// Once an element is fed into Web Audio it is heard only through that AudioContext, and a context
+// that starts outside a user gesture can stay suspended: the radio would go silent. So the module
+// is preloaded, and the element is attached synchronously inside the Start click (see play()).
+// A later attach (the module was slow, or the element was replaced) first proves with a throwaway
+// context that audio is allowed to run; if not, it waits for the listener's next click or key.
+let audioModule = null;
+let audioFeatures = null;
+function preloadAudio() {
+  if (!params.audio || !props.audioCors || audioModule) return;
+  import('../window/audio.js').then((m) => { audioModule = m; }).catch(() => {});
+}
+preloadAudio();
+
+// Only an element loaded with CORS may be attached: a non-CORS one would play silence.
+function attachable(el) {
+  return !!(params.audio && props.audioCors && audioModule && el && el.crossOrigin === 'anonymous' && el !== tapElement);
+}
+function attachNow() {
   const el = props.audioElement;
-  if (!engine || !params.audio || !props.audioCors || !el || el.crossOrigin !== 'anonymous' || el === tapElement) return;
+  if (!attachable(el)) return false;
   try {
-    const { createAudioTap } = await import('../window/audio.js');
     if (tap) tap.dispose();
-    tap = createAudioTap();
-    if (!tap.attachElement(el)) { tap = null; return; }
+    tap = audioModule.createAudioTap();
+    if (!tap.attachElement(el)) { tap = null; return false; }
     tapElement = el;
     tap.resume();
-    let features = null;
-    engine.setAudioProvider((dt) => (features = tap.update(dt)));
-    if (typeof window !== 'undefined') window.__trainWindowAudio = () => (features ? { ...features } : null);   // for checks and tuning
+    if (engine) engine.setAudioProvider((dt) => (audioFeatures = tap.update(dt)));
+    if (typeof window !== 'undefined') window.__trainWindowAudio = () => (tap ? { ...(audioFeatures || {}), context: tap.stats().state } : null);   // for checks and tuning
+    return true;
   } catch (err) {
     console.warn('Music analysis unavailable:', err);
     tap = null;
+    return false;
   }
+}
+async function attachLater() {
+  if (!attachable(props.audioElement)) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  const probe = new AC();
+  try { await probe.resume(); } catch { /* stays suspended */ }
+  const allowed = probe.state === 'running';
+  probe.close().catch(() => {});
+  if (allowed) { attachNow(); return; }
+  // Not allowed yet: try again inside the listener's next gesture.
+  const retry = () => { window.removeEventListener('pointerdown', retry); window.removeEventListener('keydown', retry); attachNow(); };
+  window.addEventListener('pointerdown', retry, { once: true });
+  window.addEventListener('keydown', retry, { once: true });
 }
 function disconnectAudio() {
   if (engine) engine.setAudioProvider(null);
   if (tap) tap.dispose();
-  tap = null; tapElement = null;
+  tap = null; tapElement = null; audioFeatures = null;
 }
 
 // With ?debug=1 a few keys drive the director, for tuning on a real GPU.
@@ -81,8 +111,15 @@ function onDebugKey(e) {
   else if (e.key === ']') s.cruise = s.cruise + 10 / 3.6;
 }
 
+function hasWebGL2() {
+  try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; }
+}
+
 async function play() {
   if (engine) return;
+  // Checked before anything touches the audio path, so a fallback leaves the radio as it was.
+  if (!hasWebGL2()) { emit('failed', new Error('WebGL2 is not available')); return; }
+  attachNow();      // still inside the Start click: the audio context is allowed to run
   try {
     const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const { createEngine } = await import('../window/engine.js');
@@ -92,7 +129,8 @@ async function play() {
     await engine.ready;
     engine.start();
     ready.value = true;
-    connectAudio();
+    if (tap) engine.setAudioProvider((dt) => (audioFeatures = tap.update(dt)));
+    else attachLater();
     if (params.debug) {
       statsTimer = setInterval(() => { statsText.value = JSON.stringify(engine.stats(), null, 1) + DEBUG_KEYS; }, 500);
       window.addEventListener('keydown', onDebugKey);
@@ -109,7 +147,8 @@ watch(() => props.rate, (r) => { if (engine) engine.setRate(r); });
 // The audio element is replaced if CORS loading fails; follow it, and drop analysis if CORS is off.
 watch(() => [props.audioElement, props.audioCors], () => {
   if (!props.audioCors || props.audioElement !== tapElement) disconnectAudio();
-  connectAudio();
+  preloadAudio();
+  if (engine) attachLater();
 });
 
 // A new channel changes the kind of scenery, behind a tunnel.

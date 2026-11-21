@@ -99,6 +99,7 @@ export function createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl = '/'
     // The world changed (new biome or seed): every placement is stale.
     reset() { for (const key of [...live.keys()]) drop(key); },
     stats() { let n = 0; for (const i of live.values()) if (i.mesh) n++; return { pieces: n, failed }; },
+    instances() { return [...live.values()].map((i) => ({ id: i.id, x: Math.round(i.x), y: +i.y.toFixed(1), push: Math.round(-i.z), loaded: !!i.mesh })); },
     dispose() { this.reset(); for (const p of packs.values()) p.packed.dispose(); packs.clear(); },
   };
 }
