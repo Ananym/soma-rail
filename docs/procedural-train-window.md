@@ -19,7 +19,7 @@ The first draft was written without web access and flagged its facts as leads. T
 | Question | Answer | Evidence |
 | --- | --- | --- |
 | Can the page read SomaFM audio samples? | Yes, in Chromium | All six stream servers (`ice1`–`ice6`), MP3 and AAC, reply with `Access-Control-Allow-Origin: *`. An `<audio crossorigin="anonymous">` fed into an `AnalyserNode` gave a peak of 0.78; the same element without the attribute gave exact silence. |
-| What caused the 403s recorded in the repo? | The `Referer` header | A stream request with a `localhost` or `github.io` referrer gets 403, as does a non-browser user agent. `Origin`, `Sec-Fetch-Mode: cors` and `Sec-GPC: 1` all get 200. Both `CROSSORIGIN_FIX.md` and `BRAVE_GPC_ISSUE.md` blame the wrong header. |
+| What caused the 403s recorded in the repo? | The `Referer` header | A stream request with a `localhost` or `github.io` referrer gets 403, as does a non-browser user agent. `Origin`, `Sec-Fetch-Mode: cors` and `Sec-GPC: 1` all get 200. The two notes that diagnosed it, `CROSSORIGIN_FIX.md` and `BRAVE_GPC_ISSUE.md`, blamed the wrong header; both have since been deleted and remain in the git history. |
 | Does Spark build splats in code and rewrite them on the GPU? | Yes | A test scene on Spark 2.4.0 built 150,000 splats with `constructSplats` and `pushSplat` in 68 ms, then scrolled and hazed them with a dyno `objectModifier`. |
 | Does stretching splats give motion blur? | Yes, by a different mechanism than drafted | It is one extra term in Spark's vertex shader, not a dyno modifier. See "Why splats suit this camera". |
 | How big and how fast is CLAP in a browser? | 34 MB, about half a second per 10 s of audio | Quantized audio encoder, single-threaded WebAssembly, no GPU. Speed and size only; match quality was not assessed. |
@@ -242,7 +242,15 @@ What was tested, in headless Chromium against the live streams:
 | Same, with `Sec-GPC: 1` as Brave sends | 200 | Real audio |
 | Same, without the `no-referrer` meta tag, from `localhost` | 403 | Playback fails |
 
-The repo's two notes on the 403 both misread it. `CROSSORIGIN_FIX.md` blames the `crossorigin` attribute and `BRAVE_GPC_ISSUE.md` blames `Sec-GPC`; neither header changes the response. The servers reject a `Referer` of `localhost` or `github.io`, and the `no-referrer` meta tag in `index.html` is what fixed playback.
+The repo's two notes on the 403 both misread it, and have since been deleted (they remain in the git history under `soma-rail-app/`). `CROSSORIGIN_FIX.md` blamed the `crossorigin` attribute and `BRAVE_GPC_ISSUE.md` blamed `Sec-GPC`; neither header changes the response. The servers reject a `Referer` of `localhost` or `github.io`, and the `no-referrer` meta tag in `index.html` is what fixed playback.
+
+Three habits from that hunt are still in the player, and none of them addresses the 403:
+
+- **The server is forced to `ice6`.** `plsParser.js` rewrites whichever server SomaFM's playlist names.
+- **AAC is preferred over MP3.** `useSomaFM.js` picks the highest-quality AAC playlist first.
+- **A playback error steps through the servers.** `AudioPlayer.vue` tries `ice6`, `ice5`, `ice4`, `ice1` and `ice3` in turn, a second apart, and gives up after five tries.
+
+All six servers and both formats answered alike in the checks above, so the choice of server and format is arbitrary, and the code comments that give `Sec-GPC` as the reason are wrong. The stepping does have a use today: when it gives up on a stream loaded with `crossorigin`, the app remounts the player without the attribute and the radio plays on without analysis.
 
 What this leaves open:
 
