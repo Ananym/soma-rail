@@ -31,9 +31,11 @@
 // kit.js holds the shared props (ground fill, trees, hedges, buildings, masts, wires, fences, ...).
 import { placeholderBiome } from './placeholder.js';
 import { downsBiome } from './downs.js';
+import { saltflatBiome } from './saltflat.js';
 
 export const BIOMES = {
   downs: downsBiome,
+  saltflat: saltflatBiome,
   placeholder: placeholderBiome,
 };
 
