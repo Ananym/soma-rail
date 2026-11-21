@@ -54,13 +54,13 @@ What the music changes:
 | --- | --- |
 | Channel | Starting biomes and surreal level, from a table of all 51 channels |
 | Track change | A tunnel, then scenery, terrain and time of day picked from a hash of artist and title |
-| Onsets (kick, snare, a struck note) | A beat pulse: everything standing above eye level swells by up to 7.5% and falls back in a fraction of a second, lights swell by up to a third, and clouds catch a little light |
-| Treble (hi-hats, cymbals, air) | A sparkle: raised scenery shimmers, lights twinkle one by one, and the stars brighten |
+| Onsets (kick, snare, a struck note) | A beat pulse: everything standing above eye level swells by up to 10% and falls back in a fraction of a second, lights swell by up to a third, and clouds catch a little light |
+| Treble rising above its recent average (hi-hats, cymbals, a bright entry) | A sparkle: raised scenery shimmers, lights twinkle one by one, and the stars brighten. It rests at zero between |
 | Bass | A slow breath: every splat swells by up to 3.5% |
 | Loudness | At the dreamlike level, layers of the scene drift apart (the dissolve); clouds and aurora brighten |
 | Tempo, when the lock is firm | Mast or pole spacing of the next stretch, one per bar |
 
-The beat pulse follows detected onsets, not a predicted beat, so it lands on what is heard and needs no tempo lock. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
+The beat pulse follows detected onsets, not a predicted beat, so it lands on what is heard and needs no tempo lock. On the live stream it fired six times in 30 seconds in a headless browser running at 3 frames a second, which shows it is wired but says nothing about how it feels. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
 
 Three failure paths were run in a headless browser and work: without WebGL2 the app falls back to the video; if the streams refuse CORS the radio keeps playing without analysis; and the audio context runs when started from the Start click with no autoplay override.
 
@@ -86,9 +86,10 @@ Nothing here can judge these; they are the point of the first session with it.
 | Is the radio ever silent in the generated view? | Add `audio=0` to turn analysis off, and note the browser: Safari and Firefox are untested |
 | Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there. The readout names the current level and what is coming |
 | Is golden hour right? | `g` steps through dawn, day, dusk and night; `gold=0.5` halves the warm grade |
-| Do buildings hold together as you pass? | Farm buildings turned away from the line used to show an open back; they now have a back wall and roof. Watch a farmstead from approach to departure |
+| Do buildings hold together as you pass? | Buildings turned away from the line used to show an open back, in the farmland and in karst country; they now have a back wall and roof. Watch a farmstead or village from approach to departure |
 | Is the dissolve dreamlike or distracting? | At the dreamlike level, loud music makes layers of the scene drift apart. It has only been seen in stills; watch it move on a spacey channel such as Drone Zone |
 | Is the beat pulse subtle enough? | On a rhythmic channel, trees, buildings and lights should swell with each hit and the readout's `beat` bar should jump. `beat=0.5` halves it, `beat=0` turns it off |
+| Does the sand-sea desert hitch? | It generates two to three times slower than the other biomes. Watch `biome=dunes` at full speed; lower `slice` if frames drop when scenery arrives |
 | Does the treble sparkle read as shimmer or as noise? | Watch foliage, lit windows and stars on a track with hi-hats. `sparkle=0` turns it off |
 | Is the bass "breath" felt or seen? | Splats swell by up to 3.5% with the bass, at both levels; it should be barely noticeable |
 | Does music analysis work in your browser? | The readout shows `energy` moving and, on rhythmic channels, a `bpm`; Safari and Firefox are untested |

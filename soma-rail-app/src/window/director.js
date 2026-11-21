@@ -35,8 +35,9 @@ export function createDirector({ params, reducedMotion = false }) {
     dissolve: 0,            // shader "matter" amount, 0..1
     breath: 0,              // shader scale pulse from the bass
     beat: 0,                // 0..1, jumps on each onset and decays quickly
-    sparkle: 0,             // 0..1, follows the treble
+    sparkle: 0,             // 0..1, lifts when the treble rises above its recent average
     trebleNow: 0,
+    trebleAvg: 0,
     beatMetres: 56,         // mast spacing; follows tempo when audio is available
     energy: 0,              // slow loudness, 0..1
     bpm: 0,                 // last trusted tempo, for the debug readout
@@ -116,7 +117,7 @@ export function createDirector({ params, reducedMotion = false }) {
         state.breath = 0.035 * f.bass;
         // an onset (kick, snare, a struck note) starts a pulse; a harder hit starts a bigger one
         if (f.onset) state.beat = Math.max(state.beat, (0.55 + 0.45 * Math.min(1, f.flux * 2.5)) * params.beat);
-        state.trebleNow = f.treble * params.sparkle;
+        state.trebleNow = f.treble;
       }
       if (f.bpm > 40 && f.confidence > 0.6 && state.speed > 1) {   // tempo on real music is shaky: trust only firm locks
         // one mast per bar of four beats at the current speed, kept inside a believable range
@@ -142,7 +143,12 @@ export function createDirector({ params, reducedMotion = false }) {
       // the clock: about an hour every 20 minutes at the plausible level, every 20 seconds at the dreamlike one
       if (params.hour < 0) state.hour = (state.hour + dt * (state.dials.time * 0.05 + 0.0002)) % 24;
       state.beat *= Math.exp(-dt / 0.17);                                   // a beat is over in a few frames
-      state.sparkle += (state.trebleNow - state.sparkle) * (1 - Math.exp(-dt / 0.1));
+      // Treble is a level, not an event: on most music it sits at a moderate value all the time. The
+      // sparkle follows only its excess over the last few seconds' average, so it rests at zero and
+      // lifts on hi-hats, cymbals and bright entries.
+      state.trebleAvg += (state.trebleNow - state.trebleAvg) * (1 - Math.exp(-dt / 3));
+      const lift = Math.min(1, Math.max(0, (state.trebleNow - state.trebleAvg * 1.15) * 2.4)) * params.sparkle;
+      state.sparkle += (lift - state.sparkle) * (1 - Math.exp(-dt / 0.1));
       const wantDissolve = reducedMotion ? 0 : state.dials.matter * Math.max(0, state.energy - 0.35) * 0.9;
       state.dissolve += (wantDissolve - state.dissolve) * Math.min(1, dt * 0.5);
 

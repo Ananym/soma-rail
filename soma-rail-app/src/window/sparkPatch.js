@@ -52,7 +52,7 @@ uniform float uClock;`,
     // breath to everything. The treble makes raised things shimmer and lights twinkle (see below).
     float raised = smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
-    scales *= 1.0 + uBreath + uBeat * (0.075 * raised + 0.32 * isLight);
+    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight);
     float shimmer = 1.0;
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);

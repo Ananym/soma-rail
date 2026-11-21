@@ -271,7 +271,7 @@ function makeVillage(W, i) {
           wx, d, concrete,
           w: concrete ? 8 + 3 * pr() : 9 + 5 * pr(), dep: concrete ? 9 + 2 * pr() : 7 + 2 * pr(),
           storeys: concrete ? 3 + (pr() < 0.4 ? 1 : 0) : pr() < 0.75 ? 2 : 1,
-          yaw: (pr() - 0.5) * 0.14 + (pr() < 0.12 ? Math.PI / 2 : 0),
+          yaw: (pr() - 0.5) * 0.14 + (pr() < 0.12 ? (pr() < 0.5 ? 1 : -1) * Math.PI / 2 : 0),   // some stand end-on, either way
           wall: concrete ? CONCRETE_WALLS[Math.floor(pr() * CONCRETE_WALLS.length)] : WALLS[Math.floor(pr() * WALLS.length)],
           court: !concrete && pr() < 0.3, seed: hashInts(h, 7, Math.round(a), Math.round(b)),
         });
@@ -819,6 +819,17 @@ export function* tiledHouse(ctx, out, x, d, opts = {}) {
     if (ix > 0.34 && ix < 0.66 && iy > 0.35 && iy < 0.72) return lightOf(row, col) ? { c: LIT, light: true } : win;
     return jitter(front, rng, 0.03);
   }, q, kind, rng);
+  // A house standing end-on to the line shows its back to a train coming from one side: without a
+  // back wall the train would look into an open box until it had passed.
+  if (Math.cos(yaw) < 0.78) {
+    const back = faceTone(wall, -fx, -fz);
+    yield* panel(out, Pt(-w / 2, 0, -dep / 2), [ex, 0, ez], [0, 1, 0], w, hh, s, (a, b) => {
+      const y = b * hh;
+      if (y > hh - 0.45) return mul3(back, 0.5);
+      if (y < 0.5) return mul3(back, 0.72);
+      return jitter(back, rng, 0.03);
+    }, q, kind, rng);
+  }
   // end walls with the gable triangle
   const qs = quatMul(q, quatYaw(Math.PI / 2));
   for (const sg of [-1, 1]) {
@@ -926,6 +937,8 @@ export function* concreteHouse(ctx, out, x, d, opts = {}) {
     return jitter(c, rng, 0.03);
   };
   yield* panel(out, Pt(-w / 2, 0, dep / 2), [ex, 0, ez], [0, 1, 0], w, h, s, face(faceTone(wall, fx, fz), cols, 0), q, kind, rng);
+  // (and the back, for a house standing end-on to the line: see tiledHouse)
+  if (Math.cos(yaw) < 0.78) yield* panel(out, Pt(-w / 2, 0, -dep / 2), [ex, 0, ez], [0, 1, 0], w, h, s, face(faceTone(wall, -fx, -fz), cols, 0), q, kind, rng);
   for (const sg of [-1, 1]) {
     yield* panel(out, Pt(sg * w / 2, 0, dep / 2), [-fx, 0, -fz], [0, 1, 0], dep, h, s, face(faceTone(wall, sg * ex, sg * ez), 2, sg), qs, kind, rng);
   }
