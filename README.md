@@ -56,6 +56,7 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | --- | --- |
 | `node scripts/window-shot.cjs out.png "seed=1&hour=12"` | Screenshot the generated view on its own (`window-harness.html`) |
 | `npm run build && node scripts/app-check.cjs` | Start the built app in both views and check they run |
+| `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |
 | `node scripts/check-biomes.mjs` | Test the scenery generators |
 | `node scripts/check-audio.mjs` | Test the music analysis |
 | `node scripts/check-sky.mjs out.png` | Render the sky at a range of hours |
