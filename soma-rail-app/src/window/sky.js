@@ -1,5 +1,5 @@
 // Sky: one full-screen shader behind everything, plus the light it implies for the land.
-// createSky(THREE) -> { object3d, update(state), horizonColor, lightTint, sunDir }
+// createSky(THREE) -> { object3d, update(state), horizonColor, hazeHighColor, lightTint, sunDir }
 //   state = { hour (0..24), level (0|1), dials, time (seconds), dt, aspect, fovDeg, travelled (m), speed (m/s), energy (0..1) }
 //   horizonColor: THREE.Color the land hazes toward; lightTint: THREE.Color multiplied into splats.
 //
@@ -385,6 +385,7 @@ export function createSky(THREE) {
   object3d.frustumCulled = false; object3d.renderOrder = -1000;
 
   const horizonColor = new THREE.Color(0.7, 0.78, 0.86);
+  const hazeHighColor = new THREE.Color(0.6, 0.72, 0.86);
   const lightTint = new THREE.Color(1, 1, 1);
   const sunDir = new THREE.Vector3(0, 1, 0);
   const moonDir = new THREE.Vector3(0, -1, 0);
@@ -511,6 +512,9 @@ export function createSky(THREE) {
     const hz = skyBaseJS([0, 0, -1]);
     const hd = display(hz, exposure);
     horizonColor.setRGB(hd[0], hd[1], hd[2]);
+    // ... and 15 degrees up, so tall distant land can haze toward the sky colour at its own height
+    const hh = display(skyBaseJS([0, 0.2588, -0.9659]), exposure);
+    hazeHighColor.setRGB(hh[0], hh[1], hh[2]);
 
     // ---- light for the land: direct sun/moon (with a soft cosine) + sky light, as the camera's
     // exposure would see it, normalised so midday is ~1, then into display terms (gamma).
@@ -549,7 +553,7 @@ export function createSky(THREE) {
   }
 
   update({ hour: 12, level: 0, dials: {}, time: 0, dt: 0, aspect: 16 / 9, fovDeg: 50, travelled: 0, energy: 0 });
-  const sky = { object3d, update, horizonColor, lightTint, sunDir };
+  const sky = { object3d, update, horizonColor, hazeHighColor, lightTint, sunDir };
   // for scripts/check-sky.mjs only; not enumerable, so the interface stays the five fields above
   Object.defineProperty(sky, '_debug', { value: { skyBaseJS, uniforms }, enumerable: false });
   return sky;

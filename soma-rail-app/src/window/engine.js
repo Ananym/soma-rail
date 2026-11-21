@@ -26,6 +26,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   // --- splat renderer, with the blur / haze / light patch ---------------------------------------
   const uniforms = PATCH_UNIFORMS();
   uniforms.uHazeColor.value = new THREE.Color(0.7, 0.78, 0.86);
+  uniforms.uHazeHigh.value = new THREE.Color(0.6, 0.72, 0.86);
   uniforms.uLightTint.value = new THREE.Color(1, 1, 1);
   uniforms.uBlurKeep.value = params.blurKeep;
   // A side-window camera only translates sideways, so depth order never changes: sort by depth.
@@ -228,6 +229,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const inTunnel = S.tunnel && S.tunnel.phase === 'inside';
     uniforms.uMotionMetres.value = S.speed * params.shutter * (reducedMotion ? 0.5 : 1);
     uniforms.uHazeColor.value.copy(sky.horizonColor);
+    uniforms.uHazeHigh.value.copy(sky.hazeHighColor || sky.horizonColor);
     uniforms.uLightTint.value.copy(sky.lightTint);
     uniforms.uHazeDist.value = biome.hazeDist || 3000;
     uniforms.uDissolve.value = S.dissolve;

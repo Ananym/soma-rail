@@ -9,6 +9,7 @@ export const PATCH_UNIFORMS = () => ({
   uMotionMetres: { value: 0 },      // speed * shutter, metres of smear along the track
   uBlurKeep: { value: 0.6 },        // 0 = energy-conserving blur (thin layers fade), 1 = keep opacity
   uHazeColor: { value: null },      // THREE.Color, set by the engine
+  uHazeHigh: { value: null },       // THREE.Color: the sky 15 degrees up, for tall distant land
   uHazeDist: { value: 2500 },       // metres at which haze reaches 63%
   uLightTint: { value: null },      // THREE.Color multiplied into every splat
   uDissolve: { value: 0 },          // 0..1, scatters splats ("matter" dial)
@@ -22,6 +23,7 @@ const EDITS = [
 uniform float uMotionMetres;
 uniform float uBlurKeep;
 uniform vec3 uHazeColor;
+uniform vec3 uHazeHigh;
 uniform float uHazeDist;
 uniform vec3 uLightTint;
 uniform float uDissolve;
@@ -46,7 +48,9 @@ uniform float uBreath;`,
         // they ignore the time-of-day tint. Natural surfaces should keep every channel below 0.8.
         float glow = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
         float hz = 1.0 - exp(viewCenter.z / max(uHazeDist, 1.0));
-        vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow), uHazeColor, hz * (1.0 - 0.5 * glow));
+        // haze toward the sky colour at the splat's own elevation, so far hills meet the sky at twilight
+        vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
+        vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow), hazeCol, hz * (1.0 - 0.5 * glow));
     }`,
   },
   {
