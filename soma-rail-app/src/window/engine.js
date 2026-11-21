@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { SparkRenderer, SplatMesh, PackedSplats } from '@sparkjsdev/spark';
 import { LAYERS, CAMERA_HEIGHT, neededChunks, expectedActive } from './layers.js';
 import { makeTerrain } from './terrain.js';
-import { getBiome } from './biomes/index.js';
+import { getBiome, BIOMES } from './biomes/index.js';
 import { createSky } from './sky.js';
 import { createFrame } from './frame.js';
 import { createDirector } from './director.js';
@@ -260,6 +260,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     director,
     start() { running = true; last = performance.now(); },
     setRate(r) { director.setRate(r); },
+    biomeNames() { return Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1); },
     setAudioProvider(fn) { audioProvider = fn; },
     stats() {
       let splats = 0, pending = 0;

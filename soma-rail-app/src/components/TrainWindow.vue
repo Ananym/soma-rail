@@ -1,6 +1,9 @@
 <template>
   <div class="window-container" :class="{ hidden: !visible || !ready }">
     <canvas ref="canvasEl"></canvas>
+    <!-- The glass and camera, first pass: grain, a faint interior reflection and a vignette. -->
+    <div class="grain"></div>
+    <div class="reflection"></div>
     <div class="glass"></div>
     <pre v-if="params.debug" class="stats">{{ statsText }}</pre>
     <div class="distraction-overlay" :style="{ opacity: overlayOpacity }"></div>
@@ -36,6 +39,20 @@ let statsTimer = null;
 let lastSongKey = null;
 let startChannelId = null;
 
+// With ?debug=1 a few keys drive the director, for tuning on a real GPU.
+const DEBUG_KEYS = '\n\nkeys: t new scenery   b next biome   l surreal level\n      h +1 hour   [ ] speed -/+ 10 km/h';
+function onDebugKey(e) {
+  if (!engine || e.metaKey || e.ctrlKey || e.altKey) return;
+  const d = engine.director, s = d.state;
+  const seed = (Math.random() * 0xffffffff) >>> 0;
+  if (e.key === 't') d.queueTransition({ seed, biome: s.biome, level: s.level });
+  else if (e.key === 'b') { const names = engine.biomeNames(); d.queueTransition({ seed, biome: names[(names.indexOf(s.biome) + 1) % names.length], level: s.level }); }
+  else if (e.key === 'l') d.queueTransition({ seed: s.seed, biome: s.biome, level: s.level ? 0 : 1 });
+  else if (e.key === 'h') s.hour = (s.hour + 1) % 24;
+  else if (e.key === '[') s.cruise = Math.max(0, s.cruise - 10 / 3.6);
+  else if (e.key === ']') s.cruise = s.cruise + 10 / 3.6;
+}
+
 async function play() {
   if (engine) return;
   try {
@@ -47,7 +64,10 @@ async function play() {
     await engine.ready;
     engine.start();
     ready.value = true;
-    if (params.debug) statsTimer = setInterval(() => { statsText.value = JSON.stringify(engine.stats(), null, 1); }, 500);
+    if (params.debug) {
+      statsTimer = setInterval(() => { statsText.value = JSON.stringify(engine.stats(), null, 1) + DEBUG_KEYS; }, 500);
+      window.addEventListener('keydown', onDebugKey);
+    }
     if (typeof window !== 'undefined') window.__trainWindow = engine;   // for tuning from the console
   } catch (err) {
     if (engine) { engine.dispose(); engine = null; }
@@ -75,6 +95,7 @@ watch(() => props.song, (song) => {
 
 onUnmounted(() => {
   if (statsTimer) clearInterval(statsTimer);
+  window.removeEventListener('keydown', onDebugKey);
   if (engine) engine.dispose();
 });
 
@@ -104,7 +125,42 @@ canvas {
   height: 100%;
 }
 
-/* A first pass at the glass and camera: a soft vignette. Reflections, droplets and grain come later. */
+/* Film grain: a small noise tile, nudged around a few times a second. */
+.grain {
+  position: absolute;
+  inset: -64px;
+  pointer-events: none;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+  animation: grain-shift 0.6s steps(6) infinite;
+}
+
+@keyframes grain-shift {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-23px, 17px); }
+  40% { transform: translate(31px, -9px); }
+  60% { transform: translate(-11px, -29px); }
+  80% { transform: translate(19px, 27px); }
+  100% { transform: translate(0, 0); }
+}
+
+/* A hint of the lit carriage reflected in the glass: two soft, slanted bands. */
+.reflection {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background:
+    linear-gradient(105deg, rgba(255, 255, 255, 0) 58%, rgba(255, 250, 240, 0.035) 64%, rgba(255, 255, 255, 0) 72%),
+    linear-gradient(105deg, rgba(255, 255, 255, 0) 12%, rgba(255, 250, 240, 0.02) 17%, rgba(255, 255, 255, 0) 24%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grain { animation: none; }
+}
+
+/* Lens vignette. Droplets and dirt on the glass are still to do. */
 .glass {
   position: absolute;
   inset: 0;
