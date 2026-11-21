@@ -130,7 +130,7 @@ uniform vec3 uFlowAgainst;`,
     float raised = uBeatRaised * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
     float picked = mv == 6 ? 1.0 : 0.0;
-    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.2 * picked);
+    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.16 * picked);
     float shimmer = 1.0 + 0.38 * uBeat * picked * (1.0 - isLight);
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
