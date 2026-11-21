@@ -9,23 +9,15 @@ import { hashInts } from './rng.js';
 export const KIT_RULES = {
   downs: [
     { id: 'treeline-meadow', every: 900, push: [0, 90], chance: 0.8 },
-    { id: 'orchard-field', every: 1300, push: [0, 120], chance: 0.7 },
-    { id: 'town-edge', every: 2300, push: [0, 60], chance: 0.7 },
-    { id: 'mountain-range', every: 9000, push: [0, 2500], chance: 0.6 },
+    { id: 'town-edge', every: 1900, push: [0, 60], chance: 0.75 },
   ],
-  pinewood: [
-    { id: 'conifer-pasture', every: 700, push: [0, 140], chance: 0.85 },
-    { id: 'mountain-lake', every: 2600, push: [0, 200], chance: 0.6 },
-    { id: 'mountain-range', every: 8000, push: [0, 2000], chance: 0.7 },
-  ],
-  saltflat: [
-    { id: 'mountain-range', every: 6000, push: [0, 3000], chance: 0.8 },
-  ],
+  // Only pieces that were looked at in place are switched on. Tried and left out: 'orchard-field'
+  // in downs and 'conifer-pasture' in pinewood (both read as pasted cut-outs beside the code-made
+  // trees). Not yet tried in place: 'mountain-lake' (pinewood) and 'mountain-range' (saltflat).
+  pinewood: [],
+  saltflat: [],
   nightcity: [],
-  placeholder: [
-    { id: 'conifer-pasture', every: 500, push: [0, 60], chance: 1 },
-    { id: 'mountain-range', every: 7000, push: [0, 1000], chance: 1 },
-  ],
+  placeholder: [],
 };
 
 export function createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl = '/' }) {

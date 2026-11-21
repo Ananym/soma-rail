@@ -33,9 +33,11 @@ import { placeholderBiome } from './placeholder.js';
 import { downsBiome } from './downs.js';
 import { saltflatBiome } from './saltflat.js';
 import { nightcityBiome } from './nightcity.js';
+import { pinewoodBiome } from './pinewood.js';
 
 export const BIOMES = {
   downs: downsBiome,
+  pinewood: pinewoodBiome,
   saltflat: saltflatBiome,
   nightcity: nightcityBiome,
   placeholder: placeholderBiome,

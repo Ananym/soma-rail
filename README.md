@@ -31,14 +31,15 @@ What it does today:
 - **Scenery** is generated ahead of the train in chunks and thrown away behind it. Changes of scenery happen inside tunnels.
 - **Speed** follows the distraction score: fidget and the train brakes; settle and it pulls away.
 - **Music** changes the view. Each SomaFM channel starts in scenery that suits it, a new track queues a tunnel and new scenery, and the audio itself drives small effects.
-- **Photo pieces** made from CC0 photographs stand among the code-made scenery (`soma-rail-app/public/kit/`, credits in its `index.json`).
+- **Four kinds of scenery** are written in code: rolling farmland, pine forest with lakes, salt flat with mesas, and a city at night. Each has a plausible and a dreamlike version.
+- **Photo pieces** made from CC0 photographs stand among the code-made farmland (`soma-rail-app/public/kit/`, credits in its `index.json`).
 
 Tuning parameters, added to the URL after `?view=generated`:
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `level` | from the channel | Surreal level: `0` plausible, `1` dreamlike |
-| `biome` | from the channel | Force one biome |
+| `biome` | from the channel | Force one biome: `downs`, `pinewood`, `saltflat` or `nightcity` |
 | `budget` | `600000` | Total splats; lower it if the view stutters |
 | `kmh` | `100` | Cruising speed |
 | `shutter` | `0.02` | Motion-blur length in seconds |

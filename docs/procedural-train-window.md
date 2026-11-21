@@ -41,8 +41,8 @@ A first draft of the whole pipeline runs behind `?view=generated`; the video is 
 | Renderer | three.js and Spark in a lazy chunk (1.1 MB gzipped) loaded after Start; the main bundle grew by about 4 kB gzipped | `src/window/engine.js` |
 | Camera effects | Motion blur, haze toward the sky colour, time-of-day tint and a "dissolve" effect, patched into Spark's vertex shader with checked anchors | `src/window/sparkPatch.js` |
 | World | Four depth bands built in chunks, generated a few milliseconds per frame; a pure function of seed, band and chunk index | `engine.js`, `layers.js`, `terrain.js` |
-| Scenery | Biomes written in code on a shared prop kit: rolling farmland is finished; pine forest, salt flat and night city are being written | `src/window/biomes/` |
-| Photo pieces | Six sheets made from CC0 photos stand on the terrain among the code-made scenery (9.8 MB) | `kitPieces.js`, `public/kit/`, `scripts/photo-to-splats.mjs` |
+| Scenery | Four biomes written in code on a shared prop kit: rolling farmland, pine forest with lakes, salt flat with mesas, and a city at night. Each has a plausible and a dreamlike version. 640 generator checks pass | `src/window/biomes/`, `scripts/check-biomes.mjs` |
+| Photo pieces | Six sheets made from CC0 photos are shipped (9.8 MB). Two are switched on, in the farmland biome: a woodland edge and a group of houses. Two looked like pasted cut-outs in place and are off; two are untried | `kitPieces.js`, `public/kit/`, `scripts/photo-to-splats.mjs` |
 | Sky | One shader: scattering by sun height, sun, moon, stars, two cloud layers; it also sets the land's haze colour and light | `src/window/sky.js` |
 | Window frame and glass | A rounded frame with a sill, plus grain, a faint reflection and a vignette | `frame.js`, `TrainWindow.vue` |
 | Director | Speed from the distraction score, time of day, two surreal levels, tunnels that hide every change of scenery | `src/window/director.js` |
@@ -70,7 +70,7 @@ Nothing here can judge these; they are the point of the first session with it.
 | Does it hold 60 fps? | The debug readout shows fps and the resolution scale it has fallen back to; try `budget=300000` and `budget=1200000` |
 | Is the blur right? | Compare `shutter=0.01`, `0.02` and `0.04`; `blurKeep` trades streak solidity against thinning |
 | Do chunks pop in or hitch? | Watch the far left edge at full speed; raise `slice` if scenery arrives late, lower it if frames drop when it arrives |
-| Do the photo pieces belong? | Compare `kit=1` with `kit=0`. In a software still, a photo piece stands correctly on the ground but is much sharper than the painterly scenery around it, and its ends are ragged |
+| Do the photo pieces belong? | In the farmland biome, compare `kit=1` with `kit=0`. In software stills the houses are convincing and the woodland edge stands correctly, but both are much sharper than the painterly scenery around them |
 | Is the radio ever silent in the generated view? | Add `audio=0` to turn analysis off, and note the browser: Safari and Firefox are untested |
 | Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there |
 | Does music analysis work in your browser? | The readout shows `energy` moving and, on rhythmic channels, a `bpm`; Safari and Firefox are untested |
@@ -312,7 +312,7 @@ Surveyed on 21 November 2026. Ready-made outdoor splats that are free, downloada
 
 | Route | What it gives | What it needs | Status |
 | --- | --- | --- | --- |
-| Photo plus depth map, turned into a sheet of splats | Photoreal one-sided pieces: tree lines, hillsides, villages | Nothing: CC0 photos, an Apache-licensed depth model, CPU only | Built: `soma-rail-app/scripts/photo-to-splats.mjs` makes a piece in about 20 seconds; six are in the app |
+| Photo plus depth map, turned into a sheet of splats | Photoreal one-sided pieces: tree lines, hillsides, villages | Nothing: CC0 photos, an Apache-licensed depth model, CPU only | Built: `soma-rail-app/scripts/photo-to-splats.mjs` makes a piece in about 20 seconds; six are shipped and two are switched on |
 | SuperSplat gallery ([superspl.at](https://superspl.at)) | About 3,100 downloadable community scenes, many of them outdoor captures | Your free PlayCanvas account; downloads return 401 without one | Not fetched; candidates listed below |
 | Free object generators on Hugging Face | Single props (a tree, a barn) as splats | A few minutes of free GPU quota a day; a free account raises it | Not run |
 
@@ -388,7 +388,7 @@ Hugging Face gives 2 minutes of GPU a day without an account and 5 with a free o
 
 The first risk is aesthetic, not technical: nobody knows yet whether a code-arranged splat world looks good sliding past a window. Spike 1 answers that before anything else is built.
 
-1. **The look.** *Built; needs judging on a real GPU.* One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, a plain window frame, the motion-stretch and haze, speed bound to the distraction score. Build it at two surreal levels. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
+1. **The look.** *Built, for four biomes; needs judging on a real GPU.* One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, a plain window frame, the motion-stretch and haze, speed bound to the distraction score. Build it at two surreal levels. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
    - Pass: a 20-second recording that someone takes for footage at first glance.
    - Also yields the real splat budget on a laptop and a phone, and settles the far-band precision and near-field opacity questions.
 2. **Audio on the other engines.** *The attribute and the fallback are built; the other browsers are untested.* Then run `docs/checks/somafm-audio` by hand in Safari on a Mac, Safari on an iPhone and Firefox. An hour of work, done alongside spike 1.
@@ -396,7 +396,7 @@ The first risk is aesthetic, not technical: nobody knows yet whether a code-arra
    - Pass: memory stays flat and no visible pop over a 30-minute run.
 4. **Reactivity.** *Analysis, channel profiles and track-change tunnels are built; CLAP is not.* Masts on the beat from our own onset tracker, then CLAP scoring against biome descriptions, with channel profiles and track-change transitions as the fallback.
    - Pass: someone listening can tell the scenery belongs to the music without being told how.
-5. **Asset pipeline.** *The photo route is built with six pieces; nothing from SuperSplat or the generators yet.* Build the kit from the routes in "Free splat sources": photo-plus-depth sheets first, then SuperSplat downloads and generated props. Record each piece's licence and attribution. Where nothing is good enough, make the piece in code. Compress them and judge them from the window. Settles what the kit weighs. Nothing is bought.
+5. **Asset pipeline.** *The photo route is built: six pieces made, two in use; nothing from SuperSplat or the generators yet.* Build the kit from the routes in "Free splat sources": photo-plus-depth sheets first, then SuperSplat downloads and generated props. Record each piece's licence and attribution. Where nothing is good enough, make the piece in code. Compress them and judge them from the window. Settles what the kit weighs. Nothing is bought.
 6. **The glass.** *Frame, grain, a faint reflection and a vignette are built.* The finished frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
 
 It ships behind a `?view=generated` flag, with the video as the default until the generated view is clearly better.
