@@ -1,6 +1,6 @@
 # Soma Rail: Procedural Train Window — Design Doc
 
-Draft of 19 November 2026, fact-checked the same day · committed copy of the [living doc](https://claude.ai/artifact/UeqzGYDoiugh3gkaXbHHqP)
+Draft of 19 November 2026, fact-checked the same day, decisions recorded 21 November · committed copy of the [living doc](https://claude.ai/artifact/UeqzGYDoiugh3gkaXbHHqP)
 
 ## Summary
 
@@ -82,18 +82,20 @@ What is free to break, each on a dial from 0 to 1:
 - **Time**: dusk to dawn in two minutes, seasons changing halfway across a field
 - **Logic**: the same station passing three times, each time slightly wrong
 
+The first version ships two or three fixed surreal levels, not free dials. Each level is one setting of all five dials, tuned by eye as a whole, and a channel's profile picks its level.
+
 ## Rendering approaches compared
 
 Gaussian splats are the right primary medium, used two ways at once, with a shader sky and a few meshes around them. No single technique covers both "photoreal" and "endless".
 
 | Approach | Realism | Surreal and reactive | Endless | Cost in the browser | Role here |
 | --- | --- | --- | --- | --- | --- |
-| Splat kit: captured or AI-generated pieces, placed by code | High; inherits the source | Good; any piece can warp or dissolve on the GPU | Arrangement is endless, the set of pieces is finite | Assets streamed per biome. A World Labs scene is 7.6 MB at 500,000 splats and 30 MB at 2 million. | Core of the near and mid bands |
-| Splats written by code from noise fields | Painterly, not photographic | Best; every parameter is ours | Fully | No download; worker time per chunk | Ground, water, far band, all "matter" effects |
+| Splat kit: openly licensed captured pieces, placed by code | High; inherits the source | Good; any piece can warp or dissolve on the GPU | Arrangement is endless, the set of pieces is finite | Assets streamed per biome, roughly 15 MB per million splats as SPZ | Near and mid bands, wherever a good open piece exists |
+| Splats written by code from noise fields | Painterly, not photographic | Best; every parameter is ours | Fully | No download; worker time per chunk | Every gap the kit leaves, plus ground, water, far band, all "matter" effects |
 | Raymarched shader world | High for sky, haze, water, distant terrain; poor for trees and buildings | Best | Fully | No download; heavy per pixel at high resolution | Sky and atmosphere |
 | Mesh scene with instanced props | Reads as a game without a lot of art | Moderate | Fully | Cheapest and most predictable | Rails, carriage, window frame |
 | Diffusion model running in the browser | High per frame | High | Frames do not hold parallax | GB-scale download, seconds per frame (estimate, not checked) | Not in v1 |
-| Worlds generated offline by a world model, shipped as splats | High, and surreal on request | Same as the kit | Bounded scenes, not strips | About $1.26 per world at build time (World Labs standard model); static files at run time | Where kit pieces and set pieces come from |
+| Worlds generated offline by a world model, shipped as splats | High, and surreal on request | Same as the kit | Bounded scenes, not strips | About $1.26 per world at build time (World Labs standard model); static files at run time | Not used: the kit is openly licensed or code-made |
 
 ### Can splats be procedurally generated?
 
@@ -101,7 +103,7 @@ Yes, at two levels, and the two give different looks.
 
 A splat is only a primitive: a position, three scales, a rotation, a colour and an opacity. Nothing requires it to come from a capture. What makes a splat scene photographic is where those numbers came from.
 
-- **Procedural arrangement.** Pieces whose splats came from photos or from a generative model keep their realism when code places, scales and tints them. This is how the view gets its photoreal half.
+- **Procedural arrangement.** Pieces whose splats came from photos keep their realism when code places, scales and tints them. This is how the view gets its photoreal half.
 - **Procedural matter.** Splats emitted by our own functions (scatter them on a noise terrain, colour them from a palette) look painterly, soft-edged and slightly unstable. That look is the surreal half, and it costs no download.
 
 Spark, the three.js splat renderer from World Labs, supports both, and both are confirmed by a running test:
@@ -127,7 +129,7 @@ How the blur is actually done differs from the first draft, which proposed a dyn
 
 ### On "inside out"
 
-I read this as a scene built to be seen from within rather than orbited. The side window is the extreme case: every object is seen from one side, across a narrow range of angles. That lets us go further than inside-out capture and use one-sided pieces, such as an image plus a depth map turned into a sheet of splats. Flagged under open questions in case you meant something else.
+I read this as a scene built to be seen from within rather than orbited. The side window is the extreme case: every object is seen from one side, across a narrow range of angles. That lets us go further than inside-out capture and use one-sided pieces, such as an image plus a depth map turned into a sheet of splats. Confirmed as the intended meaning on 21 November.
 
 ## Recommended architecture
 
@@ -139,12 +141,14 @@ Read top to bottom: the director is the only thing the inputs touch, and it talk
 
 The decisions that shape everything else:
 
-- **Splats are the common currency.** Kit pieces, code-made terrain and offline-generated set pieces all arrive as splats, so one set of GPU modifiers gives them the same haze, blur and warps.
-- **Chunks are a pure function of seed and index.** No world state is stored. A journey can be resumed, shared as a seed, and regenerated identically.
+- **Splats are the common currency.** Kit pieces and code-made terrain both arrive as splats, so one set of GPU modifiers gives them the same haze, blur and warps.
+- **Chunks are a pure function of seed, index and director state.** No world state is stored. The music sets the seed, so there is no share link in the first version; determinism is kept for resuming and debugging, and leaves sharing open later.
 - **Scene changes happen out of sight.** A tunnel, a cutting, a passing freight train or a bank of fog covers each swap of biome or asset set. These are the natural cuts of a train journey.
 - **Speed is the one fast coupling.** The world advances by speed times frame time, and the blur stretch uses the same number. Distraction lowers speed; nothing else needs to know.
 - **The camera stays at the origin.** The world scrolls past it and chunks are rebased, which avoids float precision trouble on a journey with no end.
 - **It slots in where the video was.** A `TrainWindow.vue` takes the same props as `VideoPlayer.vue`, and the renderer is imported after the Start click.
+
+The window frame is part of the picture. The view is framed by a visible carriage window, drawn as a mesh in front of the glass. It sets the composition, so it is there from spike 1.
 
 Two Spark details bear on these decisions:
 
@@ -243,8 +247,10 @@ WebGPU coverage is still uneven:
 | Splats in view | 1.5 million desktop, 750 thousand phones | My starting point. Spark's own defaults are 2.5 million desktop, 1.5 million iOS and 1 million Android, but our splats are all regenerated every frame, which Spark says becomes a bottleneck near 1 million on some systems. Spike 1 measures it. |
 | Chunk build time | Under 50 ms in the worker | A 200 m chunk is needed every 7 s at 100 km/h. The test built 150,000 splats in 68 ms on the main thread. |
 | First view | Under 5 s on broadband | Open on a code-made biome that needs no assets; stream kit pieces behind it. Spark adds 1.0 MB gzipped. |
-| Assets per biome | 30 MB or less | Four World Labs pieces at 500,000 splats each. Decides whether Pages is enough. |
+| Assets per biome | 30 MB or less | About 2 million splats of open-licence pieces as SPZ, at the 15 MB per million measured on World Labs' example files. Keeps several biomes inside GitHub Pages. |
 | Render resolution | Scale down to hold frame rate | Blur and haze hide a lower internal resolution well |
+
+Phones are best effort. The view is built and tuned on desktop, where the mouse-driven distraction mechanic already lives; on phones it lowers resolution and splat count, and music reactivity on iPhone is not promised.
 
 What needs watching:
 
@@ -259,7 +265,7 @@ What needs watching:
 
 The first risk is aesthetic, not technical: nobody knows yet whether a code-arranged splat world looks good sliding past a window. Spike 1 answers that before anything else is built.
 
-1. **The look.** One biome in three.js and Spark: code-made ground, five to ten free splat pieces scattered along it, a shader sky, the motion-stretch and haze, speed bound to the distraction score. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
+1. **The look.** One biome in three.js and Spark: code-made ground, five to ten openly licensed splat pieces scattered along it, a shader sky, a plain window frame, the motion-stretch and haze, speed bound to the distraction score. Build it at two surreal levels. Start from `docs/checks/spark-smoke`, which already has the scroll, haze and blur working.
    - Pass: a 20-second recording that someone takes for footage at first glance.
    - Also yields the real splat budget on a laptop and a phone, and settles the far-band precision and near-field opacity questions.
 2. **Audio on the other engines.** Add `crossorigin="anonymous"` with the retry-without-it fallback, then run `docs/checks/somafm-audio` by hand in Safari on a Mac, Safari on an iPhone and Firefox. An hour of work, done alongside spike 1.
@@ -267,32 +273,36 @@ The first risk is aesthetic, not technical: nobody knows yet whether a code-arra
    - Pass: memory stays flat and no visible pop over a 30-minute run.
 4. **Reactivity.** Masts on the beat from our own onset tracker, then CLAP scoring against biome descriptions, with channel profiles and track-change transitions as the fallback.
    - Pass: someone listening can tell the scenery belongs to the music without being told how.
-5. **Asset pipeline.** Produce a handful of pieces two ways, from a world model and from an image plus depth map, then compress them and judge them from the window. Settles asset size, cost and hosting.
-6. **The glass.** Frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
+5. **Asset pipeline.** Find openly licensed splat captures and record each licence. Where none is good enough, make the piece in code or from an openly licensed photo plus a depth map. Compress them and judge them from the window. Settles which open sources are usable and what the kit weighs.
+6. **The glass.** The finished frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
 
 Ship behind a `?view=generated` flag, with the video as the default until the generated view is clearly better.
 
-## Open questions
+## Decisions and open questions
 
-Answered by the checks:
+Decided on 21 November 2026:
+
+| Question | Decision | What it changes |
+| --- | --- | --- |
+| What "inside out" meant | A scene built to be seen from within | One-sided pieces are fair game |
+| Default surreal level | Two or three distinct levels in the first pass | Tune whole presets, not five free dials |
+| Carriage | Window frame visible | A frame mesh from spike 1; the view is no longer full-bleed |
+| Phones | Best effort | Desktop sets the budgets; iPhone audio is not on the critical path |
+| Assets | Openly licensed where available, code-made to fill gaps or where the open options are poor | No AI-generated assets, so no World Labs cost or terms question |
+| Hosting | Stay static on GitHub Pages for now | Revisit only if traffic nears 100 GB a month |
+| Seed or music | Music leads; no shared journeys | No seed in the URL in the first version |
+
+Answered earlier by the checks:
 
 - [x] Does SomaFM send CORS headers on its streams? Yes, on every server and format tested. No relay and no request to SomaFM is needed.
 - [x] Is a backend needed for audio? No.
 - [x] Should a copy of this doc live in the repo under `docs/`? Yes: this file.
 
-Still yours to decide, with what the checks add:
-
-- [ ] What did "inside out" mean to you? I took it as a scene built to be seen from within.
-- [ ] Are AI-generated assets acceptable? World Labs' API costs about $1.26 a world, and paying users own the output and may distribute it commercially. One clause in its terms, against storing API responses "beyond the duration specified in Documentation", is unclear for self-hosted files; I would ask them before shipping.
-- [ ] Must the app stay purely static? It can for now: audio needs no server and GitHub Pages covers a few biomes. The question returns only if traffic passes about 100 GB a month.
-- [ ] Are phones a first-class target or best effort? Spark's own phone budgets are healthy. The risk on iPhone is audio analysis, not rendering.
-- [ ] How surreal is the default? Two or three reference films or images would pin this down faster than any description.
-- [ ] Should the carriage be visible (window frame, interior reflections), or is the view full-bleed as it is now?
-- [ ] Should a journey be shareable as a seed in the URL? It conflicts with seeding scenery from the track: a shared seed only replays the same journey if the music is ignored. One of the two has to win.
-
-New, raised by the checks:
+Still open:
 
 - [ ] Does audio analysis work in Safari, on iOS and in Firefox? Spike 2.
+- [ ] Which openly licensed splat sources exist, and are they good enough from a train window? Not researched yet; spike 5.
+- [ ] What are the surreal levels called, and can the listener switch between them? Spike 1 proposes them.
 
 ## Sources
 
