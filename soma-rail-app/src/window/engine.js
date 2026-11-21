@@ -393,6 +393,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     kitInstances() { return kit ? kit.instances() : []; },   // for the harness and tuning
     biomeNames() { return Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1); },
     setAudioProvider(fn) { audioProvider = fn; },
+    sky,   // for scripts (sky._debug)
     stats() {
       let splats = 0, pending = 0;
       for (const ch of chunks.values()) { if (ch.done) splats += ch.count(); else pending++; }

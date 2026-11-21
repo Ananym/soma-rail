@@ -297,7 +297,7 @@ void main() {
         // its dot, which is what shows.
         float tw = 1.0 + uTwinkle * (0.3 + 0.35 * (1.0 - smoothstep(0.05, 0.35, dir.y))) * sin(uTwT * (2.0 + 7.0 * hash12(ci + 41.0)) + 6.2832 * hash12(ci + 43.0));
         float flare = uStarBeat * step(0.66, fract(hash12(ci + 47.0) + uBeatSeq * 0.382));
-        col += sc * b * tw * (1.0 + 2.6 * flare) * exp(-dd * dd * 2.2 / (1.0 + 0.9 * flare)) * uStars * ext.g * moonMask;
+        col += sc * b * tw * (1.0 + 2.6 * flare) * exp(-dd * dd * 2.2 / (1.0 + 0.6 * flare)) * uStars * ext.g * moonMask;
       }
       // a second, finer field of faint stars for a dark-sky site, thicker in the Milky Way
       if (uDeep > 0.003) {
@@ -475,7 +475,7 @@ export function createSky(THREE) {
 
   const AMB = 2.5;         // weight of sky light against direct light on the land
   let lastTravelled = null;
-  let lastBeat = 0, beatSeq = 0, meteorT = -1, meteorWait = 0;
+  let lastBeat = 0, beatSeq = 0, meteorT = -1, meteorWait = 0, meteorPin = null;
   // A meteor starts somewhere in the upper part of the window and falls 10 to 18 degrees on a slant.
   function startMeteor(aspect, shift) {
     const th = U.uTanHalf.value, r = Math.random;
@@ -572,6 +572,7 @@ export function createSky(THREE) {
     meteorWait -= dt;
     if (twinkle > 0 && moving && meteorT < 0 && meteorWait <= -40 && Math.random() < dt / 30) startMeteor(aspect, shift);   // and without music, one every minute or so
     if (meteorT >= 0) { meteorT += dt / 0.75; if (meteorT >= 1) meteorT = -1; }
+    if (meteorPin != null) meteorT = meteorPin;   // screenshots only
     U.uMeteorT.value = meteorT;
     U.uStarThresh.value = 0.86 - 0.05 * (skyHint.deep || 0);
     U.uMilky.value = skyHint.milkyWay || 0;
@@ -643,6 +644,7 @@ export function createSky(THREE) {
   update({ hour: 12, level: 0, dials: {}, time: 0, dt: 0, aspect: 16 / 9, fovDeg: 50, travelled: 0, energy: 0 });
   const sky = { object3d, update, horizonColor, hazeHighColor, lightTint, sunDir };
   // for scripts/check-sky.mjs only; not enumerable, so the interface stays the five fields above
-  Object.defineProperty(sky, '_debug', { value: { skyBaseJS, uniforms }, enumerable: false });
+  // _debug.meteor(t) starts a meteor and holds it at t (0..1) for a screenshot
+  Object.defineProperty(sky, '_debug', { value: { skyBaseJS, uniforms, meteor: (t) => { startMeteor(U.uAspect.value, U.uShift.value); meteorPin = t; } }, enumerable: false });
   return sky;
 }

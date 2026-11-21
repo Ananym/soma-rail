@@ -98,8 +98,8 @@ uniform vec3 uFlowAgainst;`,
             float k = min(uMove, 1.0);
             rgba.rgb = mix(rgba.rgb, lamp, k);
             rgba.a = mix(rgba.a, present * min(1.0, sum), k);
-            scales.x *= mix(1.0, 0.6, k);
-            scales.yz *= mix(1.0, 0.7 + 0.8 * head + 0.3 * tail, k);
+            scales.x *= mix(1.0, 0.4 + 0.6 * beam / max(sum, 0.001), k);    // lamps are points, the beam a streak
+            scales.yz *= mix(1.0, 0.9 + 1.0 * head + 0.5 * tail, k);
         } else if (mv == 5) {
             // Vapour (plumes, mist, cloud streamers): a slow billow, each splat on its own phase.
             float sz = max(scales.x, max(scales.y, scales.z));
