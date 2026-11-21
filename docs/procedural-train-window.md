@@ -38,7 +38,7 @@ The whole pipeline runs as the app's only view; the YouTube player was removed o
 | Part | State | Where |
 | --- | --- | --- |
 | Starting and failing | The view starts from the bare URL. Without WebGL2 a short notice takes its place and the radio plays on. An end-to-end check covers both, and fails if anything is requested from YouTube | `App.vue`, `TrainWindow.vue`, `scripts/app-check.cjs` |
-| Idling | A stopped train is redrawn twice a second, generates nothing and pauses the film grain; a hidden tab is not drawn at all | `engine.js`, `TrainWindow.vue` |
+| Idling | A stopped train is redrawn twice a second, generates nothing, pauses the film grain and rests the clock and the music's effects, so the picture stands still; a hidden tab is not drawn at all. Checked through the app with `IDLE=1 ONLY=tuned node scripts/app-check.cjs` | `engine.js`, `TrainWindow.vue` |
 | Hitch meter | The debug readout counts frames over 25 ms in the last 10 seconds and says what the worst one spent its time on (generating, rendering, or neither, which points at the GPU) | `engine.js`, `TrainWindow.vue` |
 | Renderer | three.js and Spark in a lazy chunk (1.2 MB gzipped) loaded after Start; the main bundle grew by about 4 kB gzipped | `src/window/engine.js` |
 | Camera effects | Motion blur, haze toward the sky colour, time-of-day tint and a "dissolve" effect, patched into Spark's vertex shader with checked anchors | `src/window/sparkPatch.js` |
