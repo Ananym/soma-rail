@@ -114,6 +114,9 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   let tanHalfHfov = 1;
   const chunks = new Map();     // key `${layer}:${index}` -> chunk
   let epoch = 0;                // bumps on every rebuild; stale chunks are dropped
+  // Mast spacing follows the music's tempo, but it is fixed for each world: masts and wires only
+  // meet at chunk borders if every chunk agrees on the spacing.
+  let worldBeat = S.beatMetres;
 
   const tmp = { c: new THREE.Vector3(), s: new THREE.Vector3(), q: new THREE.Quaternion(), col: new THREE.Color() };
 
@@ -129,7 +132,8 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const ctx = {
       rng: makeRng(hashInts(S.seed, layer.name.length * 131 + layer.name.charCodeAt(0), index)),
       x0, length: layer.chunkLen, zNear: layer.zNear, zFar: layer.zFar, count, index,
-      terrain, palette: biome.palette, dials: S.dials, level: S.level, beatMetres: S.beatMetres, layer: layer.name,
+      terrain, palette: biome.palette, dials: S.dials, level: S.level, beatMetres: worldBeat, layer: layer.name,
+      seed: S.seed, hour: S.hour,
     };
     const gen = (biome.generators[layer.name] || biome.generators.near)(ctx, emit);
     const chunk = { layer, index, x0, packed, gen, mesh: null, done: false, epoch, count: () => n };
@@ -184,6 +188,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     biome = getBiome(S.biome);
     terrain = makeTerrain(S.seed, biome.terrain);
     setUnderlay(biome);
+    worldBeat = S.beatMetres;
     if (kit) kit.reset();
     rebuilding = true;
   }
