@@ -1,5 +1,5 @@
 <template>
-  <div class="window-container" :class="{ hidden: !visible || !ready }">
+  <div class="window-container" :class="{ hidden: !visible || !ready, still: rate === 0 }">
     <canvas ref="canvasEl"></canvas>
     <!-- The glass and camera, first pass: grain, a faint interior reflection and a vignette. -->
     <div class="grain"></div>
@@ -10,7 +10,7 @@
 </template>
 
 <script setup>
-// The generated train window: a drop-in for VideoPlayer.vue behind ?view=generated.
+// The train window: the view out of the carriage, generated in the browser.
 // The heavy renderer (three.js + Spark) is imported only when play() is called, after the Start click.
 import { ref, watch, onUnmounted } from 'vue';
 import { readParams } from '../window/params';
@@ -18,10 +18,9 @@ import { getProfile } from '../window/profiles';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  // Accepted so this is a drop-in for VideoPlayer, but not drawn: here distraction does not fade
-  // the picture to black, it brakes the train (see `rate`), and the view sharpens as it stops.
-  distractionScore: { type: Number, default: 0 },
-  rate: { type: Number, default: 1 },            // 0..1 train speed from the distraction mechanic
+  // 0..1 train speed from the distraction mechanic: distraction brakes the train, and the view
+  // sharpens as it stops. Nothing fades to black.
+  rate: { type: Number, default: 1 },
   audioElement: { type: Object, default: null },
   audioCors: { type: Boolean, default: false },   // true when the stream was loaded with CORS, so it can be analysed
   channel: { type: Object, default: null },
@@ -111,9 +110,12 @@ function readout(s) {
     if (!what.length) what.push('new scenery');
     lines.push(s.next.phase === 'approach' ? `  ${what.join(', ')} at the tunnel ahead` : `  in the tunnel: ${what.join(', ')}`);
   }
-  lines.push(`scenery: ${s.biome}   time: ${hh}:${mm} (${s.slot || 'pinned'})   ${s.kmh} km/h`);
+  lines.push(`scenery: ${s.biome}   time: ${hh}:${mm} (${s.slot || 'pinned'})   ${s.kmh} km/h${s.idle ? '   IDLE: stopped, drawing 2 frames a second' : ''}`);
   lines.push(`${s.fps} fps   ${Math.round(s.splats / 1000)}k splats   resolution x${s.resScale}   photo pieces ${s.photos}`);
   lines.push(s.audio ? `music: energy ${s.energy}   beat ${'#'.repeat(Math.round(s.beat * 8)).padEnd(8, '.')}   sparkle ${s.sparkle}\n       ${s.bpm ? s.bpm + ' bpm' : 'no tempo lock'}   masts every ${s.mast} m   dissolve ${s.dissolve}` : 'music: not analysed');
+  // hitch meter: frames slower than 25 ms in the last 10 s, and the worst recent one with its likely cause
+  const w = s.worst;
+  lines.push(`hitches (10 s): ${s.hitches}   worst frame: ${w.ms} ms` + (w.ms > 25 ? ` = generate ${w.gen} + render ${w.render} + other ${Math.max(0, w.cpu - w.gen - w.render)} ms on the main thread${w.ms - w.cpu > 8 ? `, ${w.ms - w.cpu} ms elsewhere (GPU or browser)` : ''}${w.note ? '; ' + w.note : ''}` : ''));
   if (!s.patched) lines.push('WARNING: shader patch not applied (no blur or haze)');
   return lines.join('\n');
 }
@@ -252,6 +254,11 @@ canvas {
 
 @media (prefers-reduced-motion: reduce) {
   .grain { animation: none; }
+}
+
+/* a stopped train: nothing on the page should keep animating */
+.window-container.still .grain {
+  animation-play-state: paused;
 }
 
 /* Lens vignette. Droplets and dirt on the glass are still to do. */

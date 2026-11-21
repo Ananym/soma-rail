@@ -1,6 +1,5 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue';
-import VideoPlayer from './components/VideoPlayer.vue';
 import TrainWindow from './components/TrainWindow.vue';
 import AudioPlayer from './components/AudioPlayer.vue';
 import ChannelSelector from './components/ChannelSelector.vue';
@@ -10,7 +9,7 @@ import { useSomaFM } from './composables/useSomaFM';
 import { useInteraction } from './composables/useInteraction';
 import { usePlaybackControl } from './composables/usePlaybackControl';
 import { useLocalStorage } from './composables/useLocalStorage';
-import { wantsGeneratedView, readParams } from './window/params';
+import { readParams, audioWanted } from './window/params';
 
 // Soma FM integration
 const {
@@ -38,7 +37,6 @@ const {
   playbackRate,
   volumeMultiplier,
   baseVolume,
-  setYoutubePlayer,
   setAudioElement
 } = usePlaybackControl(distractionScore);
 
@@ -50,20 +48,18 @@ const savedVolume = useLocalStorage('volume', 0.7);
 baseVolume.value = savedVolume.value;
 
 // Refs
-const videoPlayerRef = ref(null);
+const windowRef = ref(null);
 const audioPlayerRef = ref(null);
 const audioElement = ref(null);
 const hasStarted = ref(false);
 
-// The generated train window is opt-in with ?view=generated; the video stays the default.
-// If the generated view cannot start, we fall back to the video.
-const useGenerated = ref(wantsGeneratedView());
-
-// The generated view analyses the music, which needs the stream loaded with CORS. Only then do we
-// touch the audio path; if CORS loading fails we remount a plain audio element and carry on.
-const audioCors = ref(useGenerated.value && readParams().audio !== 0);
+// The train window analyses the music, which needs the stream loaded with CORS and routed through
+// Web Audio. That is on where it is proven (see audioWanted); if CORS loading fails we remount a
+// plain audio element and carry on without analysis.
+const audioCors = ref(audioWanted(readParams()));
+// Set if the train window cannot start (no WebGL2, or its code failed to load).
+const viewFailed = ref(false);
 const audioKey = ref(0);
-const fellBack = ref(false);
 function handleCorsFailed() {
   console.warn('Stream refused CORS loading; continuing without music analysis');
   audioCors.value = false;
@@ -95,19 +91,10 @@ async function handleChannelSelect(channelId) {
   savedChannelId.value = channelId;
 }
 
-// Handle YouTube player ready
-function handlePlayerReady(player) {
-  setYoutubePlayer(player);
-  // If we fell back from the generated view after Start, the video has to be started here.
-  if (hasStarted.value && videoPlayerRef.value) videoPlayerRef.value.play();
-}
-
-// The generated view could not start (no WebGL2, or it failed to load): show the video instead.
+// The train window could not start: the radio plays on, and a notice says why there is no view.
 function handleWindowFailed(err) {
-  console.warn('Generated view unavailable, falling back to video:', err);
-  useGenerated.value = false;
-  fellBack.value = true;
-  // The audio element is left alone: it is already playing, and replacing it mid-start would stop it.
+  console.warn('Train window unavailable:', err);
+  viewFailed.value = true;
 }
 
 // Handle audio element ready
@@ -121,8 +108,6 @@ function handleStarted() {
   hasStarted.value = true;
   // Reset grace period to ignore residual mouse movement from the click
   resetGracePeriod();
-  // After a fallback the video player may have become ready before playback started.
-  if (fellBack.value && videoPlayerRef.value) videoPlayerRef.value.play();
 }
 
 // Watch volume changes and save to localStorage
@@ -141,10 +126,9 @@ onMounted(() => {
 <template>
   <div class="app">
     <TrainWindow
-      v-if="useGenerated"
-      ref="videoPlayerRef"
+      v-if="!viewFailed"
+      ref="windowRef"
       :visible="hasStarted"
-      :distraction-score="distractionScore"
       :rate="playbackRate"
       :audio-element="audioElement"
       :audio-cors="audioCors"
@@ -152,13 +136,10 @@ onMounted(() => {
       :song="currentSong"
       @failed="handleWindowFailed"
     />
-    <VideoPlayer
-      v-else
-      ref="videoPlayerRef"
-      :visible="hasStarted"
-      :distraction-score="distractionScore"
-      @player-ready="handlePlayerReady"
-    />
+    <div v-else class="no-view">
+      <p>The train window needs WebGL2, which this browser does not provide.</p>
+      <p>The radio plays on.</p>
+    </div>
 
     <AudioPlayer
       :key="audioKey"
@@ -173,7 +154,7 @@ onMounted(() => {
 
     <StartButton
       :audio-element="audioElement"
-      :video-player="videoPlayerRef"
+      :view="windowRef"
       @started="handleStarted"
     />
 
@@ -200,6 +181,20 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.no-view {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  padding: 2em;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.6);
+  background: radial-gradient(ellipse at 50% 70%, #1b2530 0%, #05070a 70%);
+}
+
 .app {
   width: 100vw;
   height: 100vh;

@@ -14,8 +14,9 @@
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     towers of impossible height and thinness rising into the sky
-//   topology  towers floating clear of the valley with roots of rock and trailing vegetation; the
-//             river lifting off the ground and running level through the air between two ranks
+//   topology  towers floating clear of the valley with roots of rock and trailing vegetation
+//             (a river running level through the air was tried and removed: from the train it
+//             read as a flat grey slab, not as water)
 //   logic     the same pagoda on the same mound repeating along the line, each copy slightly wrong
 import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
 import {
@@ -1653,7 +1654,7 @@ function* mid(ctx, emit) {
     }
   }
   if ((dz.logic || 0) > 0) yield* repeatingPagoda(ctx, out, W, dz.logic);
-  if ((dz.topology || 0) > 0) { yield* floatingTowers(ctx, out, W, 1700, 800, 2600, dz.topology, 1); yield* skyRiver(ctx, out, W, dz.topology); }
+  if ((dz.topology || 0) > 0) yield* floatingTowers(ctx, out, W, 1700, 800, 2600, dz.topology, 1);
   if ((dz.scale || 0) > 0) yield* needles(ctx, out, W, 2100, 900, 2800, dz.scale, 1);
   yield* mistBands(ctx, out, W, ctx.zNear, 2400, 160, 130, 26, 0.3);
   yield* fillSurface(ctx, out, W, { power: 1.2, cover: 3, maxR: 0.05 });
@@ -1746,43 +1747,6 @@ function* floatingTowers(ctx, out, W, cell, dLo, dHi, amount, salt) {
       const rr = R * 1.1;
       const c = jitter(mix3(C.veg, C.vegLit, r()), r, 0.1);
       out(wx + Math.sin(a) * rr - ctx.x0, y - len * 0.5, -(d - Math.cos(a) * rr), Math.max(0.8, R * 0.03), len * 0.5, Math.max(0.8, R * 0.03), c[0], c[1], c[2], 0.9, 0, 0, 0, 1, KIND.SURREAL);
-      if (out.due()) yield;
-    }
-  }
-}
-
-// Topology: the river lifts off the ground and runs level through the air between two ranks: a
-// broad ribbon of water seen from below, its near edge a pale lip, its underside dark with the
-// valley's green, threads of water falling from it here and there.
-function* skyRiver(ctx, out, W, amount) {
-  const Pc = 400;
-  const lo = 0.62 - amount * 0.25;
-  for (const { i, wx0 } of cellsAround(ctx, Pc, 0)) {
-    if (noise1(wx0 / 6000, W.ws + 1421) < lo - 0.02 && noise1((wx0 + Pc) / 6000, W.ws + 1421) < lo - 0.02) continue;
-    const r = worldRng(ctx, 1422, i);
-    const st = Math.max(1.5, detail(out, 550, 2.2));
-    for (let x = wx0 + st / 2; x < wx0 + Pc; x += st) {
-      const fade = smooth(lo, lo + 0.08, noise1(x / 6000, W.ws + 1421));
-      const dc = 560 + 110 * noise1(x / 2200, W.ws + 1423), wd = 230 * fade;
-      const y = (90 + 25 * noise1(x / 1500, W.ws + 1424)) * amount;
-      if (wd < 6) continue;
-      // the near edge: a pale lip of water, streaked
-      for (let k = 0; k < 4; k++) {
-        const c = jitter(mix3(C.river, C.riverStreak, noise2(x / 40, k, W.ws + 1425)), r, 0.03);
-        out(x - ctx.x0, y - k * 0.9, -(dc - wd / 2), st * 0.7, 0.6, 0.5, c[0], c[1], c[2], 0.95, 0, 0, 0, 1, KIND.SURREAL);
-      }
-      // the underside, seen from below
-      const rows = 7;
-      for (let k = 0; k < rows; k++) {
-        const dd = dc - wd / 2 + (k + 0.5) * wd / rows;
-        let c = mix3([0.3, 0.38, 0.35], C.riverDeep, 0.3 + 0.4 * noise2(x / 60, dd / 30, W.ws + 1426));
-        c = jitter(c, r, 0.04);
-        out(x - ctx.x0, y - 3.2, -dd, st * 0.7, 0.3, wd / rows * 0.65, c[0], c[1], c[2], 0.95, 0, 0, 0, 1, KIND.SURREAL);
-      }
-      // now and then a thread of water falling toward the valley, fading as it goes
-      if (r() < 0.02 * fade) {
-        for (let h = 3; h < y; h += 3) out(x - ctx.x0, y - h, -(dc - wd / 2), 0.6, 1.8, 0.4, C.riverStreak[0], C.riverStreak[1], C.riverStreak[2], 0.45 * (1 - h / y), 0, 0, 0, 1, KIND.SURREAL);
-      }
       if (out.due()) yield;
     }
   }

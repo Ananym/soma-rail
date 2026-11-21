@@ -1,8 +1,8 @@
 // End-to-end smoke check of the built app in headless Chromium.
 //   npm run build && node scripts/app-check.cjs [out-dir]
-// Runs four cases, clicking Start in each: the default video view, the generated view (with music
-// analysis live), the generated view without WebGL2 (must fall back to the video) and the generated
-// view with streams refusing CORS (must keep playing, without analysis).
+// Runs four cases, clicking Start in each: the plain address, the same with tuning parameters (and a
+// check that distraction brakes the train), a browser without WebGL2 (a notice, radio still playing)
+// and streams refusing CORS (must keep playing, without analysis). No case may contact YouTube.
 // It talks to the real SomaFM servers, so it needs network access (HTTPS_PROXY is honoured).
 // Headless Chromium renders in software here: this checks wiring, never frame rate or looks.
 const path = require('path');
@@ -19,15 +19,18 @@ const outDir = process.argv[2] || '.';
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
   });
   let failed = false;
-  const GEN = '?view=generated&debug=1&budget=120000&seed=check';
+  const Q = '?debug=1&budget=120000&seed=check';
   const cases = [
-    { name: 'video', query: '', wait: 4000, expect: 'video' },
-    { name: 'generated', query: GEN, wait: 20000, expect: 'generated', tap: true, distraction: true },
-    // No WebGL2: the generated view must hand over to the video without disturbing the radio.
-    { name: 'no-webgl2', query: GEN, wait: 8000, expect: 'video',
+    // The plain address, as a visitor arrives: the train window, with music analysis live.
+    // (At the full default splat budget a software renderer draws too slowly for the analysis to
+    // settle, so this case only requires that the radio is attached and its audio context running.)
+    { name: 'default', query: '', wait: 20000, expect: 'window', tap: 'attached' },
+    { name: 'tuned', query: Q, wait: 20000, expect: 'window', tap: true, distraction: true },
+    // No WebGL2: a notice instead of the view, and the radio plays on.
+    { name: 'no-webgl2', query: Q, wait: 8000, expect: 'notice',
       init: () => { const orig = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (type, ...rest) { return type === 'webgl2' ? null : orig.call(this, type, ...rest); }; } },
     // Streams refuse CORS requests: the audio element must be remounted without CORS and still play.
-    { name: 'cors-refused', query: GEN, wait: 20000, expect: 'generated', tap: false, settle: 12000,
+    { name: 'cors-refused', query: Q, wait: 20000, expect: 'window', tap: false, settle: 12000, noisy: true,
       route: async (page) => page.route(/ice\d\.somafm\.com/, async (route) => { const h = await route.request().allHeaders(); return h.origin ? route.abort() : route.continue(); }) },
   ];
   for (const c of cases) {
@@ -39,6 +42,8 @@ const outDir = process.argv[2] || '.';
     const errors = [];
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 240)); });
     page.on('pageerror', (e) => errors.push('pageerror: ' + String(e).slice(0, 240)));
+    const youtube = [];
+    page.on('request', (r) => { if (/youtube|ytimg|googlevideo/i.test(r.url())) youtube.push(r.url()); });
     await page.goto(`http://127.0.0.1:${port}/${c.query}`);
     await page.waitForSelector('.start-overlay', { timeout: 30000 });
     await page.waitForFunction(() => { const a = document.querySelector('audio'); return a && a.src; }, null, { timeout: 30000 });
@@ -52,8 +57,7 @@ const outDir = process.argv[2] || '.';
         startGone: !document.querySelector('.start-overlay'),
         hasCanvas: !!document.querySelector('.window-container canvas'),
         windowHidden: !!document.querySelector('.window-container.hidden'),
-        hasVideo: !!document.querySelector('.video-container'),
-        videoHidden: !!document.querySelector('.video-container.hidden'),
+        notice: !!document.querySelector('.no-view'),
         engine: window.__trainWindow ? window.__trainWindow.stats() : null,
         tap: window.__trainWindowAudio ? window.__trainWindowAudio() : null,
       };
@@ -74,16 +78,17 @@ const outDir = process.argv[2] || '.';
       brake = { rateBefore: +before.toFixed(2), rateAfterBlur: +after.toFixed(2), overlay, ok: after < before - 0.03 && !overlay };
     }
     await page.screenshot({ path: path.join(outDir, `app-${name}.png`), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
-    // YouTube's embed logs its own noise, and the cases that break things on purpose log theirs.
-    const ours = errors.filter((e) => !/youtube|googlevideo|doubleclick|ERR_BLOCKED|net::ERR|Permissions policy|Failed to load resource|Audio error|server attempts/i.test(e));
+    // Only the case that breaks the streams on purpose may log load failures.
+    const ours = c.noisy ? errors.filter((e) => !/Failed to load resource|net::ERR|Audio error|server attempts/i.test(e)) : errors;
+    if (youtube.length) ours.push(`requests to YouTube hosts: ${youtube.length}`);
     console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log('brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }
     const audioOk = state.audio && !state.audio.paused && state.audio.time > 0.5;
-    const viewOk = c.expect === 'video'
-      ? state.hasVideo && !state.videoHidden && !state.hasCanvas
-      : state.hasCanvas && !state.windowHidden && state.engine && state.engine.splats > 0;
+    const viewOk = c.expect === 'notice'
+      ? state.notice && !state.hasCanvas
+      : state.hasCanvas && !state.windowHidden && !state.notice && state.engine && state.engine.splats > 0;
     const tapOk = c.tap === undefined ? true
-      : c.tap ? !!(state.tap && state.tap.active && state.tap.context === 'running' && state.audio.crossOrigin === 'anonymous')
+      : c.tap ? !!(state.tap && (c.tap === 'attached' || state.tap.active) && state.tap.context === 'running' && state.audio.crossOrigin === 'anonymous')
         : !state.tap && state.audio.crossOrigin === null;
     const ok = state.startGone && audioOk && viewOk && tapOk && !ours.length && (!brake || brake.ok);
     console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk})`); if (!ok) failed = true;

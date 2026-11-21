@@ -9,8 +9,10 @@ const NUM = {
   fov: 50,           // vertical field of view, degrees
   scale: 1,          // resolution scale cap (the engine lowers it further to hold frame rate)
   slice: 5,          // ms of chunk generation allowed per frame
+  sortMs: 0,         // least time between splat sorts, ms (0 = every frame). Depth order barely changes for
+                     // this camera, so a value such as 100 may cut per-frame stalls; untested on a real GPU
   hour: -1,          // fixed time of day 0..24, or -1 to let it run
-  audio: 1,          // 0 disables audio analysis
+  audio: -1,         // music analysis: 1 on, 0 off, -1 automatic (off in Safari and on iOS, see audioWanted)
   frame: 1,          // 0 hides the window frame
   kit: 1,            // 0 leaves out the photo pieces (code-made scenery only)
   gold: 1,           // strength of the warm grade on the land when the sun is low (0 = off)
@@ -34,6 +36,16 @@ export function readParams(search = (typeof location !== 'undefined' ? location.
   return p;
 }
 
-export function wantsGeneratedView(search = (typeof location !== 'undefined' ? location.search : '')) {
-  return new URLSearchParams(search).get('view') === 'generated';
+// Should the radio be routed through Web Audio for analysis? Once it is, the listener hears it only
+// through that audio context. That is proven in Chromium; WebKit has a long-standing bug with
+// analysing live streams, and it is untested there, so in Safari and on iOS (where every browser is
+// WebKit) analysis stays off unless the URL asks for it with audio=1.
+export function audioWanted(params, nav = (typeof navigator !== 'undefined' ? navigator : null)) {
+  if (params.audio === 0) return false;
+  if (params.audio === 1) return true;
+  if (!nav) return false;
+  const ua = nav.userAgent || '';
+  const ios = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && nav.maxTouchPoints > 1);
+  const safari = /AppleWebKit/.test(ua) && !/Chrome|Chromium|Edg\/|OPR\/|Android/.test(ua);
+  return !(ios || safari);
 }

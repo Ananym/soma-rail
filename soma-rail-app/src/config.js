@@ -6,5 +6,4 @@ export const CONFIG = {
   UI_FADE_DELAY: 3000,              // ms of inactivity before UI fades
   METADATA_POLL_INTERVAL: 45000,    // ms (45 seconds)
   MOUSE_MOVEMENT_SAMPLE_RATE: 16,   // ms (~60fps)
-  YOUTUBE_VIDEO_ID: 'rQ8dD216SPs',  // Default train video
 };

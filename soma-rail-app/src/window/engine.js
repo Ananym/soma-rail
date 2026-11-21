@@ -31,7 +31,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   uniforms.uLightTint.value = new THREE.Color(1, 1, 1);
   uniforms.uBlurKeep.value = params.blurKeep;
   // A side-window camera only translates sideways, so depth order never changes: sort by depth.
-  const spark = new SparkRenderer({ renderer, sortRadial: false, extraUniforms: uniforms });
+  const spark = new SparkRenderer({ renderer, sortRadial: false, extraUniforms: uniforms, minSortIntervalMs: params.sortMs });
   const patched = buildVertexShader(spark.material.vertexShader);
   let shaderPatched = false;
   if (patched) {
@@ -124,6 +124,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const x0 = index * layer.chunkLen;
     const count = Math.max(200, Math.round((params.budget * layer.share) / expectedActive(layer, tanHalfHfov, LEAD)));
     const packed = new PackedSplats();
+    packed.ensureSplats(Math.ceil(count * 1.12));   // reserve once: growing the buffer as it fills would stall
     let n = 0;
     const emit = (x, y, z, sx, sy, sz, r, g, b, opacity = 1, qx = 0, qy = 0, qz = 0, qw = 1) => {
       tmp.c.set(x, y, z); tmp.s.set(sx, sy, sz); tmp.q.set(qx, qy, qz, qw); tmp.col.setRGB(r, g, b);
@@ -173,6 +174,10 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
         if (r.done) {
           ch.done = true;
           if (ch.count() > 0) { ch.mesh = new SplatMesh({ packedSplats: ch.packed }); ch.mesh.position.set(ch.x0 - S.travelled, 0, 0); scene.add(ch.mesh); }
+          frameNote = `${ch.layer.name} chunk arrived (${Math.round(ch.count() / 1000)}k)`;
+          // While the train is running, hand over one finished chunk per frame at most: uploading
+          // several in the same frame is the likeliest cause of a hitch.
+          if (running) return pending.length === 1;
           break;
         }
         if (performance.now() - t0 > budgetMs) return false;
@@ -184,6 +189,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
 
   function rebuildWorld() {
     epoch++;
+    frameNote = 'world rebuilt in tunnel';
     for (const key of [...chunks.keys()]) dropChunk(key);
     biome = getBiome(S.biome);
     terrain = makeTerrain(S.seed, biome.terrain);
@@ -212,8 +218,17 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   }
   resize();
   window.addEventListener('resize', resize);
+  const onVisible = () => { last = performance.now(); };   // a hidden tab is not a hitch
+  document.addEventListener('visibilitychange', onVisible);
 
   let frames = 0, acc = 0, fps = 60, slowFor = 0, fastFor = 0;
+  // hitch meter state
+  let frameNote = '', prevWork = { gen: 0, render: 0, cpu: 0, note: '' };
+  let worst = { ms: 0, at: 0, gen: 0, render: 0, cpu: 0, note: '' };
+  const hitchTimes = [];
+  // idle state
+  const IDLE_FRAME_MS = 500;
+  let idleSince = 0, lastDraw = 0, isIdle = false, lastAllDone = false;
   function adapt(dt) {
     frames++; acc += dt;
     if (acc >= 0.5) { fps = frames / acc; frames = 0; acc = 0; }
@@ -230,7 +245,28 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   function tick() {
     if (disposed) return;
     const now = performance.now();
-    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    const interval = now - last;
+    const dt = Math.min(0.1, interval / 1000); last = now;
+    // Hitch meter: the gap since the last frame is blamed on what the last frame did.
+    if (running) {
+      if (interval > 25 && !isIdle && !idleSince) hitchTimes.push(now);
+      while (hitchTimes.length && now - hitchTimes[0] > 10000) hitchTimes.shift();
+      if (!idleSince && (interval > worst.ms || now - worst.at > 4000)) worst = { ms: interval, at: now, ...prevWork };
+    }
+    frameNote = '';
+
+    // Idle: once the train has stopped and nothing is waiting to be built, the picture is not
+    // changing, so stop doing work. The director still runs (it is what notices the train may pull
+    // away again), and one frame is drawn every half second so the sky and the clock drift on.
+    // A hidden tab gets no frames at all: the browser stops calling us.
+    const stopped = running && S.speed === 0 && S.rate === 0;
+    if (stopped && !rebuilding && lastAllDone && now - lastDraw < IDLE_FRAME_MS && idleSince && now - idleSince > 600) {
+      director.update(dt);
+      isIdle = true;
+      return;
+    }
+    if (stopped) { if (!idleSince) idleSince = now; } else { idleSince = 0; isIdle = false; }
+    lastDraw = now;
 
     if (audioProvider) director.setAudio(audioProvider(dt));
     director.update(running ? dt : 0);
@@ -257,7 +293,10 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     uniforms.uClock.value = S.time % 1000;
 
     manageChunks();
+    const tGen0 = performance.now();
     const allDone = generate(running ? params.slice : 12);
+    const tGen = performance.now() - tGen0;
+    lastAllDone = allDone;
     if (allDone && rebuilding) { rebuilding = false; director.worldReady(); }
     if (allDone && readyResolve) { readyResolve(); readyResolve = null; }
     for (const ch of chunks.values()) if (ch.mesh) ch.mesh.position.x = ch.x0 - S.travelled;
@@ -273,7 +312,10 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
       camera.rotation.z = k * 0.0012 * Math.sin(S.time * 1.7);
     }
     frame.update(S.time, Math.min(1, S.speed / 30));
+    const tRender0 = performance.now();
     renderer.render(scene, camera);
+    const tEnd = performance.now();
+    prevWork = { gen: tGen, render: tEnd - tRender0, cpu: tEnd - now, note: frameNote };
     if (running && !params.preserve) adapt(dt);   // screenshot runs keep full resolution
   }
   renderer.setAnimationLoop(tick);
@@ -299,12 +341,16 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
       return { fps: Math.round(fps), at: Math.round(S.travelled), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres), photos: kit ? kit.stats().pieces : 0,
         levelName: LEVELS[S.level].name, slot: S.slot, beat: +S.beat.toFixed(2), sparkle: +S.sparkle.toFixed(2), tint: uniforms.uLightTint.value.toArray().map((v) => +v.toFixed(2)), dissolve: +S.dissolve.toFixed(2),
         next: S.tunnel ? { biome: S.tunnel.next.biome, levelName: LEVELS[S.tunnel.next.level].name, phase: S.tunnel.phase } : null,
-        audio: !!audioProvider };
+        audio: !!audioProvider,
+        // the slowest frame of the last few seconds, and what the frame before it spent its time on
+        worst: { ms: Math.round(worst.ms), gen: Math.round(worst.gen), render: Math.round(worst.render), cpu: Math.round(worst.cpu), note: worst.note },
+        hitches: hitchTimes.length, idle: isIdle };
     },
     dispose() {
       disposed = true;
       renderer.setAnimationLoop(null);
       window.removeEventListener('resize', resize);
+      document.removeEventListener('visibilitychange', onVisible);
       for (const key of [...chunks.keys()]) dropChunk(key);
       if (kit) kit.dispose();
       renderer.dispose();

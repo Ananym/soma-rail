@@ -226,7 +226,7 @@ export function createAudioTap({
     },
 
     /** Raw numbers for debugging and checks: compensated and raw RMS, volume, sample rate. */
-    stats() { return stats; },
+    stats() { if (ctx) stats.state = ctx.state; return stats; },   // live: no frame need have run yet
 
     /** Stop analysing. An element keeps playing through its (shared, permanent) graph. */
     dispose() { detach(); },

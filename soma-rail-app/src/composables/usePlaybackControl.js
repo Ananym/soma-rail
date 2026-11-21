@@ -2,14 +2,13 @@ import { ref, computed, watch } from 'vue';
 import { CONFIG } from '../config';
 
 export function usePlaybackControl(distractionScore) {
-  const youtubePlayer = ref(null);
   const audioElement = ref(null);
   const baseVolume = ref(0.7); // User-controlled volume
 
   /**
-   * Calculate playback rate based on distraction score
-   * 0 distraction = 1.0x speed
-   * max distraction = 0.0x speed (stopped)
+   * Train speed as a fraction of cruising speed, from the distraction score
+   * 0 distraction = 1.0 (full speed)
+   * max distraction = 0.0 (stopped)
    */
   const playbackRate = computed(() => {
     const normalizedDistraction = distractionScore.value / CONFIG.DISTRACTION_MAX;
@@ -23,13 +22,6 @@ export function usePlaybackControl(distractionScore) {
     const normalizedDistraction = distractionScore.value / CONFIG.DISTRACTION_MAX;
     return Math.max(0, 1 - normalizedDistraction);
   });
-
-  /**
-   * Set the YouTube player instance
-   */
-  function setYoutubePlayer(player) {
-    youtubePlayer.value = player;
-  }
 
   /**
    * Set the audio element
@@ -46,19 +38,6 @@ export function usePlaybackControl(distractionScore) {
   }
 
   /**
-   * Apply playback rate to YouTube player
-   */
-  function applyPlaybackRate(rate) {
-    if (youtubePlayer.value && typeof youtubePlayer.value.setPlaybackRate === 'function') {
-      try {
-        youtubePlayer.value.setPlaybackRate(rate);
-      } catch (error) {
-        console.error('Error setting playback rate:', error);
-      }
-    }
-  }
-
-  /**
    * Apply volume to audio element
    */
   function applyVolume(multiplier) {
@@ -66,11 +45,6 @@ export function usePlaybackControl(distractionScore) {
       audioElement.value.volume = baseVolume.value * multiplier;
     }
   }
-
-  // Watch playback rate and apply to YouTube player
-  watch(playbackRate, (rate) => {
-    applyPlaybackRate(rate);
-  });
 
   // Watch volume multiplier and apply to audio element
   watch(volumeMultiplier, (multiplier) => {
@@ -86,7 +60,6 @@ export function usePlaybackControl(distractionScore) {
     playbackRate,
     volumeMultiplier,
     baseVolume,
-    setYoutubePlayer,
     setAudioElement,
     setBaseVolume
   };

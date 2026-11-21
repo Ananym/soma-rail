@@ -1013,23 +1013,61 @@ function* powerLines(ctx, out, W, dLo, dHi) {
     }
   }
 }
+// A straight steel member from a to b: n elongated splats laid end to end along it, r thick.
+function strut(out, ax, ay, az, bx, by, bz, r, c, n, alpha = 1) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
+  const q = quatXTo(dx / len, dy / len, dz / len), sl = (len / n) * 0.45;   // short enough that the ends do not spike past the joints
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    out(ax + dx * t, ay + dy * t, az + dz * t, sl, r, r, c[0], c[1], c[2], alpha, q[0], q[1], q[2], q[3], KIND.MAST);
+  }
+}
+// A lattice suspension tower, 30 m: four legs tapering from a 6 m square base to a narrow waist and
+// on to the peak, cross-braced on every face, with one cross-arm carrying the outer conductors on
+// insulator strings. Every member is a thin splat lying along the member (never a round blob, never
+// a translucent panel), and its thickness follows distance at well under a pixel a metre, so the
+// tower stays a drawing of a tower: a soft grey shape is what it must not become. Far towers drop
+// the bracing they could not resolve anyway.
+const PYLON_LEVELS = [0, 5.5, 10.2, 14.2, 17.5, 20, 23, 26, 28.2, 30];
+const pylonHalf = (y) => (y < 20 ? 3 - 2.3 * (y / 20) : 0.7 - 0.38 * ((y - 20) / 10));
 function* pylon(ctx, out, x, d, y0) {
-  const H = 30, col = [0.42, 0.43, 0.43];
-  const s = Math.max(0.08, 0.0018 * d);
-  // four legs converging to a waist, then the mast and the cross-arm
-  for (const [lx, lz] of [[-3, -3], [3, -3], [-3, 3], [3, 3]]) {
-    for (let t = 0; t < 1; t += Math.max(0.04, s / 20)) {
-      const k = 1 - t * 0.85;
-      out(x + lx * k, y0 + t * 20, -(d + lz * k), s, Math.max(s, 0.5), s, col[0], col[1], col[2], 1, 0, 0, 0, 1, KIND.MAST);
+  const steel = [0.44, 0.45, 0.45];
+  const r = Math.max(0.065, 0.00045 * d), rb = r * 0.62;
+  const lod = d < 220 ? 2 : d < 1100 ? 1 : 0;
+  const tone = (k) => [steel[0] * k, steel[1] * k, steel[2] * k];
+  const corners = [[-1, -1, 1.1], [1, -1, 0.92], [1, 1, 0.78], [-1, 1, 0.9]];   // sx, sz (-1 = towards the track), light
+  const at = (c, y) => [x + c[0] * pylonHalf(y), y0 + y, -(d + c[1] * pylonHalf(y))];
+  for (const c of corners) {
+    strut(out, ...at(c, -0.3), ...at(c, 20), r, tone(c[2]), lod === 2 ? 10 : 4);
+    strut(out, ...at(c, 20), ...at(c, 30), r * 0.85, tone(c[2]), lod === 2 ? 5 : 2);
+  }
+  if (lod > 0) {
+    // faces: 0 is the one towards the track, then round the tower; the far ones only when close
+    const faces = lod === 2 ? [0, 1, 2, 3] : [0];
+    for (const f of faces) {
+      const a = corners[f], b = corners[(f + 1) % 4], k = f === 0 ? 1 : f === 2 ? 0.7 : 0.85;
+      const c = tone(k * 0.95);
+      for (let i = 0; i + 1 < PYLON_LEVELS.length; i++) {
+        const ya = PYLON_LEVELS[i], yb = PYLON_LEVELS[i + 1];
+        if (lod === 2 && i > 0) strut(out, ...at(a, ya), ...at(b, ya), rb, c, 2);
+        if (lod === 2 && ya < 20) {
+          strut(out, ...at(a, ya), ...at(b, yb), rb, c, 3);
+          strut(out, ...at(b, ya), ...at(a, yb), rb, c, 3);
+        } else if (i % 2 === 0) strut(out, ...at(a, ya), ...at(b, yb), rb, c, 2);
+        else strut(out, ...at(b, ya), ...at(a, yb), rb, c, 2);
+      }
     }
+    if (out.due()) yield;
   }
-  for (let t = 20; t < H; t += Math.max(0.6, s * 3)) out(x, y0 + t, -d, s * 1.6, Math.max(s, 0.5), s * 1.6, col[0], col[1], col[2], 1, 0, 0, 0, 1, KIND.MAST);
-  // lattice bracing as a faint grey veil between the legs
-  for (let t = 1; t < 20; t += 2.5) {
-    const k = 1 - (t / 20) * 0.85;
-    out(x, y0 + t, -(d - 3 * k), 3 * k, 1.1, 0.05, col[0] * 0.9, col[1] * 0.9, col[2] * 0.9, 0.35, 0, 0, 0, 1, KIND.MAST);
+  // cross-arm: a level bottom chord through the tower, a top chord from the peak to each tip
+  const armY = y0 + 27.4, z = -d, n = lod === 2 ? 6 : 3;
+  strut(out, x - 7.2, armY, z, x + 7.2, armY, z, r * 0.85, tone(0.95), n * 2);
+  for (const sx of [-1, 1]) {
+    strut(out, x + sx * 0.4, y0 + 29.6, z, x + sx * 7.2, armY, z, rb, tone(sx < 0 ? 1.05 : 0.85), n);
+    if (lod === 2) strut(out, x + sx * 3.6, armY, z, x + sx * 3.6, y0 + 28.5, z, rb, tone(0.9), 2);
+    // the insulator string the conductor hangs from
+    if (lod > 0) strut(out, x + sx * 6, armY, z, x + sx * 6, y0 + 26, z, r * 1.25, [0.2, 0.25, 0.24], 2);
   }
-  for (let ax = -7; ax <= 7; ax += Math.max(0.5, s * 3)) out(x + ax, y0 + 26, -d, Math.max(s, 0.3), s * 1.2, s, col[0], col[1], col[2], 1, 0, 0, 0, 1, KIND.MAST);
   if (out.due()) yield;
 }
 

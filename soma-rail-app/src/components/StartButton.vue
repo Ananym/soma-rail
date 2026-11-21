@@ -14,7 +14,7 @@ const props = defineProps({
     type: Object,
     default: null
   },
-  videoPlayer: {
+  view: {
     type: Object,
     default: null
   }
@@ -25,15 +25,15 @@ const emit = defineEmits(['started']);
 const visible = ref(true);
 
 function handleStart() {
-  // Start both audio and video
+  // Start the radio and the train window, both inside this click
   const promises = [];
 
   if (props.audioElement) {
     promises.push(props.audioElement.play());
   }
 
-  if (props.videoPlayer) {
-    props.videoPlayer.play();
+  if (props.view) {
+    props.view.play();
   }
 
   // Hide overlay when audio starts
