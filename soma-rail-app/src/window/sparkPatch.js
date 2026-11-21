@@ -87,11 +87,13 @@ uniform vec3 uFlowAgainst;`,
         } else if (mv == 5) {
             // Vapour (plumes, mist, cloud streamers): a slow billow, each splat on its own phase.
             float sz = max(scales.x, max(scales.y, scales.z));
-            float hp = 6.2832 * fract(sin(center.z * 78.233) * 43758.5453) + 0.02 * wx + 0.015 * center.y;
+            // (the hash is kept apart from the wx terms so that each sine's multiplier on wx stays a
+            // whole multiple of 0.01: scaling a combined phase would break the wrap rule above)
+            float hp = 6.2832 * fract(sin(center.z * 78.233) * 43758.5453);
             float amp = uMove * sz;
-            center.x += amp * 0.3 * sin(0.31 * uMoveT + hp);
-            center.y += amp * 0.12 * sin(0.23 * uMoveT + 1.7 * hp);
-            scales *= 1.0 + 0.1 * min(uMove, 1.0) * sin(0.4 * uMoveT + 2.3 * hp);
+            center.x += amp * 0.3 * sin(0.31 * uMoveT + hp + 0.02 * wx + 0.015 * center.y);
+            center.y += amp * 0.12 * sin(0.23 * uMoveT + 1.7 * hp + 0.03 * wx + 0.025 * center.y);
+            scales *= 1.0 + 0.1 * min(uMove, 1.0) * sin(0.4 * uMoveT + 2.3 * hp + 0.05 * wx + 0.035 * center.y);
         }
     }
     if (uDissolve > 0.0) {
