@@ -8,7 +8,8 @@
   <body>
     <!-- Development only: runs the generated view on its own, with no audio and no SomaFM.
          Open through the Vite dev server: /window-harness.html?seed=1&level=0&kmh=100
-         Extra harness parameters: rate (0..1 train speed), jump (metres to skip ahead). -->
+         Extra harness parameters: rate (0..1 train speed), jump (metres to skip ahead),
+         piece (id of a photo piece to stop level with), offset (metres either side of it). -->
     <canvas id="c"></canvas>
     <script type="module">
       import { readParams } from '/src/window/params.js';
@@ -22,6 +23,20 @@
         engine.setRate(q.has('rate') ? Number(q.get('rate')) : 1);
         if (q.has('jump')) engine.director.state.travelled = Number(q.get('jump'));
         await engine.ready;
+        if (q.has('piece')) {
+          // Travel until the named photo piece comes up, stop level with it, and wait for it to load.
+          const id = q.get('piece'), S = engine.director.state, frame = () => new Promise((r) => requestAnimationFrame(r));
+          for (let i = 0; i < 600; i++) {
+            const k = engine.kitInstances().find((p) => p.id === id);
+            if (k) { S.travelled = k.x + Number(q.get('offset') || 0); break; }
+            S.travelled += 100; await frame();
+          }
+          for (let i = 0; i < 3000; i++) {
+            const k = engine.kitInstances().find((p) => p.id === id);
+            if (k && k.loaded && engine.stats().pending === 0) break;
+            await frame();
+          }
+        }
         engine.start();
         window.harness.ready = true;
         const count = () => { window.harness.frames++; requestAnimationFrame(count); };
