@@ -49,7 +49,11 @@ export function createDirector({ params, reducedMotion = false }) {
     const pool = (state.profile && state.profile.biomes && state.profile.biomes.filter((b) => BIOMES[b])) || [];
     const names = pool.length ? pool : Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1);
     if (params.biome && BIOMES[params.biome]) return params.biome;
-    return names[seed % names.length];
+    // Profiles list biomes best fit first: weight them 3, 2, 1 so the best fit shows most often.
+    const weights = names.map((_, i) => Math.max(1, 3 - i));
+    let pick = seed % weights.reduce((x, y) => x + y, 0);
+    for (let i = 0; i < names.length; i++) { if (pick < weights[i]) return names[i]; pick -= weights[i]; }
+    return names[0];
   }
 
   // Ask for a change of scenery. It happens out of sight, inside a tunnel.

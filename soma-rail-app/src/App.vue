@@ -10,7 +10,7 @@ import { useSomaFM } from './composables/useSomaFM';
 import { useInteraction } from './composables/useInteraction';
 import { usePlaybackControl } from './composables/usePlaybackControl';
 import { useLocalStorage } from './composables/useLocalStorage';
-import { wantsGeneratedView } from './window/params';
+import { wantsGeneratedView, readParams } from './window/params';
 
 // Soma FM integration
 const {
@@ -59,6 +59,16 @@ const hasStarted = ref(false);
 // If the generated view cannot start, we fall back to the video.
 const useGenerated = ref(wantsGeneratedView());
 
+// The generated view analyses the music, which needs the stream loaded with CORS. Only then do we
+// touch the audio path; if CORS loading fails we remount a plain audio element and carry on.
+const audioCors = ref(useGenerated.value && readParams().audio !== 0);
+const audioKey = ref(0);
+function handleCorsFailed() {
+  console.warn('Stream refused CORS loading; continuing without music analysis');
+  audioCors.value = false;
+  audioKey.value++;
+}
+
 // Initialize
 onMounted(async () => {
   // Fetch channels
@@ -95,6 +105,8 @@ function handlePlayerReady(player) {
 function handleWindowFailed(err) {
   console.warn('Generated view unavailable, falling back to video:', err);
   useGenerated.value = false;
+  // The video needs no music analysis: go back to the plain audio path.
+  if (audioCors.value) { audioCors.value = false; audioKey.value++; }
 }
 
 // Handle audio element ready
@@ -132,6 +144,7 @@ onMounted(() => {
       :distraction-score="distractionScore"
       :rate="playbackRate"
       :audio-element="audioElement"
+      :audio-cors="audioCors"
       :channel="currentChannel"
       :song="currentSong"
       @failed="handleWindowFailed"
@@ -145,7 +158,11 @@ onMounted(() => {
     />
 
     <AudioPlayer
+      :key="audioKey"
       ref="audioPlayerRef"
+      :cors="audioCors"
+      :resume="hasStarted"
+      @cors-failed="handleCorsFailed"
       :stream-url="streamUrl"
       :volume="baseVolume * volumeMultiplier"
       @audio-ready="handleAudioReady"

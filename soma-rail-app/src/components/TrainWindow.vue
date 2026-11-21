@@ -12,12 +12,14 @@
 // The heavy renderer (three.js + Spark) is imported only when play() is called, after the Start click.
 import { ref, computed, watch, onUnmounted } from 'vue';
 import { readParams } from '../window/params';
+import { getProfile } from '../window/profiles';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
   distractionScore: { type: Number, default: 0 },
   rate: { type: Number, default: 1 },            // 0..1 train speed from the distraction mechanic
   audioElement: { type: Object, default: null },
+  audioCors: { type: Boolean, default: false },   // true when the stream was loaded with CORS, so it can be analysed
   channel: { type: Object, default: null },
   song: { type: Object, default: null },
 });
@@ -32,13 +34,15 @@ const overlayOpacity = computed(() => props.distractionScore / 100);
 let engine = null;
 let statsTimer = null;
 let lastSongKey = null;
+let startChannelId = null;
 
 async function play() {
   if (engine) return;
   try {
     const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const { createEngine } = await import('../window/engine.js');
-    engine = createEngine({ canvas: canvasEl.value, params, reducedMotion });
+    startChannelId = props.channel ? props.channel.id : null;
+    engine = createEngine({ canvas: canvasEl.value, params, reducedMotion, profile: getProfile(startChannelId) });
     engine.setRate(props.rate);
     await engine.ready;
     engine.start();
@@ -52,6 +56,14 @@ async function play() {
 }
 
 watch(() => props.rate, (r) => { if (engine) engine.setRate(r); });
+
+// A new channel changes the kind of scenery, behind a tunnel.
+watch(() => props.channel && props.channel.id, (id) => {
+  if (!engine || !id || id === startChannelId) return;
+  startChannelId = id;
+  lastSongKey = null;            // the new channel's first track is not a track change
+  engine.director.setProfile(getProfile(id));
+});
 
 // A new track queues a change of scenery; the first one we see is just where we started.
 watch(() => props.song, (song) => {

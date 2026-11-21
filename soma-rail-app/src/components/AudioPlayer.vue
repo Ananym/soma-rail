@@ -1,6 +1,7 @@
 <template>
   <audio
     ref="audioElement"
+    :crossorigin="cors ? 'anonymous' : null"
     referrerpolicy="no-referrer"
     @error="handleError"
     @loadeddata="handleLoaded"
@@ -20,10 +21,21 @@ const props = defineProps({
   volume: {
     type: Number,
     default: 0.7
+  },
+  // Load the stream with CORS so the generated view can analyse the music. SomaFM allows it,
+  // but if every server refuses we emit 'cors-failed' and the parent remounts us without it.
+  cors: {
+    type: Boolean,
+    default: false
+  },
+  // Start playing as soon as the stream loads (used when the element is remounted mid-session).
+  resume: {
+    type: Boolean,
+    default: false
   }
 });
 
-const emit = defineEmits(['audio-ready', 'error', 'playing']);
+const emit = defineEmits(['audio-ready', 'error', 'playing', 'cors-failed']);
 
 const audioElement = ref(null);
 const isPlaying = ref(false);
@@ -62,6 +74,7 @@ function handleError(event) {
     }, 1000);
   } else if (serverAttempts.value >= maxServerAttempts) {
     console.error('All server attempts exhausted');
+    if (props.cors) emit('cors-failed');
   }
 
   emit('error', event);
@@ -126,6 +139,12 @@ watch(() => props.volume, (newVolume) => {
 }, { immediate: true });
 
 onMounted(() => {
+  // On a remount the stream URL is already known, so the watcher above never fired for this element.
+  if (props.streamUrl && audioElement.value && !audioElement.value.src) {
+    wasPlayingBeforeChange.value = props.resume;
+    audioElement.value.src = props.streamUrl;
+    audioElement.value.load();
+  }
   emit('audio-ready', audioElement.value);
 });
 

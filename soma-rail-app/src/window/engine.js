@@ -15,7 +15,7 @@ import { hashInts, makeRng } from './rng.js';
 const LEAD = 60;           // metres of track generated beyond the edge of view
 const TUNNEL_Z = -2.2;     // the tunnel wall sits this far from the eye
 
-export function createEngine({ canvas, params, reducedMotion = false }) {
+export function createEngine({ canvas, params, reducedMotion = false, profile = null }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   if (!renderer.capabilities.isWebGL2) { renderer.dispose(); throw new Error('WebGL2 is not available'); }
   const scene = new THREE.Scene();
@@ -48,6 +48,7 @@ export function createEngine({ canvas, params, reducedMotion = false }) {
   const frame = createFrame(THREE);
   if (params.frame) camera.add(frame.object3d);
   const director = createDirector({ params, reducedMotion });
+  if (profile) director.setProfile(profile, { immediate: true });   // the channel picks where the journey starts
   const S = director.state;
 
   // --- tunnel: an opaque wall close to the glass, with lamps as splats so they streak ------------
