@@ -12,7 +12,9 @@ const NUM = {
   hour: -1,          // fixed time of day 0..24, or -1 to let it run
   audio: 1,          // 0 disables audio analysis
   frame: 1,          // 0 hides the window frame
+  kit: 1,            // 0 leaves out the photo pieces (code-made scenery only)
   debug: 0,          // 1 shows a stats readout
+  preserve: 0,       // 1 keeps the drawing buffer readable (screenshot scripts only; slower)
 };
 const STR = { seed: '', biome: '' };
 

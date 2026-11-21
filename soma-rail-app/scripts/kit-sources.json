@@ -1,0 +1,223 @@
+{
+  "about": {
+    "summary": "Sources for the photo splat kit (scripts/photo-to-splats.mjs). Only CC0 / public-domain images whose licence was read on the source page. Poly Haven: 'Our assets are all licensed as CC0, which is effectively Public Domain even in jurisdictions that do not support the Public Domain.' (https://polyhaven.com/license, read 2026-11-21); each asset page also shows 'CC0 License', which the script re-checks before every build.",
+    "view": "centerU: horizontal centre of the cut as a fraction of the panorama width (0..1, left to right); pitchDeg tilts the view up; hfovDeg is its horizontal field of view; width its resolution in pixels (one splat per kept pixel); aspect defaults to 16:9.",
+    "scale": "How disparity becomes metres. 'ground' (default): 1/Z = a*D with a calibrated so the open ground in the lower part of the view sits captureHeight (default 1.7 m) below the camera; nearMetres/farMetres then only clamp depth. 'hints': 1/Z = d*(1/near - 1/far) + 1/far with d the disparity normalised between the 0.5th and 99.5th percentile of the kept land; used for views from a hilltop and far ranges, where there is no level ground to calibrate on. 'ground-affine': free affine fit to the ground (not used). scaleGain multiplies depth in 'ground' mode.",
+    "keep": "minKeepMetres drops anything nearer (default nearMetres); minElevDeg drops everything below that elevation (the foreground plain under a far range); cutNearerThanDisp drops pixels nearer than that fraction of the 99th-percentile disparity (a road below a town); fillGapPx fills short near gaps such as fence posts from the side; minIslandPx removes small islands.",
+    "relief": "relief (0..1, default 1) squeezes log depth toward the median so near pieces tear less when seen from the side; 0.3 on the near tree pieces.",
+    "sky": "sky.{maxDisp, minLum, maxSat, maxTex, erode, holes}: thresholds of the sky test (relative disparity, luminance, saturation, local texture), how many pixels to eat off the land at the skyline, and whether to also remove sky seen through gaps in crowns (holes: false for bare hills, where haze can look like sky).",
+    "disabled": "disabled: true drops a piece (its files are deleted) and disabledReason says why."
+  },
+  "pieces": [
+    {
+      "id": "treeline-meadow",
+      "title": "Deciduous woodland edge across a meadow",
+      "band": "near",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/dreifaltigkeitsberg.jpg",
+      "sourcePage": "https://polyhaven.com/a/dreifaltigkeitsberg",
+      "licence": "CC0 1.0",
+      "author": "Andreas Mischok",
+      "attribution": "Dreifaltigkeitsberg by Andreas Mischok, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.78,
+        "pitchDeg": 0,
+        "hfovDeg": 70,
+        "width": 760
+      },
+      "nearMetres": 4.5,
+      "farMetres": 400,
+      "minKeepMetres": 15,
+      "relief": 0.3
+    },
+    {
+      "id": "conifer-pasture",
+      "title": "Spruce trees on an alpine pasture",
+      "band": "near",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/immenstadter_horn.jpg",
+      "sourcePage": "https://polyhaven.com/a/immenstadter_horn",
+      "licence": "CC0 1.0",
+      "author": "Andreas Mischok",
+      "attribution": "Immenst\u00e4dter Horn by Andreas Mischok, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.42,
+        "pitchDeg": 0,
+        "hfovDeg": 70,
+        "width": 760
+      },
+      "nearMetres": 4.5,
+      "farMetres": 3000,
+      "minKeepMetres": 12,
+      "relief": 0.3
+    },
+    {
+      "id": "orchard-field",
+      "title": "Meadow with hedges and fruit trees",
+      "band": "near",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/evening_meadow.jpg",
+      "sourcePage": "https://polyhaven.com/a/evening_meadow",
+      "licence": "CC0 1.0",
+      "author": "Alexander Scholten",
+      "attribution": "Evening Meadow by Alexander Scholten, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.68,
+        "pitchDeg": 0,
+        "hfovDeg": 70,
+        "width": 760
+      },
+      "nearMetres": 4.5,
+      "farMetres": 1500,
+      "minKeepMetres": 15,
+      "relief": 0.3,
+      "sky": {
+        "maxDisp": 0.1
+      }
+    },
+    {
+      "id": "mountain-range",
+      "title": "Sandstone mountain range over grassland",
+      "band": "far",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/clarens_midday.jpg",
+      "sourcePage": "https://polyhaven.com/a/clarens_midday",
+      "licence": "CC0 1.0",
+      "author": "Dimitrios Savva (photography), Jarod Guest (processing)",
+      "attribution": "Clarens Midday by Dimitrios Savva and Jarod Guest, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.88,
+        "pitchDeg": 2,
+        "hfovDeg": 45,
+        "width": 1100
+      },
+      "nearMetres": 3000,
+      "farMetres": 12000,
+      "minKeepMetres": 2000,
+      "relief": 0.8,
+      "scale": "hints",
+      "minElevDeg": -0.1,
+      "sky": {
+        "holes": false
+      }
+    },
+    {
+      "id": "valley-town",
+      "title": "Small town in a wooded valley",
+      "band": "mid",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/kloetzle_blei.jpg",
+      "sourcePage": "https://polyhaven.com/a/kloetzle_blei",
+      "licence": "CC0 1.0",
+      "author": "Andreas Mischok",
+      "attribution": "Kloetzle Blei by Andreas Mischok, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.86,
+        "pitchDeg": 0,
+        "hfovDeg": 60,
+        "width": 760
+      },
+      "nearMetres": 60,
+      "farMetres": 2500,
+      "minKeepMetres": 50,
+      "relief": 0.4,
+      "scale": "hints",
+      "sky": {
+        "holes": false
+      },
+      "disabled": true,
+      "disabledReason": "seen from a hilltop: most of it sits far below rail level, where the terrain would hide it"
+    },
+    {
+      "id": "village-forest",
+      "title": "Village edge below a forested hill",
+      "band": "mid",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/hausdorf_meadow.jpg",
+      "sourcePage": "https://polyhaven.com/a/hausdorf_meadow",
+      "licence": "CC0 1.0",
+      "author": "Grzegorz Wronkowski",
+      "attribution": "Hausdorf Meadow by Grzegorz Wronkowski, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.62,
+        "pitchDeg": 0,
+        "hfovDeg": 70,
+        "width": 760
+      },
+      "nearMetres": 4.5,
+      "farMetres": 2500,
+      "minKeepMetres": 15,
+      "relief": 0.45,
+      "disabled": true,
+      "disabledReason": "Dropped after the side-on test: the hedge and tree on the right blend into the forest behind in the depth map and smear into a dark rubber sheet when the camera slides; the forest band shears."
+    },
+    {
+      "id": "mountain-lake",
+      "title": "Lake below forested hills",
+      "band": "mid",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/shudu_lake.jpg",
+      "sourcePage": "https://polyhaven.com/a/shudu_lake",
+      "licence": "CC0 1.0",
+      "author": "Alex Radosnov",
+      "attribution": "Shudu Lake by Alex Radosnov, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.42,
+        "pitchDeg": 0,
+        "hfovDeg": 70,
+        "width": 760
+      },
+      "nearMetres": 60,
+      "farMetres": 2500,
+      "minKeepMetres": 0,
+      "relief": 0.6,
+      "scale": "hints",
+      "minElevDeg": -1.2,
+      "sky": {
+        "holes": false
+      }
+    },
+    {
+      "id": "town-edge",
+      "title": "Houses and trees beyond a dry field",
+      "band": "near",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/suburban_field_01.jpg",
+      "sourcePage": "https://polyhaven.com/a/suburban_field_01",
+      "licence": "CC0 1.0",
+      "author": "Jacopo Voltolina",
+      "attribution": "Suburban Field 01 by Jacopo Voltolina, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.38,
+        "pitchDeg": 3,
+        "hfovDeg": 45,
+        "width": 760
+      },
+      "nearMetres": 4.5,
+      "farMetres": 600,
+      "minKeepMetres": 15,
+      "relief": 0.45
+    },
+    {
+      "id": "coast-town",
+      "title": "Bay and seaside town below a headland",
+      "band": "far",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/red_hill_cloudy.jpg",
+      "sourcePage": "https://polyhaven.com/a/red_hill_cloudy",
+      "licence": "CC0 1.0",
+      "author": "Greg Zaal",
+      "attribution": "Red Hill Cloudy by Greg Zaal, Poly Haven (CC0)",
+      "view": {
+        "centerU": 0.8,
+        "pitchDeg": -3,
+        "hfovDeg": 45,
+        "width": 760
+      },
+      "nearMetres": 300,
+      "farMetres": 4000,
+      "minKeepMetres": 250,
+      "relief": 0.8,
+      "scale": "hints",
+      "sky": {
+        "maxTex": 0.02,
+        "maxDisp": 0.03,
+        "holes": false
+      },
+      "cutNearerThanDisp": 0.2,
+      "disabled": true,
+      "disabledReason": "seen from a hilltop: most of it sits far below rail level, where the terrain would hide it"
+    }
+  ]
+}

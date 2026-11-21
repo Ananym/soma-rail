@@ -11,12 +11,13 @@ import { createFrame } from './frame.js';
 import { createDirector } from './director.js';
 import { buildVertexShader, PATCH_UNIFORMS } from './sparkPatch.js';
 import { hashInts, makeRng } from './rng.js';
+import { createKit } from './kitPieces.js';
 
 const LEAD = 60;           // metres of track generated beyond the edge of view
 const TUNNEL_Z = -2.2;     // the tunnel wall sits this far from the eye
 
 export function createEngine({ canvas, params, reducedMotion = false, profile = null }) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: !!params.preserve });
   if (!renderer.capabilities.isWebGL2) { renderer.dispose(); throw new Error('WebGL2 is not available'); }
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(params.fov, 16 / 9, 0.05, 60000);
@@ -183,10 +184,14 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     biome = getBiome(S.biome);
     terrain = makeTerrain(S.seed, biome.terrain);
     setUnderlay(biome);
+    if (kit) kit.reset();
     rebuilding = true;
   }
   let rebuilding = false;
   director.on('swap', rebuildWorld);
+
+  // --- photo pieces ---------------------------------------------------------------------------------
+  const kit = params.kit ? createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl: import.meta.env.BASE_URL }) : null;
 
   // --- sizing and adaptive resolution -------------------------------------------------------------
   let resScale = Math.min(1, params.scale);
@@ -240,6 +245,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     if (allDone && rebuilding) { rebuilding = false; director.worldReady(); }
     if (allDone && readyResolve) { readyResolve(); readyResolve = null; }
     for (const ch of chunks.values()) if (ch.mesh) ch.mesh.position.x = ch.x0 - S.travelled;
+    if (kit) kit.update({ travelled: S.travelled, biomeName: biome.name, terrain, seed: S.seed, tanHalfHfov, lead: LEAD });
     updateTunnel();
     sky.object3d.visible = !inTunnel;
     underlay.visible = !inTunnel;
@@ -252,7 +258,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     }
     frame.update(S.time, Math.min(1, S.speed / 30));
     renderer.render(scene, camera);
-    if (running) adapt(dt);
+    if (running && !params.preserve) adapt(dt);   // screenshot runs keep full resolution
   }
   renderer.setAnimationLoop(tick);
 
@@ -267,13 +273,14 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     stats() {
       let splats = 0, pending = 0;
       for (const ch of chunks.values()) { if (ch.done) splats += ch.count(); else pending++; }
-      return { fps: Math.round(fps), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres) };
+      return { fps: Math.round(fps), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres), photos: kit ? kit.stats().pieces : 0 };
     },
     dispose() {
       disposed = true;
       renderer.setAnimationLoop(null);
       window.removeEventListener('resize', resize);
       for (const key of [...chunks.keys()]) dropChunk(key);
+      if (kit) kit.dispose();
       renderer.dispose();
     },
   };

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Splat kit harness</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #87b4dc; overflow: hidden; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #label { position: fixed; left: 8px; top: 6px; font: 12px/1.3 monospace; color: #102030; background: rgba(255,255,255,.55); padding: 2px 6px; }
+    </style>
+  </head>
+  <body>
+    <!-- Development only: shows ONE photo-splat kit piece (public/kit/) the way the train sees it.
+         Open through the Vite dev server: /kit-harness.html?piece=treeline-meadow&x=0
+         Camera at (x, 2.6, 0) (default x: the piece's capture point, -xShift) looking along -z, vertical FOV 50 degrees, sky-blue background.
+         The piece is loaded at position.z = 0: its files hold absolute depth, so its front stands at
+         its suggestedDistance. ?file=name.ply loads another file from public/kit/ instead. -->
+    <canvas id="c"></canvas>
+    <div id="label"></div>
+    <script type="module">
+      import * as THREE from 'three';
+      import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+      const q = new URLSearchParams(location.search);
+      window.kit = { ready: false, error: null, frames: 0 };
+      try {
+        const index = await (await fetch('/kit/index.json')).json();
+        const piece = index.pieces.find((p) => p.id === q.get('piece')) || index.pieces[0];
+        const file = q.get('file') || piece.file;
+        const canvas = document.getElementById('c');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+        renderer.setClearColor(0x87b4dc, 1);
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 60000);
+        // default: the capture point (x = -xShift), where the sheet reproduces the photo exactly
+        camera.position.set(q.has('x') ? Number(q.get('x')) : -(piece.xShift || 0), 2.6, 0);   // looks along -z by default
+        const resize = () => { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); };
+        resize(); addEventListener('resize', resize);
+        // same choice as the engine: a sideways-only camera never changes depth order
+        scene.add(new SparkRenderer({ renderer, sortRadial: false }));
+        const mesh = new SplatMesh({ url: '/kit/' + file });
+        mesh.position.set(0, 0, 0);
+        scene.add(mesh);
+        await mesh.initialized;
+        const label = document.getElementById('label');
+        const setLabel = () => { label.textContent = `${piece.id}  x=${camera.position.x.toFixed(1)} m  front ${piece.suggestedDistance} m  ${piece.splats} splats  ${file}`; };
+        setLabel();
+        window.kit.piece = piece;
+        window.kit.setX = (x) => { camera.position.x = x; setLabel(); };
+        window.kit.box = () => { const b = mesh.packedSplats ? new THREE.Box3() : null; if (b) mesh.packedSplats.forEachSplat((i, c) => b.expandByPoint(c)); return b ? [b.min.toArray(), b.max.toArray()] : null; };
+        renderer.setAnimationLoop(() => { renderer.render(scene, camera); window.kit.frames++; });
+        window.kit.ready = true;
+      } catch (e) {
+        window.kit.error = String((e && e.stack) || e);
+        console.error(e);
+      }
+    </script>
+  </body>
+</html>
