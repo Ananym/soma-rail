@@ -90,7 +90,7 @@ Gaussian splats are the right primary medium, used two ways at once, with a shad
 
 | Approach | Realism | Surreal and reactive | Endless | Cost in the browser | Role here |
 | --- | --- | --- | --- | --- | --- |
-| Splat kit: captured or generated pieces that are free to use, placed by code | High; inherits the source | Good; any piece can warp or dissolve on the GPU | Arrangement is endless, the set of pieces is finite | Assets streamed per biome, roughly 15 MB per million splats as SPZ | Near and mid bands, wherever a good free piece exists |
+| Splat kit: captured or generated pieces that are free to use, placed by code | High; inherits the source | Good; any piece can warp or dissolve on the GPU | Arrangement is endless, the set of pieces is finite | Assets streamed per biome, 10–23 MB per million splats compressed | Near and mid bands, wherever a good free piece exists |
 | Splats written by code from noise fields | Painterly, not photographic | Best; every parameter is ours | Fully | No download; worker time per chunk | Every gap the kit leaves, plus ground, water, far band, all "matter" effects |
 | Raymarched shader world | High for sky, haze, water, distant terrain; poor for trees and buildings | Best | Fully | No download; heavy per pixel at high resolution | Sky and atmosphere |
 | Mesh scene with instanced props | Reads as a game without a lot of art | Moderate | Fully | Cheapest and most predictable | Rails, carriage, window frame |
@@ -247,7 +247,7 @@ WebGPU coverage is still uneven:
 | Splats in view | 1.5 million desktop, 750 thousand phones | My starting point. Spark's own defaults are 2.5 million desktop, 1.5 million iOS and 1 million Android, but our splats are all regenerated every frame, which Spark says becomes a bottleneck near 1 million on some systems. Spike 1 measures it. |
 | Chunk build time | Under 50 ms in the worker | A 200 m chunk is needed every 7 s at 100 km/h. The test built 150,000 splats in 68 ms on the main thread. |
 | First view | Under 5 s on broadband | Open on a code-made biome that needs no assets; stream kit pieces behind it. Spark adds 1.0 MB gzipped. |
-| Assets per biome | 30 MB or less | About 2 million splats of kit pieces as SPZ, at the 15 MB per million measured on World Labs' example files. Keeps several biomes inside GitHub Pages. |
+| Assets per biome | 30 MB or less | About 2 million splats of kit pieces. Compressed files measured here run from 10 to 23 MB per million splats. Keeps several biomes inside GitHub Pages. |
 | Render resolution | Scale down to hold frame rate | Blur and haze hide a lower internal resolution well |
 
 Phones are best effort. The view is built and tuned on desktop, where the mouse-driven distraction mechanic already lives; on phones it lowers resolution and splat count, and music reactivity on iPhone is not promised.
@@ -261,6 +261,71 @@ What needs watching:
 - **Fallback.** If the canvas cannot start, keep the current video as the fallback view, so no listener is left with a black screen.
 - **Motion sensitivity.** Honour `prefers-reduced-motion` with a slower train and no beat-driven effects.
 
+## Free splat sources
+
+Surveyed on 21 November 2026. Ready-made outdoor splats that are free, downloadable and clearly licensed are scarce, so the kit will mostly be made, not found. Three routes are worth using, in this order.
+
+| Route | What it gives | What it needs | Status |
+| --- | --- | --- | --- |
+| Photo plus depth map, turned into a sheet of splats | Photoreal one-sided pieces: tree lines, hillsides, villages | Nothing: CC0 photos, an Apache-licensed depth model, CPU only | Pipeline being built in `soma-rail-app/scripts/photo-to-splats.mjs` |
+| SuperSplat gallery ([superspl.at](https://superspl.at)) | About 3,100 downloadable community scenes, many of them outdoor captures | Your free PlayCanvas account; downloads return 401 without one | Not fetched; candidates listed below |
+| Free object generators on Hugging Face | Single props (a tree, a barn) as splats | A few minutes of free GPU quota a day; a free account raises it | Not run |
+
+### What can be downloaded today without an account
+
+| File | Licence | Size | Verdict |
+| --- | --- | --- | --- |
+| [Big Sur cliff](https://huggingface.co/datasets/Jamesbass/bigsur-360-colmap), aerial coast | CC BY 4.0, set by the person who flew it | 133 MB `.sog`, 10 million splats | Usable once cut down; too big to ship whole |
+| [Ludlow, Quality Square](https://superspl.at/scene/ca36efcc), a small town square | CC BY 4.0 on its SuperSplat page (author ijenko) | 255 MB `.ply`, 4.6 million splats | Usable once cut down |
+| [Tokyo Takanawadai intersection](https://huggingface.co/datasets/dynamic-maps/hard-intersection-multimodal-sample), street level | CC BY 4.0 | 1.2 GB `.rad`, 56 million splats | Licence is clean; only practical as a small crop |
+| [Padilla object set](https://marcelpadilla.com/Gaussian_Splat_Object_Dataset/): tree, mountain, house | CC BY 4.0 or CC BY-NC 4.0 per object | 3 MB at 100,000 splats | Loads in Spark, but each is one flat colour: silhouettes only |
+| A handful of personal Hugging Face uploads (meadow, rural river, drone town) | A bare `mit` or `cc-by-nc-4.0` tag from the uploader | 18–55 MB | Weak: nothing shows who captured them |
+
+I re-read the licence statements for the first, second and fourth rows and loaded the Padilla tree in Spark. The Big Sur and Ludlow files were too large to render on this machine.
+
+### SuperSplat candidates, once you log in
+
+Each scene's uploader picks a Creative Commons licence when enabling downloads; most choose CC BY. Check the licence link on each page, credit the author, and skip game rips and AI-generated worlds.
+
+| Scene | Size |
+| --- | --- |
+| [Windmill, Zaanse Schans](https://superspl.at/scene/40fa433f) | 16.5 MB, 1.0 million splats |
+| [Cell tower](https://superspl.at/scene/225aa5a2) | 12.4 MB |
+| [Audley tree](https://superspl.at/scene/af9c6b0d) | 19.0 MB |
+| [St Giles church](https://superspl.at/scene/4fa2f72e) | 15.9 MB |
+| [2 Bridges](https://superspl.at/scene/3ba03cdc) | 19.4 MB |
+| [Hunstanton coastguard station](https://superspl.at/scene/873fe015) | 18.8 MB |
+| [Narva-Jõesuu lighthouse](https://superspl.at/scene/30995503) | 5.3 MB |
+| [Jacaranda tree](https://superspl.at/scene/c171ba17) | 16.7 MB |
+
+Sizes come from the site's listing; I confirmed the CC BY licence link on the windmill page only. PlayCanvas's terms forbid automated access, so these are for you to download by hand.
+
+### Free generation
+
+| Tool | Makes | Licence | How to run it free |
+| --- | --- | --- | --- |
+| Depth Anything V2 Small | Depth for the photo route | Apache-2.0 | On CPU, in Node or the browser |
+| [TripoSplat](https://huggingface.co/spaces/VAST-AI/TripoSplat) | One object from one image, as `.ply` or `.splat` | MIT | Its Hugging Face Space |
+| [TRELLIS](https://github.com/microsoft/TRELLIS) | One object from text or an image | MIT | A community Space; 16 GB GPU to run locally |
+| [FlashWorld](https://github.com/imlixinyang/FlashWorld) | A whole scene from text or an image, as `.spz` | Code Apache-2.0, weights CC BY-NC-SA | Its demo Space |
+| [Brush](https://github.com/ArthurBrussee/brush) | A splat trained from your own photos | Apache-2.0 | Any recent GPU, or a browser |
+
+Hugging Face gives 2 minutes of GPU a day without an account and 5 with a free one, so each of these is a few objects a day at most. None was run here.
+
+### Ruled out
+
+| Source | Why |
+| --- | --- |
+| World Labs Marble, free plan | "The Free plan can generate worlds but not export them", and free output is for personal use only |
+| Polycam, Postshot, KIRI Engine free tiers | No splat export without paying |
+| Scaniverse | Other people's scans cannot be downloaded; your own captures can be exported free |
+| The classic research scenes (garden, bicycle, stump, treehill) | No licence on the photos or the trained models |
+| DL3DV-10K, Waymo, KITTI-360 and similar | Research use only, or no redistribution |
+| Tencent HunyuanWorld models | Their licence excludes the UK and EU |
+| Apple SHARP (one photo to splats) | Works on CPU, but the weights are licensed for research only |
+| Tanks and Temples scenes | The licence page says CC BY 4.0 and, in another paragraph, no redistribution |
+| Spark's own sample files | No licence stated; fine to hot-link while developing, not to ship |
+
 ## Prototype plan
 
 The first risk is aesthetic, not technical: nobody knows yet whether a code-arranged splat world looks good sliding past a window. Spike 1 answers that before anything else is built.
@@ -273,7 +338,7 @@ The first risk is aesthetic, not technical: nobody knows yet whether a code-arra
    - Pass: memory stays flat and no visible pop over a 30-minute run.
 4. **Reactivity.** Masts on the beat from our own onset tracker, then CLAP scoring against biome descriptions, with channel profiles and track-change transitions as the fallback.
    - Pass: someone listening can tell the scenery belongs to the music without being told how.
-5. **Asset pipeline.** Survey what is free: open and non-commercial splat captures, free generation routes, and photos turned into splats with a depth map. Record each piece's licence and attribution. Where nothing is good enough, make the piece in code. Compress them and judge them from the window. Settles which free sources are usable and what the kit weighs. Nothing is bought.
+5. **Asset pipeline.** Build the kit from the routes in "Free splat sources": photo-plus-depth sheets first, then SuperSplat downloads and generated props. Record each piece's licence and attribution. Where nothing is good enough, make the piece in code. Compress them and judge them from the window. Settles what the kit weighs. Nothing is bought.
 6. **The glass.** The finished frame, reflections, droplets, exposure and grain. Last because the technique is well known, though it is the largest single gain in polish.
 
 Ship behind a `?view=generated` flag, with the video as the default until the generated view is clearly better.
@@ -301,7 +366,8 @@ Answered earlier by the checks:
 Still open:
 
 - [ ] Does audio analysis work in Safari, on iOS and in Firefox? Spike 2.
-- [ ] Which free splat sources exist, and are they good enough from a train window? Not researched yet; spike 5. That includes whether a free World Labs account can export splats and whether its output may be hosted publicly.
+- [x] Which free splat sources exist? Surveyed; see "Free splat sources". A free World Labs account cannot export splats, so that route is closed.
+- [ ] Are found or photo-made pieces good enough from a train window? The few files that could be rendered here are judged in "Free splat sources"; the real test is on a GPU.
 - [ ] What are the surreal levels called, and can the listener switch between them? Spike 1 proposes them.
 
 ## Sources
