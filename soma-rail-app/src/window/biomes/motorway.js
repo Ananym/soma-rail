@@ -1960,6 +1960,7 @@ export const motorwayBiome = {
   // clear night air: far lights survive the haze (lights get half the haze in the shader)
   hazeDist: 8000,
   hours: [21.5, 3.5],
+  holdHours: true,   // its lights are baked into the scenery: never let the clock run on into day
   // the night sky is the other half of this biome: more and fainter stars, the Milky Way, few
   // clouds, and a horizon lowered in the frame so the sky has most of the window
   sky: { stars: 1.25, deep: 1, milkyWay: 1, clear: 0.8 },

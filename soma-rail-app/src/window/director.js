@@ -46,10 +46,12 @@ export function createDirector({ params, reducedMotion = false }) {
     time: 0,
   };
   const listeners = { swap: [] };
+  let hourDir = 1;   // which way the clock runs for a biome that holds it inside its hours
 
   // Each change of scenery arrives at a time of day drawn from these slots, so journeys spend real
   // time in the low light of dawn and dusk and not only at midday. A biome can ask for its own
-  // window with { hours: [from, to] } (the night city does) or reweight the slots with
+  // window with { hours: [from, to] } (the night city does; add holdHours: true to keep the clock
+  // inside it for as long as the biome lasts, as the motorway does) or reweight the slots with
   // { slots: { dawn, day, dusk, night } }. `slot=` in the URL forces one; `hour=` pins the clock.
   function placeHour() {
     const b = BIOMES[state.biome];
@@ -144,7 +146,18 @@ export function createDirector({ params, reducedMotion = false }) {
       // A stopped train holds the whole view still: the clock waits and the music stops moving the
       // scenery, so the engine can redraw it rarely (see its idle mode) and the picture stands sharp.
       const still = state.speed === 0 && state.rate === 0;
-      if (params.hour < 0 && !still) state.hour = (state.hour + dt * (state.dials.time * 0.05 + 0.0002)) % 24;
+      if (params.hour < 0 && !still) {
+        const step = dt * (state.dials.time * 0.05 + 0.0002);
+        const b = BIOMES[state.biome];
+        if (b && b.holdHours && b.hours && !SLOTS[params.slot]) {
+          // This biome only works inside its own hours (its lights are part of the scenery), so the
+          // clock turns back at either end instead of running on into day.
+          const from = b.hours[0], span = (b.hours[1] - from + 24) % 24;
+          let pos = Math.min(span, (state.hour - from + 24) % 24) + step * hourDir;
+          if (pos > span) { pos = 2 * span - pos; hourDir = -1; } else if (pos < 0) { pos = -pos; hourDir = 1; }
+          state.hour = (from + pos) % 24;
+        } else state.hour = (state.hour + step) % 24;
+      }
       state.beat *= Math.exp(-dt / 0.17);                                   // a beat is over in a few frames
       // Treble is a level, not an event: on most music it sits at a moderate value all the time. The
       // sparkle follows only its excess over the last few seconds' average, so it rests at zero and

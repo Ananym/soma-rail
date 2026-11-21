@@ -1257,16 +1257,18 @@ function* floatingRoot(ctx, out, W, v, lift, dLo, dHi) {
   const cx = (xa + xb) / 2, R = (xb - xa) / 2 + 6;
   if (!inX(ctx, cx, R + 10)) return;
   const r = makeRng(v.seed ^ 0x77);
-  const top = W.H(cx, dm) + lift - 0.5, depth = R * 0.8 + lift * 0.3;
+  // a shallow wedge of the field with earth and rock beneath it, never a bulk big enough to
+  // outweigh the houses it carries
+  const top = W.H(cx, dm) + lift - 0.5, depth = R * 0.4 + lift * 0.08;
   const n = Math.round(clamp(60000 * out.density * R * depth / (dm * dm), 40, 2500));
   const s = Math.sqrt(2.4 * R * depth / n);
   for (let k = 0; k < n; k++) {
     const f = Math.pow(r(), 0.8), a = (r() - 0.5) * Math.PI * 1.3;
     const rr = R * Math.pow(1 - f, 1.1) * (0.85 + 0.25 * r());
     const nx = Math.sin(a), nz = Math.cos(a);
-    let c = f < 0.08 ? mix3(C.yard, C.grassDry, r()) : mix3(C.rock, [0.5, 0.42, 0.33], 0.6 * r());
-    if (f > 0.08 && noise2(a * 3, f * 9, v.seed & 0xffff) > 0.62) c = mix3(c, C.stone, 0.6);
-    c = jitter(mul3(shade(c, nx * 0.7, 0.1, nz, 0.62, 0.45), 1 - 0.25 * f), r, 0.1);
+    let c = f < 0.22 ? mix3(C.yard, C.grassDry, r()) : mix3(mix3(C.rock, C.grassDry, 0.35), [0.5, 0.42, 0.33], 0.6 * r());
+    if (f > 0.22 && noise2(a * 3, f * 9, v.seed & 0xffff) > 0.62) c = mix3(c, C.stone, 0.6);
+    c = jitter(mul3(shade(c, nx * 0.7, 0.1, nz, 0.7, 0.4), 1 - 0.12 * f), r, 0.1);
     out(cx + nx * rr - ctx.x0, top - f * depth, -(dm - nz * rr * 0.4), s, s * 0.8, s * 0.6, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.SURREAL);
     if (out.due()) yield;
   }

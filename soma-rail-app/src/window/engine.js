@@ -222,10 +222,13 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     frameMount.matrixWorldNeedsUpdate = true;
     underlayUniforms.uShift.value = horizonShift;
   }
-  function setHorizon(b) {
+  // A change of biome changes the target inside the tunnel; the shift eases to it over a second or
+  // so (see tick), so the tunnel's own lamps do not jump.
+  let horizonTarget = 0;
+  function setHorizon(b, now = false) {
     const h = params.horizon >= 0 ? params.horizon : (b.horizon || 0);
-    horizonShift = Math.max(0, Math.min(0.6, h));
-    applyHorizon();
+    horizonTarget = Math.max(0, Math.min(0.6, h));
+    if (now) { horizonShift = horizonTarget; applyHorizon(); }
   }
   let resScale = Math.min(1, params.scale);
   let width = 1, height = 1;
@@ -240,7 +243,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     frame.resize(camera.aspect, params.fov);
   }
   resize();
-  setHorizon(biome);
+  setHorizon(biome, true);
   window.addEventListener('resize', resize);
   const onVisible = () => { last = performance.now(); };   // a hidden tab is not a hitch
   document.addEventListener('visibilitychange', onVisible);
@@ -295,6 +298,11 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
 
     if (audioProvider) director.setAudio(audioProvider(dt));
     director.update(running ? dt : 0);
+    if (horizonShift !== horizonTarget) {
+      horizonShift += (horizonTarget - horizonShift) * (1 - Math.exp(-dt / 0.6));
+      if (Math.abs(horizonTarget - horizonShift) < 0.001) horizonShift = horizonTarget;
+      applyHorizon();
+    }
 
     sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: S.beat, sparkle: S.sparkle, sky: biome.sky, shift: horizonShift });
     const inTunnel = S.tunnel && S.tunnel.phase === 'inside';
