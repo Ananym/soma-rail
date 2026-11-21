@@ -1,5 +1,6 @@
 // Check the sky on its own, without the land.
 //   node scripts/check-sky.mjs <out.png> [--level 0|1] [--hours 5.5,6.5,...] [--size 480x270] [--energy 0..1]
+//        [--sky stars=1.8,deep=1,milkyWay=1,clear=1]   a biome's night-sky hint
 // Renders the sky shader for each hour into a contact sheet (one tile per hour, labelled), and
 // checks that the exported horizonColor matches the pixel the shader draws straight ahead at the
 // horizon (the land hazes toward horizonColor, so a mismatch shows as a seam). Exits 1 on a
@@ -19,6 +20,7 @@ const hours = opt('hours', '2,5.5,6.5,9,12,17,19.5,20.5,23').split(',').map(Numb
 const [W, H] = opt('size', '480x270').split('x').map(Number);
 const energy = Number(opt('energy', 0));
 const travelled = Number(opt('travelled', 0));
+const skyHint = opt('sky', '') ? Object.fromEntries(opt('sky', '').split(',').map((kv) => { const [k, v] = kv.split('='); return [k, Number(v)]; })) : null;   // e.g. --sky stars=1.8,deep=1,milkyWay=1,clear=1
 const clouds = Number(opt('clouds', 1));   // 0 hides the clouds, to judge the atmosphere alone
 
 const { createServer } = await import('vite');
@@ -35,7 +37,7 @@ let code = 0;
 try {
   // any same-origin page will do; the modules are imported directly below
   await page.goto(`http://127.0.0.1:${port}/src/window/rng.js`);
-  const res = await page.evaluate(async ({ hours, W, H, level, energy, travelled, clouds }) => {
+  const res = await page.evaluate(async ({ hours, W, H, level, energy, travelled, clouds, skyHint }) => {
     const THREE = await import('/node_modules/three/build/three.module.js');
     const { createSky } = await import('/src/window/sky.js');
     const { LEVELS } = await import('/src/window/director.js');
@@ -54,7 +56,7 @@ try {
     const gl = renderer.getContext();
     hours.forEach((hour, k) => {
       // run a few frames so smoothed values settle
-      for (let f = 0; f < 3; f++) sky.update({ hour, level, dials: LEVELS[level], time: 100 + f / 30, dt: f ? 1 / 30 : 0, aspect: W / H, fovDeg: 50, travelled: travelled + f, speed: 28, energy });
+      for (let f = 0; f < 3; f++) sky.update({ hour, level, dials: LEVELS[level], time: 100 + f / 30, dt: f ? 1 / 30 : 0, aspect: W / H, fovDeg: 50, travelled: travelled + f, speed: 28, energy, sky: skyHint });
       if (!clouds && sky._debug) { sky._debug.uniforms.uCoverLo.value = 3; sky._debug.uniforms.uCoverHi.value = 3; }
       renderer.render(scene, camera);
       gl.readPixels(W >> 1, (H >> 1) - 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);   // just below the horizon
@@ -69,7 +71,7 @@ try {
       ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.fillText(`${hour}h  L${level}`, x + 32, y + H - 10);
     });
     return { report, png: sheet.toDataURL('image/png') };
-  }, { hours, W, H, level, energy, travelled, clouds });
+  }, { hours, W, H, level, energy, travelled, clouds, skyHint });
   fs.writeFileSync(out, Buffer.from(res.png.split(',')[1], 'base64'));
   for (const r of res.report) {
     const bad = r.diff > 3;

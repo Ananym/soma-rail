@@ -6,4 +6,5 @@ export const motorwayBiome = {
   name: 'motorway',
   hazeDist: 4500,
   hours: [21.5, 3.5],
+  sky: { stars: 1.25, deep: 1, milkyWay: 1, clear: 0.8 },
 };

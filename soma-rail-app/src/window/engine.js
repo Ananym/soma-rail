@@ -272,7 +272,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     if (audioProvider) director.setAudio(audioProvider(dt));
     director.update(running ? dt : 0);
 
-    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: S.beat, sparkle: S.sparkle });
+    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: S.beat, sparkle: S.sparkle, sky: biome.sky });
     const inTunnel = S.tunnel && S.tunnel.phase === 'inside';
     uniforms.uMotionMetres.value = S.speed * params.shutter * (reducedMotion ? 0.5 : 1);
     uniforms.uHazeColor.value.copy(sky.horizonColor);

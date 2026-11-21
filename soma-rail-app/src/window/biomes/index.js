@@ -4,6 +4,8 @@
 //   terrain   overrides for DEFAULT_TERRAIN in terrain.js
 //   hazeDist  metres at which haze reaches 63% (the far band needs height and contrast to survive it)
 //   hours     optional [from, to] time of day the biome prefers
+//   sky       optional night-sky hint { stars, deep, milkyWay, clear }: brighter stars, a second field
+//             of faint ones, the Milky Way, fewer clouds (see sky.js update)
 //
 // A generator is a JS generator function:   function* (ctx, emit)
 //   emit(x, y, z, sx, sy, sz, r, g, b, opacity, qx, qy, qz, qw, kind)

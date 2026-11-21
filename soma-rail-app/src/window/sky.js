@@ -116,6 +116,7 @@ uniform vec3 uMoonDir, uMoonLow, uMoonHigh, uMoonDirect;
 uniform vec3 uSun2Dir, uSun2Col;                           // level-1 second sun (uSun2Col = 0 when off)
 uniform vec3 uNightGlow, uAmbient;                         // airglow; average sky light for clouds
 uniform float uSunDisc, uMoonDisc, uMoonRadius, uSun2Disc, uStars;
+uniform float uStarThresh, uDeep, uMilky;                   // a biome's night-sky hint (see update)
 uniform vec2 uCloudOffLo, uCloudOffHi;
 uniform float uCoverLo, uCoverHi, uCloudGain;
 uniform float uTopo, uAurora, uLandOff;
@@ -260,19 +261,47 @@ void main() {
     float az = atan(dir.x, -dir.z), el = asin(dir.y);
     float moonMask = 1.0 - disc(dir, uMoonDir, uMoonRadius * 1.04, px);   // the moon hides what is behind it
 
+    // ---- the Milky Way (only where a biome asks for it): a broad band along a great circle that
+    // crosses the window on a slant, brighter toward its middle, mottled, with a dark rift
+    float mw = 0.0;
+    if (uMilky > 0.003 && uStars > 0.003) {
+      // a low arch from the lower left of the window (azimuth -38, 6 degrees up) to the upper right (+30, 22 up)
+      const vec3 POLE = vec3(0.2272, -0.9262, -0.3009), GU = vec3(-0.6123, 0.1045, -0.7837), GV = vec3(0.7573, 0.3623, -0.5434);
+      float lat = dot(dir, POLE);
+      float lon = atan(dot(dir, GV), dot(dir, GU));
+      float fw = px * 24.0;
+      float cl = fbm(vec2(lon * 7.0, lat * 24.0) + 31.0, fw, 4);
+      float band = exp(-lat * lat / 0.009);
+      float rift = (1.0 - smoothstep(0.012, 0.05, abs(lat - 0.008 + 0.05 * (cl - 0.5)))) * smoothstep(0.35, 0.6, fbm(vec2(lon * 2.5, 3.0), px * 2.5, 3));
+      mw = band * (0.3 + 1.1 * cl * cl) * (1.0 - 0.75 * rift);
+      col += vec3(0.6, 0.66, 0.82) * mw * uMilky * uStars * 0.05 * ext.g * moonMask;
+    }
+
     // ---- stars: one candidate per 0.45-degree cell, fixed to the sky, a soft one-pixel dot
     if (uStars > 0.003) {
       const float CELL = 0.00785;
       vec2 g = vec2(az, el) / CELL;
       vec2 ci = floor(g);
       float h = hash12(ci + 91.0);
-      if (h > 0.86) {
+      if (h > uStarThresh - 0.3 * mw * uMilky) {
         vec2 sp = ci + 0.2 + 0.6 * vec2(hash12(ci + 3.0), hash12(ci + 7.0));
         float dd = length((g - sp) * CELL) / max(px, 1e-5);
         float b = pow(hash12(ci + 13.0), 9.0) * 1.8 + 0.035;
         float tint = hash12(ci + 29.0);
         vec3 sc = mix(vec3(1.0, 0.82, 0.65), vec3(0.75, 0.85, 1.0), tint);
         col += sc * b * exp(-dd * dd * 2.2) * uStars * ext.g * moonMask;
+      }
+      // a second, finer field of faint stars for a dark-sky site, thicker in the Milky Way
+      if (uDeep > 0.003) {
+        const float CELL2 = 0.0031;
+        vec2 g2 = vec2(az, el) / CELL2;
+        vec2 c2 = floor(g2);
+        if (hash12(c2 + 57.0) > 0.8 - 0.45 * mw * uMilky) {
+          vec2 sp = c2 + 0.2 + 0.6 * vec2(hash12(c2 + 5.0), hash12(c2 + 11.0));
+          float dd = length((g2 - sp) * CELL2) / max(px, 1e-5);
+          float b = 0.012 + 0.07 * pow(hash12(c2 + 17.0), 3.0);
+          col += vec3(0.85, 0.9, 1.0) * b * exp(-dd * dd * 2.6) * uStars * uDeep * ext.g * moonMask;
+        }
       }
     }
 
@@ -377,6 +406,7 @@ export function createSky(THREE) {
     uSun2Dir: { value: new THREE.Vector3(0.3, 0.04, -0.95).normalize() }, uSun2Col: { value: C3() },
     uNightGlow: { value: C3() }, uAmbient: { value: C3() },
     uSunDisc: { value: 0 }, uMoonDisc: { value: 0 }, uMoonRadius: { value: 0.005 }, uSun2Disc: { value: 0 }, uStars: { value: 0 },
+    uStarThresh: { value: 0.86 }, uDeep: { value: 0 }, uMilky: { value: 0 },
     uCloudOffLo: { value: new THREE.Vector2(17.3, 5.1) }, uCloudOffHi: { value: new THREE.Vector2(3.7, 40.2) },
     uCoverLo: { value: 0.52 }, uCoverHi: { value: 0.58 }, uCloudGain: { value: 1 },
     uTopo: { value: 0 }, uAurora: { value: 0 }, uLandOff: { value: 0 }, uLandCol: { value: C3() },
@@ -461,7 +491,10 @@ export function createSky(THREE) {
   }
 
   function update(state) {
-    const { hour = 12, level = 0, dials = {}, time = 0, dt = 0, aspect = 16 / 9, fovDeg = 50, travelled = 0, energy = 0, beat = 0, sparkle = 0 } = state;
+    const { hour = 12, level = 0, dials = {}, time = 0, dt = 0, aspect = 16 / 9, fovDeg = 50, travelled = 0, energy = 0, beat = 0, sparkle = 0, sky: hint = null } = state;
+    // A biome may ask for a richer night sky: { stars: brightness x, deep: 0..1 extra faint stars,
+    // milkyWay: 0..1, clear: 0..1 fewer clouds }. All default to the plain sky.
+    const skyHint = hint || {};
     const L1 = level >= 1 ? 1 : 0;
     const scaleDial = L1 * (dials.scale || 0), topo = L1 * (dials.topology || 0), timeDial = dials.time || 0;
     U.uTime.value = time;
@@ -491,7 +524,12 @@ export function createSky(THREE) {
     U.uMoonRadius.value = 0.0047 * (1 + 8 * smoothstep(0, 1, scaleDial));
     U.uMoonDisc.value = mix(0.35, 1.5, night) * smoothstep(-0.03, 0.01, moonDir.y);
     // the stars brighten with the treble, so hi-hats make the night sky glitter
-    U.uStars.value = smoothstep(-0.07, -0.2, sy) * (1 - 0.35 * smoothstep(0, 0.3, moonDir.y)) * (1 + 0.4 * L1) * (1 + 0.9 * sparkle);
+    U.uStars.value = smoothstep(-0.07, -0.2, sy) * (1 - 0.35 * smoothstep(0, 0.3, moonDir.y)) * (1 + 0.4 * L1) * (1 + 0.9 * sparkle) * (skyHint.stars || 1);
+    U.uDeep.value = skyHint.deep || 0;
+    U.uStarThresh.value = 0.86 - 0.05 * (skyHint.deep || 0);
+    U.uMilky.value = skyHint.milkyWay || 0;
+    U.uCoverLo.value = 0.52 + 0.16 * (skyHint.clear || 0);
+    U.uCoverHi.value = 0.58 + 0.16 * (skyHint.clear || 0);
     U.uSun2Disc.value = s2 * (0.4 + 0.6 * smoothstep(-0.25, 0.1, sy));
 
     // ---- clouds: wind drift plus true parallax of the layer as the train moves (+x)
