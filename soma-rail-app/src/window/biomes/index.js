@@ -32,10 +32,12 @@
 import { placeholderBiome } from './placeholder.js';
 import { downsBiome } from './downs.js';
 import { saltflatBiome } from './saltflat.js';
+import { nightcityBiome } from './nightcity.js';
 
 export const BIOMES = {
   downs: downsBiome,
   saltflat: saltflatBiome,
+  nightcity: nightcityBiome,
   placeholder: placeholderBiome,
 };
 
