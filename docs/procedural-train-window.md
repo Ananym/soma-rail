@@ -48,7 +48,9 @@ A first draft of the whole pipeline runs behind `?view=generated`; the video is 
 | Director | Speed from the distraction score, time of day, two surreal levels, tunnels that hide every change of scenery | `src/window/director.js` |
 | Music | The stream is loaded with CORS and analysed for loudness, bands, onsets and tempo; each channel has a starting profile; a new track queues a tunnel | `audio.js`, `audioAnalysis.js`, `profiles.json` |
 
-What the music changes today is modest: bass makes the splats breathe slightly, loudness drives the dissolve effect at the dreamlike level, a firm tempo lock sets the mast spacing of the next stretch, and a track or channel change brings new scenery through a tunnel.
+What the music changes today is modest: bass makes the splats breathe slightly, loudness drives the dissolve effect at the dreamlike level, a firm tempo lock sets the mast spacing of the next stretch, and a track or channel change brings new scenery through a tunnel. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
+
+Three failure paths were run in a headless browser and work: without WebGL2 the app falls back to the video; if the streams refuse CORS the radio keeps playing without analysis; and the audio context runs when started from the Start click with no autoplay override.
 
 Not built yet:
 
@@ -68,7 +70,8 @@ Nothing here can judge these; they are the point of the first session with it.
 | Does it hold 60 fps? | The debug readout shows fps and the resolution scale it has fallen back to; try `budget=300000` and `budget=1200000` |
 | Is the blur right? | Compare `shutter=0.01`, `0.02` and `0.04`; `blurKeep` trades streak solidity against thinning |
 | Do chunks pop in or hitch? | Watch the far left edge at full speed; raise `slice` if scenery arrives late, lower it if frames drop when it arrives |
-| Do the photo pieces belong? | Compare `kit=1` with `kit=0`; note where a photo's ground or edges show |
+| Do the photo pieces belong? | Compare `kit=1` with `kit=0`. In a software still, a photo piece stands correctly on the ground but is much sharper than the painterly scenery around it, and its ends are ragged |
+| Is the radio ever silent in the generated view? | Add `audio=0` to turn analysis off, and note the browser: Safari and Firefox are untested |
 | Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there |
 | Does music analysis work in your browser? | The readout shows `energy` moving and, on rhythmic channels, a `bpm`; Safari and Firefox are untested |
 | Do tunnels read as tunnels? | `t` forces one |
