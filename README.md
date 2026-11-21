@@ -66,6 +66,7 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | `npm run build && node scripts/app-check.cjs` | Start the built app in four cases (the bare URL, a tuned run, no WebGL2, streams refusing CORS) and check each runs. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
 | `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |
 | `node scripts/check-biomes.mjs` | Test the scenery generators |
+| `node scripts/check-rng.mjs` | Check the hash and noise helpers still return exactly the values every world is built from |
 | `node scripts/check-audio.mjs` | Test the music analysis |
 | `node scripts/check-sky.mjs out.png` | Render the sky at a range of hours |
 | `node scripts/build-profiles.mjs` | Regenerate the channel profiles from SomaFM's channel list |
