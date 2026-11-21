@@ -42,8 +42,11 @@ uniform float uBreath;`,
     anchor: 'vRgba = rgba;',
     insert: `
     {
+        // Colours with a channel near 1.0 are treated as light sources (lamps, lit windows):
+        // they ignore the time-of-day tint. Natural surfaces should keep every channel below 0.8.
+        float glow = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
         float hz = 1.0 - exp(viewCenter.z / max(uHazeDist, 1.0));
-        vRgba.rgb = mix(rgba.rgb * uLightTint, uHazeColor, hz);
+        vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow), uHazeColor, hz * (1.0 - 0.5 * glow));
     }`,
   },
   {

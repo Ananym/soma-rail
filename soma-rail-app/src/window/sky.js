@@ -1,6 +1,6 @@
 // Sky: a full-screen shader behind everything, plus the light it implies for the land.
 // createSky(THREE) -> { object3d, update(state), horizonColor, lightTint, sunDir }
-//   state = { hour (0..24), level (0|1), dials, time (seconds), dt, aspect, fovDeg }
+//   state = { hour (0..24), level (0|1), dials, time (seconds), dt, aspect, fovDeg, travelled (m), speed (m/s), energy (0..1) }
 //   horizonColor: THREE.Color the land hazes toward; lightTint: THREE.Color multiplied into splats.
 // This is a placeholder gradient; the real sky replaces it behind the same interface.
 export function createSky(THREE) {
