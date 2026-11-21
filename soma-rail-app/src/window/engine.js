@@ -45,6 +45,17 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   // --- sky, frame, director ----------------------------------------------------------------------
   const sky = createSky(THREE);
   scene.add(sky.object3d);
+  // Below the horizon and behind the splats: a ground-coloured backdrop, so any thin spot in the
+  // land reads as more land and never as sky. The camera is level, so the horizon is mid-screen.
+  const underlayUniforms = { uGround: { value: new THREE.Color(0.3, 0.38, 0.2) }, uHaze: uniforms.uHazeColor, uTint: uniforms.uLightTint };
+  const underlay = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+    uniforms: underlayUniforms, depthTest: false, depthWrite: false,   // opaque pass, right after the sky
+    vertexShader: 'varying float vDown; void main() { vDown = 0.5 - 0.5 * position.y; gl_Position = vec4(position.x, position.y * 0.5 - 0.5, 1.0, 1.0); }',
+    fragmentShader: 'varying float vDown; uniform vec3 uGround; uniform vec3 uHaze; uniform vec3 uTint; void main() { vec3 c = mix(uHaze, uGround * uTint, smoothstep(0.0, 0.3, vDown)); gl_FragColor = vec4(c, 1.0); }',
+  }));
+  underlay.frustumCulled = false; underlay.renderOrder = -999;
+  scene.add(underlay);
+  const setUnderlay = (b) => { const g = (b.palette && (b.palette.underlay || b.palette.ground)) || [0.3, 0.38, 0.2]; underlayUniforms.uGround.value.setRGB(g[0], g[1], g[2]); };
   const frame = createFrame(THREE);
   if (params.frame) camera.add(frame.object3d);
   const director = createDirector({ params, reducedMotion });
@@ -97,6 +108,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   // --- world: chunk rings per depth band -----------------------------------------------------------
   let biome = getBiome(S.biome);
   let terrain = makeTerrain(S.seed, biome.terrain);
+  setUnderlay(biome);
   let tanHalfHfov = 1;
   const chunks = new Map();     // key `${layer}:${index}` -> chunk
   let epoch = 0;                // bumps on every rebuild; stale chunks are dropped
@@ -169,6 +181,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     for (const key of [...chunks.keys()]) dropChunk(key);
     biome = getBiome(S.biome);
     terrain = makeTerrain(S.seed, biome.terrain);
+    setUnderlay(biome);
     rebuilding = true;
   }
   let rebuilding = false;
@@ -227,6 +240,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     for (const ch of chunks.values()) if (ch.mesh) ch.mesh.position.x = ch.x0 - S.travelled;
     updateTunnel();
     sky.object3d.visible = !inTunnel;
+    underlay.visible = !inTunnel;
 
     if (!reducedMotion) {
       // a little carriage movement, scaled by speed

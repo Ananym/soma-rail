@@ -12,6 +12,7 @@
 // ctx = { rng, x0, length, zNear, zFar, count, terrain, palette, dials, level, beatMetres, index }
 //   terrain.height(worldX, dist) gives ground height; use ctx.x0 + x for worldX.
 //   count is the target number of splats for the chunk; stay within about 10% of it.
+// palette.ground (or palette.underlay) is also used for the backdrop drawn below the horizon, behind the splats.
 import { placeholderBiome } from './placeholder.js';
 
 export const BIOMES = {
