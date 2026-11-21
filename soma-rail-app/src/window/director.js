@@ -6,9 +6,14 @@ import { BIOMES, DEFAULT_BIOME } from './biomes/index.js';
 
 // Surreal levels: each is one setting of all five dials, tuned as a whole.
 export const LEVELS = [
-  { name: 'plausible', scale: 0, topology: 0, matter: 0, time: 0.03, logic: 0 },
+  { name: 'plausible', scale: 0, topology: 0, matter: 0, time: 0.012, logic: 0 },
   { name: 'dreamlike', scale: 0.8, topology: 0.6, matter: 0.5, time: 1, logic: 0.3 },
 ];
+
+// Times of day a stretch of scenery can start in. The sky's sun rises at 06:00 and sets at 20:00
+// and is below about 10 degrees for the 45 minutes after and before: those are the golden hours.
+export const SLOTS = { dawn: [6.1, 6.8], day: [9, 16.5], dusk: [19.15, 19.85], night: [21.5, 3] };
+const SLOT_WEIGHTS = { dawn: 0.22, day: 0.46, dusk: 0.32, night: 0 };
 
 const TUNNEL_LEAD = 70;        // metres ahead that a tunnel mouth appears
 const TUNNEL_MIN_SECONDS = 5;  // shortest time spent inside one
@@ -21,7 +26,8 @@ export function createDirector({ params, reducedMotion = false }) {
     speed: 0,               // metres per second
     rate: 1,                // 0..1 from the distraction mechanic
     cruise: (params.kmh / 3.6) * (reducedMotion ? 0.4 : 1),
-    hour: params.hour >= 0 ? params.hour : 8 + (baseSeed % 800) / 100,   // start between 08:00 and 16:00
+    hour: params.hour >= 0 ? params.hour : 12,   // placed in a slot just below
+    slot: '',
     level: params.level,
     dials: { ...LEVELS[params.level] },
     biome: BIOMES[params.biome] ? params.biome : DEFAULT_BIOME,
@@ -37,21 +43,28 @@ export function createDirector({ params, reducedMotion = false }) {
   };
   const listeners = { swap: [] };
 
-  // A biome may prefer part of the day (a night city, a dawn marsh): { hours: [from, to] }.
-  // Called whenever the scenery changes.
+  // Each change of scenery arrives at a time of day drawn from these slots, so journeys spend real
+  // time in the low light of dawn and dusk and not only at midday. A biome can ask for its own
+  // window with { hours: [from, to] } (the night city does) or reweight the slots with
+  // { slots: { dawn, day, dusk, night } }. `slot=` in the URL forces one; `hour=` pins the clock.
   function placeHour() {
     const b = BIOMES[state.biome];
-    if (params.hour >= 0 || !b) return;
-    const roll = ((state.seed >>> 8) % 1000) / 1000;
-    if (b.hours) {
-      const [from, to] = b.hours;
-      state.hour = (from + ((to - from + 24) % 24) * roll) % 24;
-    } else if (state.level === 0 && (state.hour < 6.5 || state.hour > 19.5)) {
-      // Leaving a night biome at the plausible level: come out of the tunnel into daylight rather
-      // than spend an hour of real time in the dark. (The dreamlike level cycles the day quickly.)
-      state.hour = 8 + 9 * roll;
+    if (params.hour >= 0) return;
+    const roll = ((state.seed >>> 8) % 1000) / 1000, roll2 = ((state.seed >>> 18) % 1000) / 1000;
+    let range = null;
+    if (SLOTS[params.slot]) { range = SLOTS[params.slot]; state.slot = params.slot; }
+    else if (b && b.hours) { range = b.hours; state.slot = 'biome'; }
+    else {
+      const w = { ...SLOT_WEIGHTS, ...((b && b.slots) || {}) };
+      const total = Object.values(w).reduce((x, y) => x + y, 0);
+      let pick = roll * total;
+      for (const name of Object.keys(w)) { if (pick < w[name]) { range = SLOTS[name]; state.slot = name; break; } pick -= w[name]; }
+      if (!range) { range = SLOTS.day; state.slot = 'day'; }
     }
+    const [from, to] = range;
+    state.hour = (from + ((to - from + 24) % 24) * roll2) % 24;
   }
+  placeHour();
 
   function chooseBiome(seed) {
     const pool = (state.profile && state.profile.biomes && state.profile.biomes.filter((b) => BIOMES[b])) || [];
@@ -118,7 +131,8 @@ export function createDirector({ params, reducedMotion = false }) {
       if (state.speed < 0.02 && target === 0) state.speed = 0;
       state.travelled += state.speed * dt;
 
-      if (params.hour < 0) state.hour = (state.hour + dt * (state.dials.time * 0.05 + 0.0006)) % 24;
+      // the clock: about an hour every 20 minutes at the plausible level, every 20 seconds at the dreamlike one
+      if (params.hour < 0) state.hour = (state.hour + dt * (state.dials.time * 0.05 + 0.0002)) % 24;
       const wantDissolve = reducedMotion ? 0 : state.dials.matter * Math.max(0, state.energy - 0.35) * 0.9;
       state.dissolve += (wantDissolve - state.dissolve) * Math.min(1, dt * 0.5);
 

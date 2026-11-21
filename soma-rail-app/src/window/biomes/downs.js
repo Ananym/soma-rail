@@ -325,7 +325,7 @@ function* fieldContents(ctx, out, L, dLo, dHi, margin, opts = {}) {
 
 // House, barn and a shed, with a tree. `wrong` > 0 nudges it for the repeating (logic) version.
 function* farmstead(ctx, out, x, d, rng, scale = 1, wrong = 0) {
-  const yaw = (rng() - 0.5) * 0.5 + (rng() < 0.25 ? Math.PI / 2 : 0);
+  const yaw = (rng() - 0.5) * 0.5 + (rng() < 0.25 ? (rng() < 0.5 ? 1 : -1) * Math.PI / 2 : 0);
   const wall = WALLS[Math.floor(rng() * WALLS.length)];
   const roof = ROOFS[Math.floor(rng() * ROOFS.length)];
   yield* house(ctx, out, x, d, { w: 10 * scale, depth: 7 * scale, h: 6 * scale, wall, roof: wrong ? mix3(roof, [0.2, 0.3, 0.45], wrong) : roof, yaw, rng });
@@ -359,7 +359,7 @@ function* villages(ctx, out, L, dLo, dHi, opts = {}) {
       const hr = makeRng(hashInts(v.seed, si));
       // irregular plots: nudge each house off the street line and turn some gable-on
       const wx = spots[si][0] + (hr() - 0.5) * 6, dd = spots[si][1] + (hr() - 0.5) * 5;
-      const yaw = spots[si][2] + (hr() < 0.2 ? Math.PI / 2 : 0);
+      const yaw = spots[si][2] + (hr() < 0.2 ? (hr() < 0.5 ? 1 : -1) * Math.PI / 2 : 0);
       if (hr() < 0.3) continue;
       if (Math.abs(wx - v.cx) < 20 && Math.abs(dd - v.dc - 14) < 12) continue;   // the churchyard
       if (dd < dLo || dd >= dHi) continue;

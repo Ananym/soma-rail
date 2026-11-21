@@ -13,10 +13,11 @@ const NUM = {
   audio: 1,          // 0 disables audio analysis
   frame: 1,          // 0 hides the window frame
   kit: 1,            // 0 leaves out the photo pieces (code-made scenery only)
+  gold: 1,           // strength of the warm grade on the land when the sun is low (0 = off)
   debug: 0,          // 1 shows a stats readout
   preserve: 0,       // 1 keeps the drawing buffer readable (screenshot scripts only; slower)
 };
-const STR = { seed: '', biome: '' };
+const STR = { seed: '', biome: '', slot: '' };   // slot: dawn | day | dusk | night
 
 export function readParams(search = (typeof location !== 'undefined' ? location.search : '')) {
   const q = new URLSearchParams(search);

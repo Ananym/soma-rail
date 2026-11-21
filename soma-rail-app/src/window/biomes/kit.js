@@ -447,9 +447,13 @@ export function* house(ctx, out, x, d, opts = {}) {
   const [fx, fz] = rotY(0, 1, yaw);       // outward from the front (toward camera when yaw = 0)
   const P = (lx, ly, lz) => [x + ex * lx + fx * lz, base + ly, -d + ez * lx + fz * lz];
   const win = opts.windowColor || [0.12, 0.13, 0.15];
-  const wallF = shade(wall, fx * 0, 0, 1, 0.66, 0.4);
-  const wallS = shade(wall, -1, 0, 0, 0.66, 0.4);
-  const wallS2 = shade(wall, 1, 0, 0, 0.66, 0.4);
+  // The three faces a passing train sees get clearly different tones, so both corners read in
+  // motion: first the front with the approach-side (west, -x) end, then the front with the far
+  // (east, +x) end. Plain sun shading made the west end almost the same tone as the front, and the
+  // building then looked like a flat card until the train had passed it.
+  const wallF = mul3(wall, 0.8);
+  const wallS = mul3(wall, 0.98);     // west end: in full sun
+  const wallS2 = mul3(wall, 0.56);    // east end: in shade
   const rows = Math.max(1, Math.floor(h / 2.7));
   const cols = Math.max(1, Math.floor(w / 2.6));
   const windowAt = (a, b) => {
@@ -462,18 +466,28 @@ export function* house(ctx, out, x, d, opts = {}) {
   };
   const wj = jitter([1, 1, 1], rng, 0.05)[0];
   // front wall
-  yield* face(out, P(-w / 2, 0, dep / 2), ex, 0, ez, 0, 1, 0, w, hh, s, (a, b) => (windowAt(a, b) ? win : mul3(wallF, wj * (0.95 + 0.1 * b))), q, kind, rng);
+  // (the top of the front wall is darkened: the shadow under the eaves)
+  yield* face(out, P(-w / 2, 0, dep / 2), ex, 0, ez, 0, 1, 0, w, hh, s, (a, b) => (windowAt(a, b) ? win : mul3(wallF, wj * (0.95 + 0.1 * b) * (b > 0.9 ? 0.72 : 1))), q, kind, rng);
   // gable ends (sides), with the triangle up to the ridge
   const side = (sgn, col) => {
     const qs = quatMul(q, quatYaw(Math.PI / 2));
     return face(out, P(sgn * w / 2, 0, dep / 2), -fx, 0, -fz, 0, 1, 0, dep, hh + rh, s, (a, b) => {
       const yy = b * (hh + rh);
       if (yy > hh && Math.abs(a - 0.5) * 2 > 1 - (yy - hh) / rh) return null;   // outside the gable triangle
-      return mul3(col, wj);
+      // one small window high in the gable of a house, so the end wall reads as a wall
+      if (opts.windows !== false && dep >= 5 && Math.abs(a - 0.5) < 0.09 && yy > hh * 0.62 && yy < hh * 0.86) return win;
+      return mul3(col, wj * (0.92 + 0.12 * b));
     }, qs, kind, rng);
   };
   yield* side(-1, wallS);
   yield* side(1, wallS2);
+  // A building turned away from the track shows its back to a train coming from one side. Without a
+  // back wall and back roof slope you would look into an open box until the train had passed it.
+  const turned = Math.cos(yaw) < 0.78;
+  if (turned) {
+    const wallB = mul3(wall, 0.68);
+    yield* face(out, P(-w / 2, 0, -dep / 2), ex, 0, ez, 0, 1, 0, w, hh, s, (a, b) => (windowAt(a, b) ? win : mul3(wallB, wj * (0.95 + 0.1 * b) * (b > 0.9 ? 0.72 : 1))), q, kind, rng);
+  }
   // roof: the front pitch, plus a strip of the back pitch showing above the ridge from below
   const pitch = Math.atan2(rh, dep / 2);
   const slopeLen = Math.hypot(rh, dep / 2) + 0.3;
@@ -482,6 +496,12 @@ export function* house(ctx, out, x, d, opts = {}) {
   const ov = 0.3;   // eaves overhang
   yield* face(out, P(-w / 2 - ov, hh - 0.1, dep / 2 + 0.25), ex, 0, ez, -fx * Math.cos(pitch), Math.sin(pitch), -fz * Math.cos(pitch), w + 2 * ov, slopeLen, s,
     () => jitter(roofF, rng, 0.07), qr, kind, rng);
+  if (turned) {
+    const qrB = quatMul(q, quatPitch(Math.PI / 2 - pitch));
+    const roofB = mul3(roof, 0.82);
+    yield* face(out, P(-w / 2 - ov, hh - 0.1, -dep / 2 - 0.25), ex, 0, ez, fx * Math.cos(pitch), Math.sin(pitch), fz * Math.cos(pitch), w + 2 * ov, slopeLen, s,
+      () => jitter(roofB, rng, 0.07), qrB, kind, rng);
+  }
   if (opts.chimney !== false && w > 6 && rng() < 0.8) {
     const cxl = (rng() < 0.5 ? -1 : 1) * (w / 2 - 0.8);
     const col = shade(opts.chimneyColor || wall, 0, 0.3, 1, 0.6, 0.5);
@@ -502,7 +522,8 @@ export function* tower(ctx, out, x, d, opts = {}) {
   const yaw = opts.yaw || 0, q = quatYaw(yaw);
   const [ex, ez] = rotY(1, 0, yaw), [fx, fz] = rotY(0, 1, yaw);
   const P = (lx, ly, lz) => [x + ex * lx + fx * lz, base + ly, -d + ez * lx + fz * lz];
-  const front = shade(col, 0, 0, 1, 0.64, 0.4), sideL = shade(col, -1, 0, 0, 0.64, 0.4), sideR = shade(col, 1, 0, 0, 0.64, 0.4);
+  // as for house(): three clearly different tones, so both corners read from a passing train
+  const front = mul3(col, 0.8), sideL = mul3(col, 0.98), sideR = mul3(col, 0.56);
   const slit = (a, b) => Math.abs(a - 0.5) < 0.08 && ((b > 0.62 && b < 0.72) || (b > 0.82 && b < 0.9));
   yield* face(out, P(-w / 2, 0, w / 2), ex, 0, ez, 0, 1, 0, w, h, s, (a, b) => (slit(a, b) ? [0.1, 0.1, 0.11] : jitter(front, rng, 0.05)), q, kind, rng);
   const qs = quatMul(q, quatYaw(Math.PI / 2));

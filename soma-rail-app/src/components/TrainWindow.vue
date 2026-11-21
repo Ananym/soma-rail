@@ -98,7 +98,25 @@ function disconnectAudio() {
 }
 
 // With ?debug=1 a few keys drive the director, for tuning on a real GPU.
-const DEBUG_KEYS = '\n\nkeys: t new scenery   b next biome   l surreal level\n      h +1 hour   [ ] speed -/+ 10 km/h';
+const DEBUG_KEYS = '\n\nkeys: l surreal level   b next biome   t new scenery\n      g next time slot   h +1 hour   [ ] speed -/+ 10 km/h';
+
+// The debug readout: what the director is doing now, and what is about to change.
+function readout(s) {
+  const hh = Math.floor(s.hour), mm = String(Math.floor((s.hour - hh) * 60)).padStart(2, '0');
+  const lines = [`SURREAL LEVEL: ${s.levelName.toUpperCase()} (${s.level})`];
+  if (s.next) {
+    const what = [];
+    if (s.next.levelName !== s.levelName) what.push(`level -> ${s.next.levelName}`);
+    if (s.next.biome !== s.biome) what.push(`scenery -> ${s.next.biome}`);
+    if (!what.length) what.push('new scenery');
+    lines.push(s.next.phase === 'approach' ? `  ${what.join(', ')} at the tunnel ahead` : `  in the tunnel: ${what.join(', ')}`);
+  }
+  lines.push(`scenery: ${s.biome}   time: ${hh}:${mm} (${s.slot || 'pinned'})   ${s.kmh} km/h`);
+  lines.push(`${s.fps} fps   ${Math.round(s.splats / 1000)}k splats   resolution x${s.resScale}   photo pieces ${s.photos}`);
+  lines.push(s.audio ? `music: energy ${s.energy}   ${s.bpm ? s.bpm + ' bpm' : 'no tempo lock'}   masts every ${s.mast} m   dissolve ${s.dissolve}` : 'music: not analysed');
+  if (!s.patched) lines.push('WARNING: shader patch not applied (no blur or haze)');
+  return lines.join('\n');
+}
 function onDebugKey(e) {
   if (!engine || e.metaKey || e.ctrlKey || e.altKey) return;
   const d = engine.director, s = d.state;
@@ -107,6 +125,7 @@ function onDebugKey(e) {
   else if (e.key === 'b') { const names = engine.biomeNames(); d.queueTransition({ seed, biome: names[(names.indexOf(s.biome) + 1) % names.length], level: s.level }); }
   else if (e.key === 'l') d.queueTransition({ seed: s.seed, biome: s.biome, level: s.level ? 0 : 1 });
   else if (e.key === 'h') s.hour = (s.hour + 1) % 24;
+  else if (e.key === 'g') engine.cycleSlot();
   else if (e.key === '[') s.cruise = Math.max(0, s.cruise - 10 / 3.6);
   else if (e.key === ']') s.cruise = s.cruise + 10 / 3.6;
 }
@@ -132,7 +151,7 @@ async function play() {
     if (tap) engine.setAudioProvider((dt) => (audioFeatures = tap.update(dt)));
     else attachLater();
     if (params.debug) {
-      statsTimer = setInterval(() => { statsText.value = JSON.stringify(engine.stats(), null, 1) + DEBUG_KEYS; }, 500);
+      statsTimer = setInterval(() => { statsText.value = readout(engine.stats()) + DEBUG_KEYS; }, 250);
       window.addEventListener('keydown', onDebugKey);
     }
     if (typeof window !== 'undefined') window.__trainWindow = engine;   // for tuning from the console
@@ -248,7 +267,8 @@ canvas {
   top: 8px;
   left: 8px;
   z-index: 2;
-  font: 11px/1.3 ui-monospace, monospace;
+  font: 12px/1.4 ui-monospace, monospace;
+  white-space: pre;
   color: #9f9;
   background: rgba(0, 0, 0, 0.5);
   padding: 6px 8px;

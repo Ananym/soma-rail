@@ -45,7 +45,7 @@ A first draft of the whole pipeline runs behind `?view=generated`; the video is 
 | Photo pieces | Six sheets made from CC0 photos are shipped (9.8 MB). Two are switched on, in the farmland biome: a woodland edge and a group of houses. Two looked like pasted cut-outs in place and are off; two are untried | `kitPieces.js`, `public/kit/`, `scripts/photo-to-splats.mjs` |
 | Sky | One shader: scattering by sun height, sun, moon, stars, two cloud layers; it also sets the land's haze colour and light | `src/window/sky.js` |
 | Window frame and glass | A rounded frame with a sill, plus grain, a faint reflection and a vignette | `frame.js`, `TrainWindow.vue` |
-| Director | Speed from the distraction score (distraction brakes the train to a stop; nothing fades to black), time of day, two surreal levels, tunnels that hide every change of scenery | `src/window/director.js` |
+| Director | Speed from the distraction score (distraction brakes the train to a stop; nothing fades to black), two surreal levels, tunnels that hide every change of scenery. Each stretch starts in a time-of-day slot: dawn or dusk about half the time, with a warm grade on the land while the sun is low | `src/window/director.js` |
 | Music | The stream is loaded with CORS and analysed for loudness, bands, onsets and tempo; each channel has a starting profile; a new track queues a tunnel | `audio.js`, `audioAnalysis.js`, `profiles.json` |
 
 What the music changes today is modest: bass makes the splats breathe slightly, loudness drives the dissolve effect at the dreamlike level, a firm tempo lock sets the mast spacing of the next stretch, and a track or channel change brings new scenery through a tunnel. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
@@ -72,7 +72,9 @@ Nothing here can judge these; they are the point of the first session with it.
 | Do chunks pop in or hitch? | Watch the far left edge at full speed; raise `slice` if scenery arrives late, lower it if frames drop when it arrives |
 | Do the photo pieces belong? | In the farmland biome, compare `kit=1` with `kit=0`. In software stills the houses are convincing and the woodland edge stands correctly, but both are much sharper than the painterly scenery around them |
 | Is the radio ever silent in the generated view? | Add `audio=0` to turn analysis off, and note the browser: Safari and Firefox are untested |
-| Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there |
+| Do the two surreal levels feel right? | `l` switches level through a tunnel; `level=1` starts there. The readout names the current level and what is coming |
+| Is golden hour right? | `g` steps through dawn, day, dusk and night; `gold=0.5` halves the warm grade |
+| Do buildings hold together as you pass? | Farm buildings turned away from the line used to show an open back; they now have a back wall and roof. Watch a farmstead from approach to departure |
 | Is the dissolve dreamlike or distracting? | At the dreamlike level, loud music makes layers of the scene drift apart. It has only been seen in stills; watch it move on a spacey channel such as Drone Zone |
 | Is the bass "breath" felt or seen? | Splats swell by up to 3.5% with the bass, at both levels; it should be barely noticeable |
 | Does music analysis work in your browser? | The readout shows `energy` moving and, on rhythmic channels, a `bpm`; Safari and Firefox are untested |

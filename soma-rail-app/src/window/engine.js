@@ -8,7 +8,7 @@ import { makeTerrain } from './terrain.js';
 import { getBiome, BIOMES } from './biomes/index.js';
 import { createSky } from './sky.js';
 import { createFrame } from './frame.js';
-import { createDirector } from './director.js';
+import { createDirector, LEVELS, SLOTS } from './director.js';
 import { buildVertexShader, PATCH_UNIFORMS } from './sparkPatch.js';
 import { hashInts, makeRng } from './rng.js';
 import { createKit } from './kitPieces.js';
@@ -241,6 +241,14 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     uniforms.uHazeColor.value.copy(sky.horizonColor);
     uniforms.uHazeHigh.value.copy(sky.hazeHighColor || sky.horizonColor);
     uniforms.uLightTint.value.copy(sky.lightTint);
+    {
+      // Golden hour: with the sun low but up, push the land's light warm and a little brighter, as a
+      // camera exposing for the scene would see it. The sky's own tint only dims at these hours.
+      const y = sky.sunDir.y, ss = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+      const low = ss(0.32, 0.1, y) * ss(-0.06, 0.03, y) * params.gold;
+      const t = uniforms.uLightTint.value;
+      t.r *= 1 + 0.42 * low; t.g *= 1 + 0.12 * low; t.b *= 1 - 0.22 * low;
+    }
     uniforms.uHazeDist.value = biome.hazeDist || 3000;
     uniforms.uDissolve.value = S.dissolve;
     uniforms.uBreath.value = S.breath;
@@ -273,13 +281,22 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     director,
     start() { running = true; last = performance.now(); },
     setRate(r) { director.setRate(r); },
+    // Jump the clock to the next time-of-day slot (a tuning aid; see SLOTS in director.js).
+    cycleSlot() {
+      const names = Object.keys(SLOTS), next = names[(names.indexOf(S.slot) + 1) % names.length];
+      S.slot = next; S.hour = (SLOTS[next][0] + 0.3) % 24;
+      return next;
+    },
     kitInstances() { return kit ? kit.instances() : []; },   // for the harness and tuning
     biomeNames() { return Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1); },
     setAudioProvider(fn) { audioProvider = fn; },
     stats() {
       let splats = 0, pending = 0;
       for (const ch of chunks.values()) { if (ch.done) splats += ch.count(); else pending++; }
-      return { fps: Math.round(fps), at: Math.round(S.travelled), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres), photos: kit ? kit.stats().pieces : 0 };
+      return { fps: Math.round(fps), at: Math.round(S.travelled), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres), photos: kit ? kit.stats().pieces : 0,
+        levelName: LEVELS[S.level].name, slot: S.slot, tint: uniforms.uLightTint.value.toArray().map((v) => +v.toFixed(2)), dissolve: +S.dissolve.toFixed(2),
+        next: S.tunnel ? { biome: S.tunnel.next.biome, levelName: LEVELS[S.tunnel.next.level].name, phase: S.tunnel.phase } : null,
+        audio: !!audioProvider };
     },
     dispose() {
       disposed = true;
