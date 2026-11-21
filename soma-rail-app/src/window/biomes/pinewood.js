@@ -995,7 +995,7 @@ function* powerLines(ctx, out, W, dLo, dHi) {
         const ya = p.y + 26 + (off === 0 ? 4 : 0), yb = p2.y + 26 + (off === 0 ? 4 : 0);
         const len = Math.hypot(p2.wx - p.wx, p2.d - p.d);
         const steps = Math.ceil(len / Math.max(1, 0.004 * p.d));
-        const r = Math.max(0.03, 0.0012 * p.d);
+        const r = Math.max(0.03, 0.00055 * p.d);   // thin at any distance: a conductor is a line, not a ribbon
         for (let s = 0; s < steps; s++) {
           const t = (s + 0.5) / steps;
           const d = lerp(p.d, p2.d, t);

@@ -33,7 +33,7 @@ const outDir = process.argv[2] || '.';
     { name: 'cors-refused', query: Q, wait: 20000, expect: 'window', tap: false, settle: 12000, noisy: true,
       route: async (page) => page.route(/ice\d\.somafm\.com/, async (route) => { const h = await route.request().allHeaders(); return h.origin ? route.abort() : route.continue(); }) },
   ];
-  for (const c of cases) {
+  for (const c of cases.filter((k) => !process.env.ONLY || k.name === process.env.ONLY)) {
     const name = c.name;
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' });
     const page = await ctx.newPage();
@@ -74,12 +74,27 @@ const outDir = process.argv[2] || '.';
       await page.waitForTimeout(15000);
       const after = await rate();
       const overlay = await page.evaluate(() => !!document.querySelector('.window-container .distraction-overlay'));
-      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
       brake = { rateBefore: +before.toFixed(2), rateAfterBlur: +after.toFixed(2), overlay, ok: after < before - 0.03 && !overlay };
+      // With IDLE=1, hold the distraction until the train has stopped (minutes on a software renderer)
+      // and require the engine to go idle and the music effects to rest. Off by default for its length.
+      if (process.env.IDLE === '1') {
+        const t0 = Date.now();
+        while (Date.now() - t0 < 420000 && (await rate()) > 0) await page.waitForTimeout(5000);
+        const t1 = Date.now();   // then the brake itself, which is slow at a few frames a second
+        while (Date.now() - t1 < 240000 && !(await page.evaluate(() => window.__trainWindow.stats().idle))) await page.waitForTimeout(3000);
+        const idle = await page.evaluate(() => { const s = window.__trainWindow.stats(), d = window.__trainWindow.director.state;
+          return { rate: d.rate, kmh: s.kmh, idle: s.idle, beat: d.beat, sparkle: d.sparkle, breath: d.breath,
+            still: document.querySelector('.window-container').classList.contains('still') }; });
+        brake.idle = idle;
+        brake.ok = brake.ok && idle.rate === 0 && idle.idle === true && idle.still && idle.beat === 0 && idle.sparkle === 0 && idle.breath === 0;
+      }
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     }
     await page.screenshot({ path: path.join(outDir, `app-${name}.png`), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
     // Only the case that breaks the streams on purpose may log load failures.
-    const ours = c.noisy ? errors.filter((e) => !/Failed to load resource|net::ERR|Audio error|server attempts/i.test(e)) : errors;
+    let ours = c.noisy ? errors.filter((e) => !/Failed to load resource|net::ERR|Audio error|server attempts/i.test(e)) : errors;
+    // The minutes-long IDLE run rides out the odd dropped poll through a proxy; nothing else is excused.
+    if (process.env.IDLE === '1') for (let i = ours.length - 1; i >= 0; i--) if (/net::ERR_CONNECTION_RESET/.test(ours[i])) ours.splice(i, 1);
     if (youtube.length) ours.push(`requests to YouTube hosts: ${youtube.length}`);
     console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log('brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }

@@ -29,7 +29,7 @@ The view is a landscape of Gaussian splats sliding past, under a shader sky, beh
 What it does today:
 
 - **Scenery** is generated ahead of the train in chunks and thrown away behind it. Changes of scenery happen inside tunnels.
-- **Distraction brakes the train.** Fidget and it slows to a stop, the motion blur shrinking until the view stands sharp and still; settle and it pulls away again. The audio quietens with it. A stopped train costs almost nothing to show: the view is redrawn twice a second, and a hidden tab is not drawn at all.
+- **Distraction brakes the train.** Fidget and it slows to a stop, the motion blur shrinking until the view stands sharp and still; settle and it pulls away again. The audio quietens with it. A stopped train costs almost nothing to show: the clock and the music's effects rest, the view is redrawn twice a second, and a hidden tab is not drawn at all.
 - **Time of day** is drawn afresh for each stretch of scenery: dawn and dusk (golden hour) about half the time, full day the rest, and night in the city.
 - **Music** changes the view. Each SomaFM channel starts in scenery that suits it, and a new track queues a tunnel and new scenery. The audio is analysed live: each kick or snare makes trees, buildings and lights swell briefly, the treble makes foliage shimmer and lights and stars twinkle, and the bass makes everything breathe. In Safari and on iPhones and iPads the analysis is off unless you add `audio=1`, because those browsers can go silent when a radio stream is analysed; the channel and track changes still steer the view there.
 - **Six kinds of scenery** are written in code: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country with limestone towers and paddies, and a sand-sea desert with oases. Each has a plausible and a dreamlike version.
@@ -62,7 +62,7 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | Script | What it does |
 | --- | --- |
 | `node scripts/window-shot.cjs out.png "seed=1&hour=12"` | Screenshot the view on its own (`window-harness.html`) |
-| `npm run build && node scripts/app-check.cjs` | Start the built app in four cases (the bare URL, a tuned run, no WebGL2, streams refusing CORS) and check each runs |
+| `npm run build && node scripts/app-check.cjs` | Start the built app in four cases (the bare URL, a tuned run, no WebGL2, streams refusing CORS) and check each runs. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
 | `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |
 | `node scripts/check-biomes.mjs` | Test the scenery generators |
 | `node scripts/check-audio.mjs` | Test the music analysis |

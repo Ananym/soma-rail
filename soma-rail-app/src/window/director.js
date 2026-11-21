@@ -141,7 +141,10 @@ export function createDirector({ params, reducedMotion = false }) {
       state.travelled += state.speed * dt;
 
       // the clock: about an hour every 20 minutes at the plausible level, every 20 seconds at the dreamlike one
-      if (params.hour < 0) state.hour = (state.hour + dt * (state.dials.time * 0.05 + 0.0002)) % 24;
+      // A stopped train holds the whole view still: the clock waits and the music stops moving the
+      // scenery, so the engine can redraw it rarely (see its idle mode) and the picture stands sharp.
+      const still = state.speed === 0 && state.rate === 0;
+      if (params.hour < 0 && !still) state.hour = (state.hour + dt * (state.dials.time * 0.05 + 0.0002)) % 24;
       state.beat *= Math.exp(-dt / 0.17);                                   // a beat is over in a few frames
       // Treble is a level, not an event: on most music it sits at a moderate value all the time. The
       // sparkle follows only its excess over the last few seconds' average, so it rests at zero and
@@ -151,6 +154,7 @@ export function createDirector({ params, reducedMotion = false }) {
       state.sparkle += (lift - state.sparkle) * (1 - Math.exp(-dt / 0.1));
       const wantDissolve = reducedMotion ? 0 : state.dials.matter * Math.max(0, state.energy - 0.35) * 0.9;
       state.dissolve += (wantDissolve - state.dissolve) * Math.min(1, dt * 0.5);
+      if (still) { state.beat = 0; state.sparkle = 0; state.breath = 0; }
 
       const t = state.tunnel;
       if (t) {

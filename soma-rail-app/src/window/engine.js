@@ -247,11 +247,12 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const now = performance.now();
     const interval = now - last;
     const dt = Math.min(0.1, interval / 1000); last = now;
+    const wasIdle = isIdle || !!idleSince;   // the gap before this frame was chosen, not suffered
     // Hitch meter: the gap since the last frame is blamed on what the last frame did.
     if (running) {
-      if (interval > 25 && !isIdle && !idleSince) hitchTimes.push(now);
+      if (interval > 25 && !wasIdle) hitchTimes.push(now);
       while (hitchTimes.length && now - hitchTimes[0] > 10000) hitchTimes.shift();
-      if (!idleSince && (interval > worst.ms || now - worst.at > 4000)) worst = { ms: interval, at: now, ...prevWork };
+      if (!wasIdle && (interval > worst.ms || now - worst.at > 4000)) worst = { ms: interval, at: now, ...prevWork };
     }
     frameNote = '';
 
@@ -260,12 +261,12 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     // away again), and one frame is drawn every half second so the sky and the clock drift on.
     // A hidden tab gets no frames at all: the browser stops calling us.
     const stopped = running && S.speed === 0 && S.rate === 0;
-    if (stopped && !rebuilding && lastAllDone && now - lastDraw < IDLE_FRAME_MS && idleSince && now - idleSince > 600) {
+    if (stopped) { if (!idleSince) idleSince = now; } else idleSince = 0;
+    isIdle = stopped && !rebuilding && lastAllDone && now - idleSince > 600;
+    if (isIdle && now - lastDraw < IDLE_FRAME_MS) {
       director.update(dt);
-      isIdle = true;
       return;
     }
-    if (stopped) { if (!idleSince) idleSince = now; } else { idleSince = 0; isIdle = false; }
     lastDraw = now;
 
     if (audioProvider) director.setAudio(audioProvider(dt));
@@ -316,7 +317,9 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     renderer.render(scene, camera);
     const tEnd = performance.now();
     prevWork = { gen: tGen, render: tEnd - tRender0, cpu: tEnd - now, note: frameNote };
-    if (running && !params.preserve) adapt(dt);   // screenshot runs keep full resolution
+    // Screenshot runs keep full resolution, and a stopped train's slow redraws say nothing about speed:
+    // without this the resolution would fall while the view stands still.
+    if (running && !params.preserve && !wasIdle && !isIdle) adapt(dt);
   }
   renderer.setAnimationLoop(tick);
 
