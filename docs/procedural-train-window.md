@@ -283,6 +283,19 @@ Surveyed on 21 November 2026. Ready-made outdoor splats that are free, downloada
 
 I re-read the licence statements for the first, second and fourth rows and loaded the Padilla tree in Spark. The Big Sur and Ludlow files were too large to render on this machine.
 
+### What the files look like from the window
+
+Four files were small enough to load in Spark and view from the side, as the train would see them. The Spark samples carry no licence, so they were looked at and not kept.
+
+| File | From the side |
+| --- | --- |
+| Padilla tree, 100,000 splats | A clean, solid shape in one flat colour. Usable as a silhouette if recoloured. |
+| Spark sample "snow-street", 1 million splats | A lit street between two buildings, with its own sky baked in and ragged edges. Reads as a diorama. |
+| Spark sample "valley", 500,000 splats | A bubble: the scene is painted on the inside of a sphere of splats. Unusable from outside. |
+| Hugging Face "meadow", 1.2 million splats | Long streaks and floaters across the frame. Needs cleaning and orienting before it is anything. |
+
+Two lessons for the kit. Scenes made to be stood inside, which is what world generators produce, do not work as pieces seen from outside without cutting away their sky and edges. And raw captures need a cleaning pass before they are usable. Both favour pieces made for this camera: photo sheets and code-made scenery.
+
 ### SuperSplat candidates, once you log in
 
 Each scene's uploader picks a Creative Commons licence when enabling downloads; most choose CC BY. Check the licence link on each page, credit the author, and skip game rips and AI-generated worlds.
