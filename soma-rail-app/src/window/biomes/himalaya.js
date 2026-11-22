@@ -875,7 +875,8 @@ function surface(W, wx, d) {
   return S;
 }
 
-function snowLine(W, wx, d) { return 360 + 160 * noise2(wx / 1800, d / 1500, W.ws + 81) + 70 * (noise2(wx / 160, d / 160, W.ws + 82) - 0.5); }
+// (low enough that the upper third of the wall seen from the window is under snow: this is a cold place)
+function snowLine(W, wx, d) { return 100 + 150 * noise2(wx / 1800, d / 1500, W.ws + 81) + 70 * (noise2(wx / 160, d / 160, W.ws + 82) - 0.5); }
 
 // Colour of the ground at a point, lit from its normal nn. Every texture here belongs to the
 // mountain: rock in beds that follow the contours, scree streaked down the fall line, snow lying in
@@ -961,7 +962,7 @@ function surfColor(W, S, wx, d, rng, nn) {
       // snow: patchy below the line, lying lower in the gullies and on ledges, solid above, but not
       // on steep rock or the crests of the ribs
       const gullyK = Math.max(crease, big) * smooth(220, 420, h);
-      const sn = h < 180 ? 0 : smooth(-40, 40, h - snowLine(W, wx, d) + 300 * gullyK + 160 * smooth(0.8, 0.93, ny) - 360 * smooth(0.66, 0.45, ny) - 160 * S.cliff - 170 * smooth(0.7, 1, S.rib) * steep);
+      const sn = h < 60 ? 0 : smooth(-40, 40, h - snowLine(W, wx, d) + 300 * gullyK + 160 * smooth(0.8, 0.93, ny) - 120 * smooth(0.66, 0.45, ny) - 160 * S.cliff - 170 * smooth(0.7, 1, S.rib) * steep);
       c = mul3(shade(c, nn[0], nn[1], nn[2], 0.4, 0.75), ao);
       if (sn > 0) {
         const snc = mul3(mix3(C.snowShade, C.snow, clamp(lit * 1.35 - 0.15, 0, 1)), 0.75 + 0.25 * ao);

@@ -89,17 +89,26 @@ uniform vec3 uFlowAgainst;`,
             float lorry = step(lane == 2 ? 0.45 : 0.92, hc.z);
             float halfL = mix(2.1, 6.5, lorry);
             float f = (fract(u) - (0.25 + 0.5 * hc.y)) * 48.0 * dirS;      // metres ahead of the vehicle's middle
-            float head = exp(-(f - halfL) * (f - halfL) / 0.9);
-            float tail = exp(-(f + halfL) * (f + halfL) / 0.7);
-            float beam = 0.3 * step(halfL, f) * exp(-(f - halfL) / 5.0);
-            float side = lorry * 0.22 * step(abs(f), halfL - 0.9) * (0.5 + 0.5 * cos(f * 2.6));
-            float sum = head + tail + beam + side;
-            vec3 lamp = (vec3(1.0, 0.97, 0.88) * (head + beam) + vec3(1.0, 0.1, 0.07) * tail + vec3(1.0, 0.6, 0.15) * side) / max(sum, 0.001);
+            // A lamp is one lane splat, the one nearest the lamp, slid along the lane to the lamp's
+            // exact place: so lamps glide instead of hopping between the fixed splats. The lane's
+            // spacing is read off the splat's own baked length (0.72 of the spacing).
+            float sp = scales.x / 0.72;
+            float dh = f - halfL, dtl = f + halfL;
+            float mk = floor(f / 2.4 + 0.5) * 2.4;                          // nearest side-marker position
+            float head = step(abs(dh), 0.53 * sp);                          // a shade wide: the spacing is only known to a few per cent
+            float tail = step(abs(dtl), 0.5 * sp) * (1.0 - head);
+            float side = lorry * step(abs(f - mk), 0.5 * sp) * step(abs(mk), halfL - 1.0) * (1.0 - head) * (1.0 - tail);
+            float beam = 0.3 * step(0.5 * sp, dh) * exp(-dh / 5.0);         // a short pool of light ahead
+            float slide = -(head * dh + tail * dtl + side * (f - mk)) * dirS;
+            float sum = head + 0.9 * tail + beam + 0.3 * side;
+            vec3 lamp = (vec3(1.0, 0.97, 0.88) * (head + beam) + vec3(1.0, 0.1, 0.07) * 0.9 * tail + vec3(1.0, 0.6, 0.15) * 0.3 * side) / max(sum, 0.001);
             float k = min(uMove, 1.0);
+            center.x += slide * k;
             rgba.rgb = mix(rgba.rgb, lamp, k);
             rgba.a = mix(rgba.a, present * min(1.0, sum), k);
-            scales.x *= mix(1.0, 0.4 + 0.6 * beam / max(sum, 0.001), k);    // lamps are points, the beam a streak
-            scales.yz *= mix(1.0, 0.9 + 1.0 * head + 0.5 * tail, k);
+            float point = head + tail + side;                               // 1 for a lamp, 0 for beam or dark lane
+            scales.x = mix(scales.x, mix(scales.x, 0.3 + 0.12 * head, point), k);
+            scales.yz *= mix(1.0, 0.9 + 1.0 * head + 0.5 * tail - 0.2 * side, k);
         } else if (mv == 5) {
             // Vapour (plumes, mist, cloud streamers): a slow billow, each splat on its own phase.
             float sz = max(scales.x, max(scales.y, scales.z));
