@@ -13,6 +13,13 @@
 //   - full trees (spruce, Scots pine, birch) only along the edges that face the camera, plus
 //     a cheap spire here and there inside, so the canopy line is serrated.
 //
+// Wildlife (see "Wildlife" below): red deer in small groups (a group about every 500 m of line),
+// moose (about every 3 km; one in five in the shallows of a lake, most on open ground), a wolf
+// pack of three to six (about every 4 km), a brown bear, sometimes reared up or with cubs (every 7
+// to 10 km), a fox by the line (every 4 to 5 km) and a sea eagle on a dead pine (every 5 to 9 km).
+// They stand only where the train can see them, are drawn larger than life, and every splat of
+// them answers the beat.
+//
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     spruces of impossible height among the others; far mountains that keep going up
 //   topology  floating islands of forest; a lake standing upright like a wall
@@ -20,9 +27,9 @@
 import { hashInts, hashString, makeRng, noise1, noise2, fbm2 } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
-  KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, house, church,
+  KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, house, church,
   overheadLine, fence, lamp, floatingIsland, wires, jitter, mul3, mix3, shade, smooth, clamp, lerp,
-  quatYaw, quatRoll, quatUpTo, quatXTo, strut, norm3, Q_ID, SUN,
+  quatYaw, quatRoll, quatUpTo, quatXTo, quatMul, quatAxis, strut, norm3, Q_ID, SUN,
 } from './kit.js';
 
 const PAL = {
@@ -77,7 +84,7 @@ function world(ctx) {
   const ws = worldSeed(ctx);
   let W = worlds.get(ws);
   if (W) return W;
-  W = { ws, H: (wx, d) => ctx.terrain.height(wx, d), lakes: [new Map(), new Map()], sites: new Map(), cuts: new Map(), lines: new Map() };
+  W = { ws, H: (wx, d) => ctx.terrain.height(wx, d), lakes: [new Map(), new Map()], sites: new Map(), cuts: new Map(), lines: new Map(), wild: new Map() };
   worlds.set(ws, W);
   if (worlds.size > 6) worlds.delete(worlds.keys().next().value);
   return W;
@@ -1098,6 +1105,558 @@ function* mist(ctx, out, W, dLo, dHi, cell, size) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Wildlife: red deer, moose, wolves, brown bears, a fox by the line, an eagle on a dead tree.
+//
+// Every animal is a handful of shaped splats: ellipsoids for the body, struts for legs, ears,
+// tails and antlers, all tagged MOVE.BEAT. They are drawn larger than life, and more so the further
+// out they stand (wildK), because a life-size deer at 100 m is twelve pixels of brown.
+//
+// Where they stand is a pure function of the world (wildGroup, cached per world cell): each kind
+// has a cell length along the line and a chance per cell, tries a few places in its cell and takes
+// the first that is in the open and in plain view from the train: this side of a lake with the
+// water behind it, the far shore with the water in front, the shallows, open heath, bog or
+// clear-cut, the ground before a forest edge, or the strip between the line and the trees.
+// ---------------------------------------------------------------------------------------------
+const BEAT = MOVE.BEAT;
+const wildK = (d) => 1.3 + 0.8 * smooth(15, 95, d);
+const limbR = (r, d) => Math.max(r, 0.0007 * d);     // never much thinner than a pixel
+// A thin straight member that answers the beat (kit strut() carries no motion class). a, b: [x, y, z].
+function strutB(out, a, b, r, c, n, kind, move = BEAT) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], len = Math.hypot(dx, dy, dz) || 1e-6;
+  const q = quatXTo(dx / len, dy / len, dz / len), sl = Math.max((len / n) * 0.5, r);
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    out(a[0] + dx * t, a[1] + dy * t, a[2] + dz * t, sl, r, r, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind, move);
+  }
+}
+// An animal's own frame: u forward, h up, v to its right, in metres at life size; k scales it,
+// yaw turns it (0 = heading along +x, positive turns it away from the line), slope shears it to
+// the ground. E draws an ellipsoid (radii along u, h, v; pitch lifts its long axis from forward,
+// tilt rolls it about that axis), S a strut between two points, sub a frame at a point of this one
+// with a further turn (a head that looks round).
+function beastFrame(out, x, y, z, yaw, k, slope = 0, kind = KIND.OTHER) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), qy = quatYaw(yaw), d = -z;
+  const F = {
+    k, d, near: cy >= 0 ? 1 : -1,      // the sign of v on the side towards the line
+    P: (u, h, v) => [x + (cy * u + sy * v) * k, y + (h + slope * u) * k, z + (-sy * u + cy * v) * k],
+    E(u, h, v, ru, rh, rv, c, pitch = 0, tilt = 0) {
+      let q = qy;
+      if (pitch) q = quatMul(q, quatRoll(pitch));
+      if (tilt) q = quatMul(q, quatAxis(1, 0, 0, tilt));
+      const p = F.P(u, h, v);
+      out(p[0], p[1], p[2], ru * k, rh * k, rv * k, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind, BEAT);
+    },
+    S(a, b, r, c, n = 1) { strutB(out, F.P(a[0], a[1], a[2]), F.P(b[0], b[1], b[2]), limbR(r * k, d), c, n, kind); },
+    sub(u, h, v, turn) { const p = F.P(u, h, v); return beastFrame(out, p[0], p[1], p[2], yaw + turn, k, 0, kind); },
+  };
+  return F;
+}
+// Four legs, each with a joint. fu, hu: where the fore and hind legs leave the body; top: the
+// height they leave it at; v: half the track; rr: thickness; st: stride (0 = standing square).
+// The pair on the far side is darker, so the two pairs read apart.
+function legs(F, fu, hu, top, v, rr, st, c, cLow, foot = 0.02) {
+  for (const [u, sg, sw] of [[fu, 1, st], [fu, -1, -st], [hu, 1, -st], [hu, -1, st]]) {
+    const hind = u < 0, k = sg === F.near ? 1 : 0.7;
+    const ku = u + sw * 0.45 + (hind ? -0.1 : 0.035) * top, kh = top * (hind ? 0.54 : 0.5);
+    F.S([u, top, sg * v], [ku, kh, sg * v], rr * 1.35, mul3(c, k), 2);
+    F.S([ku, kh, sg * v], [u + sw - (hind ? 0.03 : 0) * top, foot, sg * v], rr, mul3(cLow || c, k), 2);
+  }
+}
+const rot2 = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]]; };
+
+// A red deer: a hind, a stag (antlers, a dark mane, a size bigger) or a calf. a.pose: 'alert'
+// (head up; a.look turns it to the train), 'graze', 'drink' (head right down) or 'walk'.
+function drawDeer(out, x, y, z, a, r) {
+  const k = a.k * (a.stag ? 1.12 : a.calf ? 0.62 : 1);
+  const F = beastFrame(out, x, y, z, a.yaw, k, a.slope);
+  const col = jitter(a.calf ? [0.5, 0.36, 0.21] : a.stag ? [0.41, 0.27, 0.16] : [0.46, 0.3, 0.17], r, 0.1);
+  const dark = mul3(col, 0.55), pale = mix3(col, [0.74, 0.66, 0.5], 0.6), lit = mix3(col, [0.66, 0.5, 0.32], 0.5);
+  const down = a.pose === 'graze' || a.pose === 'drink';
+  legs(F, 0.4, -0.42, 0.82, 0.1, 0.032, a.pose === 'walk' ? a.st || 0.13 : 0.02, col, dark);
+  F.E(0, 0.84, 0, 0.34, 0.07, 0.12, pale);                    // the pale underside
+  F.E(0, 0.97, 0, 0.42, 0.17, 0.15, col);
+  F.E(0.36, 0.99, 0, 0.2, 0.23, 0.16, col);
+  F.E(-0.38, 1.01, 0, 0.21, 0.21, 0.16, col);
+  F.E(-0.02, 1.13, 0, 0.38, 0.045, 0.1, lit);                 // the light along the back
+  F.E(-0.57, 1.04, 0, 0.06, 0.13, 0.13, pale);                // the rump patch and the short tail
+  F.E(-0.63, 0.98, 0, 0.035, 0.09, 0.035, dark);
+  // neck and head
+  const n0 = [0.48, 1.07], n1 = a.pose === 'drink' ? [0.84, 0.46] : a.pose === 'graze' ? [0.82, 0.56] : [0.72, 1.56];
+  const np = Math.atan2(n1[1] - n0[1], n1[0] - n0[0]), nl = Math.hypot(n1[0] - n0[0], n1[1] - n0[1]);
+  F.E((n0[0] + n1[0]) / 2, (n0[1] + n1[1]) / 2, 0, nl * 0.6, a.stag ? 0.135 : 0.11, a.stag ? 0.12 : 0.095, a.stag ? mul3(col, 0.72) : col, np);
+  const hp = down ? -1.2 : -0.3;                               // the head's own pitch
+  const Hd = F.sub(n1[0] + 0.02, n1[1] + (down ? -0.02 : 0.05), 0, down ? 0 : a.look || 0);
+  const ax = Math.cos(hp), ay = Math.sin(hp);
+  Hd.E(ax * 0.1, ay * 0.1, 0, 0.15, 0.08, 0.075, col, hp);
+  Hd.E(ax * 0.24, ay * 0.24 - 0.01, 0, 0.07, 0.05, 0.045, mix3(col, dark, 0.5), hp);
+  Hd.E(ax * 0.31, ay * 0.31 - 0.01, 0, 0.03, 0.03, 0.03, [0.08, 0.07, 0.06]);
+  for (const sg of [-1, 1]) Hd.S(rot2([-0.02, 0.05, sg * 0.05], hp + 0.3), rot2([-0.08, 0.2, sg * 0.19], hp + 0.3), 0.034, sg === Hd.near ? col : dark);
+  if (a.stag) {
+    // antlers: a beam sweeping up and back on each side, a brow tine, a tray tine and a forked crown
+    const bone = [0.58, 0.51, 0.38], ar = 0.021, t = hp + 0.3;
+    for (const sg of [-1, 1]) {
+      const A = rot2([-0.02, 0.07, sg * 0.05], t), B = rot2([-0.17, 0.42, sg * 0.2], t), Cc = rot2([-0.1, 0.8, sg * 0.28], t);
+      const c = sg === Hd.near ? bone : mul3(bone, 0.78);
+      Hd.S(A, B, ar * 1.2, c, 2); Hd.S(B, Cc, ar, c, 2);
+      Hd.S(A, rot2([0.15, 0.24, sg * 0.1], t), ar, c, 1);
+      Hd.S(B, rot2([0.02, 0.62, sg * 0.28], t), ar, c, 1);
+      Hd.S(Cc, rot2([0.05, 1.0, sg * 0.31], t), ar, c, 1);
+      Hd.S(Cc, rot2([-0.22, 1.0, sg * 0.22], t), ar, c, 1);
+    }
+  }
+}
+
+// A moose: tall pale legs under a deep dark body with a hump at the shoulder, a long drooping
+// face and a bell under the chin; the bull carries broad palms. a.pose: 'stand' or 'feed' (the
+// head lowered to the water). Standing in a lake its feet are under the water, which hides them.
+function drawMoose(out, x, y, z, a, r) {
+  const k = a.k * (a.calf ? 0.6 : a.bull ? 1.06 : 1);
+  const F = beastFrame(out, x, y, z, a.yaw, k, a.slope);
+  const col = jitter(a.calf ? [0.42, 0.29, 0.17] : [0.29, 0.2, 0.14], r, 0.1), dark = mul3(col, 0.55);
+  const sock = a.calf ? mul3(col, 0.8) : [0.5, 0.46, 0.4], lit = mix3(col, [0.56, 0.45, 0.33], 0.55);
+  legs(F, 0.52, -0.6, 1.25, 0.14, 0.05, 0.03, mix3(col, sock, 0.3), sock);
+  F.E(0, 1.48, 0, 0.5, 0.32, 0.25, col);
+  F.E(0.42, 1.58, 0, 0.32, 0.42, 0.27, col);
+  F.E(-0.5, 1.46, 0, 0.3, 0.34, 0.26, col);
+  F.E(0.4, 1.96, 0, 0.24, 0.1, 0.16, lit);                    // the hump, catching the light
+  F.E(-0.12, 1.78, 0, 0.4, 0.05, 0.13, lit);
+  const feed = a.pose === 'feed';
+  const n0 = [0.7, 1.7], n1 = feed ? [1.08, 1.12] : [1.1, 1.74];
+  const np = Math.atan2(n1[1] - n0[1], n1[0] - n0[0]), nl = Math.hypot(n1[0] - n0[0], n1[1] - n0[1]);
+  F.E((n0[0] + n1[0]) / 2, (n0[1] + n1[1]) / 2, 0, nl * 0.62, 0.2, 0.15, col, np);
+  const hp = feed ? -1.15 : -0.6, ax = Math.cos(hp), ay = Math.sin(hp);
+  const Hd = F.sub(n1[0] + 0.03, n1[1] + 0.03, 0, feed ? 0 : a.look || 0);
+  Hd.E(ax * 0.22, ay * 0.22, 0, 0.34, 0.15, 0.12, col, hp);
+  Hd.E(ax * 0.54, ay * 0.54, 0, 0.16, 0.14, 0.11, dark, hp);  // the bulbous muzzle
+  if (!a.calf) Hd.E(ax * 0.12 + 0.02, ay * 0.12 - 0.25, 0, 0.045, 0.13, 0.04, dark);   // the bell
+  for (const sg of [-1, 1]) Hd.S(rot2([-0.04, 0.08, sg * 0.07], hp + 0.5), rot2([-0.14, 0.26, sg * 0.2], hp + 0.5), 0.045, sg === Hd.near ? col : dark);
+  if (a.bull) {
+    // palms: a broad plate out to each side, rising outward, with a row of points and a brow tine
+    const bone = [0.58, 0.51, 0.38], t = hp + 0.6;
+    for (const sg of [-1, 1]) {
+      const c = sg === Hd.near ? bone : mul3(bone, 0.78);
+      const pc = rot2([-0.06, 0.34, sg * 0.46], t);
+      Hd.S(rot2([-0.02, 0.1, sg * 0.06], t), rot2([-0.05, 0.24, sg * 0.24], t), 0.04, c, 1);
+      Hd.E(pc[0], pc[1], pc[2], 0.3, 0.045, 0.26, c, t, -sg * 0.75);
+      for (const u0 of [-0.3, -0.1, 0.1]) Hd.S(rot2([u0, 0.46, sg * 0.62], t), rot2([u0 + 0.03, 0.6, sg * 0.72], t), 0.03, c, 1);
+      Hd.S(rot2([0.02, 0.14, sg * 0.14], t), rot2([0.26, 0.24, sg * 0.28], t), 0.03, c, 1);
+    }
+  }
+  if (a.level != null) ripple(out, x, z, a.level, k * 1.3);
+}
+// The water parting round the legs of an animal standing in a lake: a pale ring lying on it.
+function ripple(out, x, z, level, k) {
+  const w = C.waterStreak;
+  out(x, level + 0.03, z + 0.2, 1.2 * k, 0.02, 0.4 * k, w[0], w[1], w[2], 0.55, 0, 0, 0, 1, KIND.GROUND);
+}
+
+// A wolf: lean and grey, deep in the chest and tucked up behind, long-legged, the head carried
+// low and forward, a bushy tail hanging. a.pose: 'trot', 'stand' (a.look turns the head to the
+// train) or 'howl' (sitting, muzzle to the sky).
+function drawWolf(out, x, y, z, a, r) {
+  const F = beastFrame(out, x, y, z, a.yaw, a.k, a.slope);
+  const col = jitter(a.black ? [0.1, 0.1, 0.11] : [0.46, 0.45, 0.42], r, 0.1);
+  const dark = a.black ? [0.05, 0.05, 0.06] : [0.2, 0.19, 0.18], pale = a.black ? [0.2, 0.2, 0.2] : [0.68, 0.66, 0.6];
+  const head = (Hd, hp) => {
+    const ax = Math.cos(hp), ay = Math.sin(hp);
+    Hd.E(ax * 0.08, ay * 0.08, 0, 0.12, 0.085, 0.08, col, hp);
+    Hd.E(ax * 0.24 + ay * 0.02, ay * 0.24 - ax * 0.02, 0, 0.1, 0.042, 0.042, pale, hp);
+    Hd.E(ax * 0.34 + ay * 0.02, ay * 0.34 - ax * 0.02, 0, 0.026, 0.026, 0.026, [0.06, 0.06, 0.06]);
+    for (const sg of [-1, 1]) Hd.S(rot2([0, 0.06, sg * 0.05], hp), rot2([-0.02, 0.2, sg * 0.075], hp), 0.03, dark);
+  };
+  if (a.pose === 'howl') {
+    // sitting: haunches on the ground, the back sloping up to the shoulders, forelegs straight
+    for (const sg of [-1, 1]) {
+      F.S([0.2, 0.6, sg * 0.08], [0.24, 0.02, sg * 0.08], 0.036, sg === F.near ? pale : mul3(pale, 0.7), 3);
+      F.S([-0.2, 0.22, sg * 0.1], [0.02, 0.03, sg * 0.11], 0.04, sg === F.near ? col : mul3(col, 0.7), 1);
+    }
+    F.E(-0.2, 0.2, 0, 0.2, 0.17, 0.15, col);
+    F.E(0, 0.46, 0, 0.36, 0.14, 0.13, col, 0.95);
+    F.E(0.16, 0.5, 0, 0.2, 0.07, 0.1, pale, 1.15);              // the pale chest
+    F.E(-0.1, 0.56, 0, 0.3, 0.05, 0.09, dark, 0.95);            // the dark saddle
+    F.E(0.26, 0.82, 0, 0.17, 0.11, 0.1, col, 1.2);              // the neck, stretched up
+    head(F.sub(0.3, 0.98, 0, 0), 1.05);
+    F.S([-0.36, 0.1, 0], [-0.72, 0.06, 0], 0.06, col, 2);
+    F.S([-0.72, 0.06, 0], [-0.86, 0.07, 0], 0.05, dark, 1);
+    return;
+  }
+  legs(F, 0.36, -0.4, 0.54, 0.08, 0.03, a.pose === 'trot' ? a.st || 0.15 : 0.02, mix3(col, pale, 0.4), pale);
+  F.E(0.02, 0.575, 0, 0.3, 0.045, 0.09, pale);                // pale underneath
+  F.E(0, 0.68, 0, 0.38, 0.13, 0.115, col);
+  F.E(0.3, 0.68, 0, 0.17, 0.17, 0.125, col);
+  F.E(-0.36, 0.7, 0, 0.17, 0.15, 0.125, col);
+  F.E(-0.02, 0.8, 0, 0.36, 0.045, 0.09, dark);                // the dark saddle
+  F.E(0.54, 0.82, 0, 0.18, 0.11, 0.1, col, 0.5);              // the ruff of the neck
+  const low = a.pose === 'trot' && a.low ? 1 : 0;              // nose down, on a scent
+  head(F.sub(0.68, 0.9 - 0.1 * low, 0, a.pose === 'stand' ? a.look || 0 : 0), a.pose === 'trot' ? -0.12 - 0.4 * low : -0.05);
+  F.S([-0.5, 0.72, 0], [-0.72, 0.5, 0], 0.062, col, 2);       // the tail
+  F.S([-0.72, 0.5, 0], [-0.82, 0.32, 0], 0.055, dark, 1);
+}
+
+// A brown bear: a great barrel on short thick legs, a hump at the shoulder, the head low, round
+// ears, a paler muzzle. a.pose: 'walk', 'stand' (on all fours), 'fish' (head down to the water)
+// or 'up' (reared on its hind legs).
+function drawBear(out, x, y, z, a, r) {
+  const k = a.k * (a.cub ? 0.46 : 1);
+  const F = beastFrame(out, x, y, z, a.yaw, k, a.pose === 'up' ? 0 : a.slope);
+  const col = jitter(a.cub ? [0.42, 0.28, 0.16] : [0.39, 0.25, 0.14], r, 0.1);
+  const dark = mul3(col, 0.55), lit = mix3(col, [0.6, 0.45, 0.28], 0.55), tan = [0.6, 0.47, 0.3];
+  const head = (Hd, hp) => {
+    const ax = Math.cos(hp), ay = Math.sin(hp);
+    Hd.E(ax * 0.14, ay * 0.14, 0, 0.2, 0.18, 0.17, col, hp);
+    Hd.E(ax * 0.36 + ay * 0.06, ay * 0.36 - ax * 0.06, 0, 0.13, 0.08, 0.075, tan, hp);
+    Hd.E(ax * 0.48 + ay * 0.06, ay * 0.48 - ax * 0.06, 0, 0.036, 0.036, 0.036, [0.06, 0.05, 0.05]);
+    for (const sg of [-1, 1]) { const e = rot2([0.04, 0.18, sg * 0.13], hp); Hd.E(e[0], e[1], e[2], 0.05, 0.055, 0.04, sg === Hd.near ? lit : dark); }
+  };
+  if (a.pose === 'up') {
+    for (const sg of [-1, 1]) {
+      const near = sg === F.near, c = near ? col : dark, fu = near ? 0.16 : -0.14;   // one foot before the other
+      F.S([fu * 0.4, 0.8, sg * 0.2], [fu + 0.06, 0.42, sg * 0.22], 0.16, c, 2);
+      F.S([fu + 0.06, 0.42, sg * 0.22], [fu, 0.07, sg * 0.22], 0.125, c, 2);
+      F.E(fu + 0.13, 0.06, sg * 0.22, 0.17, 0.06, 0.09, dark);
+      F.S([0.12, 1.72, sg * 0.34], [0.5, 1.5, sg * 0.34], 0.11, near ? mix3(col, lit, 0.5) : dark, 2);   // the forelegs, held out before it
+      F.S([0.5, 1.5, sg * 0.34], [0.74, 1.26, sg * 0.28], 0.095, near ? lit : dark, 2);
+    }
+    F.E(0, 0.88, 0, 0.32, 0.3, 0.34, col);
+    F.E(0.02, 1.28, 0, 0.46, 0.35, 0.36, col, 1.5);
+    F.E(0.06, 1.7, 0, 0.3, 0.26, 0.36, col);
+    F.E(0.2, 1.36, 0, 0.3, 0.09, 0.2, lit, 1.5);                             // the paler chest
+    head(F.sub(0.14, 1.98, 0, a.look || 0), -0.15);
+    return;
+  }
+  legs(F, 0.5, -0.52, 0.62, 0.17, 0.095, a.pose === 'walk' ? 0.13 : 0.03, col, dark, 0.07);
+  for (const [u, sg] of [[0.5, 1], [0.5, -1], [-0.52, 1], [-0.52, -1]]) F.E(u + 0.08 + (a.pose === 'walk' ? 0.13 * sg * (u > 0 ? 1 : -1) : 0), 0.05, sg * 0.17, 0.14, 0.05, 0.085, dark);
+  F.E(0, 0.92, 0, 0.56, 0.3, 0.27, col);
+  F.E(-0.48, 0.95, 0, 0.32, 0.33, 0.28, col);
+  F.E(0.4, 1.04, 0, 0.3, 0.3, 0.27, col);
+  F.E(0.36, 1.3, 0, 0.26, 0.09, 0.17, lit);                    // the grizzled hump
+  F.E(-0.2, 1.2, 0, 0.36, 0.05, 0.15, lit);
+  head(F.sub(0.84, a.pose === 'fish' ? 0.74 : 0.92, 0, a.pose === 'stand' ? a.look || 0 : 0), a.pose === 'fish' ? -0.75 : a.pose === 'walk' ? -0.3 : -0.12);
+  if (a.level != null) ripple(out, x, z, a.level, k);
+}
+
+// A fox trotting along by the line: red, white under the chin and at the tip of a brush as long
+// as its body, black legs and ears.
+function drawFox(out, x, y, z, a, r) {
+  const F = beastFrame(out, x, y, z, a.yaw, a.k, a.slope);
+  const col = jitter([0.74, 0.36, 0.1], r, 0.08), black = [0.1, 0.08, 0.07], white = [0.78, 0.76, 0.7];
+  legs(F, 0.2, -0.22, 0.28, 0.05, 0.022, a.pose === 'trot' ? 0.09 : 0.01, mix3(col, black, 0.5), black);
+  F.E(0, 0.37, 0, 0.26, 0.1, 0.09, col);
+  F.E(0.18, 0.37, 0, 0.11, 0.11, 0.09, col);
+  F.E(-0.2, 0.38, 0, 0.11, 0.11, 0.09, col);
+  F.E(0.22, 0.3, 0, 0.09, 0.05, 0.07, white);                  // the white bib
+  F.E(0.3, 0.44, 0, 0.1, 0.07, 0.065, col, 0.5);
+  const Hd = F.sub(0.37, 0.5, 0, a.pose === 'trot' ? 0 : a.look || 0);
+  Hd.E(0.05, 0, 0, 0.085, 0.07, 0.07, col);
+  Hd.E(0.15, -0.03, 0, 0.065, 0.03, 0.03, white);
+  Hd.E(0.22, -0.03, 0, 0.02, 0.02, 0.02, black);
+  for (const sg of [-1, 1]) Hd.S([0.0, 0.05, sg * 0.045], [-0.02, 0.18, sg * 0.07], 0.028, black);
+  F.S([-0.28, 0.4, 0], [-0.62, 0.3, 0], 0.075, col, 3);        // the brush
+  F.E(-0.7, 0.28, 0, 0.08, 0.065, 0.065, white);
+}
+
+// A dead pine with a sea eagle on top: a grey barkless trunk, a few broken boughs, and the bird
+// sitting upright, dark, with a pale head, a yellow bill and a white tail.
+function drawEagle(out, x, y, z, a, r) {
+  const d = -z, grey = jitter([0.56, 0.54, 0.5], r, 0.08), H = a.h, lean = a.lean;
+  const tr = Math.max(0.24, 0.0045 * d), tx = (h) => x + lean * h * h / H;
+  for (let i = 0; i < 6; i++) {
+    const h0 = H * i / 6, h1 = H * (i + 1) / 6;
+    strutB(out, [tx(h0), y - 0.2 + h0, z], [tx(h1), y - 0.2 + h1, z], tr * (1 - 0.11 * i), mul3(grey, 0.72 + 0.055 * i), 4, KIND.TREE, 0);
+  }
+  for (let i = 0; i < 4; i++) {
+    const h = H * (0.42 + 0.14 * i + 0.05 * r()), sg = i % 2 ? 1 : -1, len = (1.6 - 0.25 * i) * (0.7 + 0.6 * r());
+    const dz = (r() - 0.5) * 0.8;
+    strut(out, tx(h), y + h, z, tx(h) + sg * len, y + h + len * (0.25 + 0.4 * r()), z + dz, Math.max(0.08, 0.0016 * d), mul3(grey, 0.8), 2, 1, KIND.TREE);
+  }
+  const F = beastFrame(out, tx(H), y - 0.25 + H, z, a.yaw, a.k);
+  const brown = [0.2, 0.14, 0.09], white = [0.78, 0.77, 0.72], yellow = [0.8, 0.62, 0.12];
+  F.E(-0.07, 0.1, 0, 0.07, 0.15, 0.09, white, 0.25);          // the white tail, below the perch
+  F.E(0, 0.42, 0, 0.3, 0.16, 0.17, brown, 1.35);              // the body, upright
+  F.E(-0.07, 0.4, 0, 0.27, 0.07, 0.13, mul3(brown, 0.65), 1.3);   // the folded wing, darker
+  F.E(0.06, 0.52, 0, 0.14, 0.09, 0.13, mix3(brown, white, 0.25), 1.35);
+  F.E(0.06, 0.8, 0, 0.095, 0.1, 0.095, white);                 // the pale head
+  F.E(0.17, 0.78, 0, 0.07, 0.035, 0.035, yellow, -0.4);        // the bill
+  for (const sg of [-1, 1]) F.E(0.03, 0.04, sg * 0.06, 0.05, 0.04, 0.035, yellow);
+}
+
+// --- where they are -----------------------------------------------------------------------------
+const WILD = {
+  // cell: metres of line to a cell; p: the chance a cell has any; tries: places tried in the cell,
+  // the first `lakes` of them along a lake in the cell, if it has one
+  deer: { cell: 210, salt: 811, p: 0.9, tries: 6, lakes: 0, draw: drawDeer },
+  moose: { cell: 1500, salt: 812, p: 0.6, tries: 10, lakes: 6, draw: drawMoose },
+  wolf: { cell: 2800, salt: 813, p: 0.85, tries: 24, lakes: 6, draw: drawWolf },
+  bear: { cell: 4600, salt: 814, p: 0.7, tries: 28, lakes: 8, draw: drawBear },
+  fox: { cell: 2200, salt: 815, p: 0.6, tries: 8, lakes: 0, draw: drawFox },
+  eagle: { cell: 2600, salt: 816, p: 0.6, tries: 10, lakes: 5, draw: drawEagle },
+};
+const isLand = (t) => t === T.OPEN || t === T.BOG || t === T.CLEARCUT || t === T.ROAD || t === T.GROUND;
+// Ground an animal can stand on at (wx, d), given surface() there: land, and not one of the bog's
+// dark pools, a log stack or the foot of a pylon.
+function firm(W, s, wx, d) {
+  if (!isLand(s.t) || (s.t === T.BOG && noise2(wx / 14, d / 9, W.ws + 33) > 0.6)) return false;
+  if (d < 14 && sidingAt(W, wx)) return false;                  // the log stacks
+  for (const L of linesNear(W, wx, d)) {                         // a pylon's feet (as powerLines() stands them)
+    const pd = 60 + 320 * Math.max(0, Math.round((d - 60) / 320));
+    if (Math.abs(d - pd) < 7 && Math.abs(wx - (L.wx0 + L.slope * pd)) < 7) return false;
+  }
+  return true;
+}
+// What lies straight out from world x, as far as the first forest: where that forest begins, the
+// first water and where it ends, and the runs of open land.
+function column(W, wx) {
+  const c = { edge: 999, w0: 0, w1: 0, lake: null, open: [] };
+  let run = null, inWater = false;
+  for (let d = 9; d <= 170; d += 2) {
+    const s = surface(W, wx, d), t = s.t;
+    if (t === T.FOREST) { c.edge = d; break; }
+    if (t === T.WATER) {
+      if (!c.w0) { c.w0 = d; c.lake = s.lake; inWater = true; }
+      if (inWater) c.w1 = d;
+      run = null;
+      continue;
+    }
+    inWater = false;
+    if (!isLand(t)) { run = null; continue; }
+    if (!run) { run = [d, d]; c.open.push(run); } else run[1] = d;
+  }
+  return c;
+}
+// The water's edge between a point on land and a point in the water at world x (the land side of it).
+function waterEdge(W, wx, land, water) {
+  for (let k = 0; k < 5; k++) { const m = (land + water) / 2; if (surface(W, wx, m).t === T.WATER) water = m; else land = m; }
+  return land;
+}
+// The shore of the water nearest to d0 at world x: its near edge (far = false) or its far edge.
+function shoreNear(W, wx, d0, far) {
+  if (far) { for (let d = d0 + 10; d > d0 - 14; d -= 2) if (surface(W, wx, d).t === T.WATER) return d < d0 + 10 ? waterEdge(W, wx, d + 2, d) : null; }
+  else for (let d = d0 - 10; d < d0 + 14; d += 2) if (surface(W, wx, d).t === T.WATER) return d > d0 - 10 ? waterEdge(W, wx, d - 2, d) : null;
+  return null;
+}
+const reedy = (lk, wx) => noise1(wx / 25, lk.salt + 3) >= 0.45;      // as lakeProps() places the reeds
+const saplings = (W, wx) => noise1(wx / 320, W.ws + 653);            // as trackside() thickens them
+// Can a point y high at (wx, d) be seen from the train: straight out, and from 22 degrees before
+// and after? Hills, forest, rock cuttings, log stacks, the snow fence and the thick stretches of
+// young trees by the line can stand in the way.
+const TAN22 = 0.404;
+function inView(W, wx, d, y) {
+  let ok = 0;
+  for (const tn of [0, -TAN22, TAN22]) {
+    const cam = wx - d * tn, at = (pd) => cam + (wx - cam) * pd / d, sight = (pd) => 2.6 + (y - 2.6) * pd / d;
+    let clear = true;
+    const cut = cuttingAt(W, at(7));
+    if (cut && cutH(W, cut, at(7)) > Math.max(0.8, sight(7))) clear = false;
+    if (clear && d > 13 && sidingAt(W, at(11)) && sight(11) < 3.6) clear = false;
+    if (clear && d > 13.5) {
+      const fx = d > 15.5 ? at(15) : wx;
+      if (noise1(Math.floor(fx / 100) * 100 / 1700, W.ws + 652) > 0.7 && noise1(fx / 140, W.ws + 611) >= 0.3 && (d <= 16.5 || W.H(fx, 15) + 2.3 > sight(15))) clear = false;
+    }
+    if (clear && d > 26 && saplings(W, at(14)) > 0.52) {         // a screen of young trees by the line
+      const t = surface(W, at(14), 14).t;
+      if (t !== T.BOG && t !== T.WATER && t !== T.RIPRAP) clear = false;
+    }
+    for (let pd = 12; clear && pd < d - 2; pd = pd < 32 ? pd + 4 : pd * 1.25) {
+      const px = at(pd), s = surface(W, px, pd);
+      if (s.y + (s.t === T.FOREST ? canopyH(W, px, pd) : 0.25) > sight(pd)) clear = false;
+    }
+    if (clear) ok++; else if (tn === 0) return false;
+  }
+  return ok >= 2;
+}
+// A place to stand at world x, or null: { at, d, lake } with at one of 'shore' (this side of a
+// lake, the water behind), 'far' (its far shore), 'wade' (in the shallows), 'open', 'edge' (before
+// the forest wall) or 'strip' (between the line and the trees). want gives each a weight (0 or
+// missing = never); lo and hi bound the distance (the strip apart).
+function wildSpot(W, wx, r, want, lo = 36, hi = 125, tall = 1) {
+  const c = column(W, wx), opts = [];
+  const lk = c.lake;
+  if (lk && c.w0 > 11) {
+    const e0 = waterEdge(W, wx, c.w0 - 2, c.w0), wide = c.w1 - c.w0;
+    if (want.shore && e0 >= (want.shoreLo || lo) + 2 && e0 <= hi) opts.push(['shore', e0 - 0.9 - r(), want.shore]);
+    if (want.wade && e0 >= 19 && e0 <= hi - 8 && wide >= 10 && !reedy(lk, wx)) opts.push(['wade', Math.max(e0 + 2.5 + 3 * r(), 33), want.wade]);
+    const cabinX = lk.cabin < 0.55 && lk.dc < 600 ? lk.cx + (lk.cabinU - 0.5) * lk.rx * 0.9 : Infinity;   // as lakeProps()
+    if (want.far && wide >= 14 && c.w1 + 2 >= lo + 8 && c.w1 + 2 <= hi && !reedy(lk, wx) && Math.abs(wx - cabinX) > 16) opts.push(['far', waterEdge(W, wx, c.w1 + 2, c.w1) + 0.8 + r(), want.far]);
+  }
+  if (want.open) for (const [a, b] of c.open) {
+    const a1 = Math.max(a + 2, lo), b1 = Math.min(b - 2, hi, c.edge - 10);
+    if (b1 - a1 >= 6) opts.push(['open', a1 + (b1 - a1) * r() * r(), want.open]);
+  }
+  if (want.edge && c.edge >= lo + 8 && c.edge <= hi + 14) opts.push(['edge', c.edge - 6 - 3 * r(), want.edge]);
+  if (want.strip && c.edge >= 15.5 && c.edge < 36 && saplings(W, wx) < 0.45) opts.push(['strip', clamp(c.edge - 4.5 - 2 * r(), 10.5, 24), want.strip]);
+  while (opts.length) {
+    let sum = 0;
+    for (const o of opts) sum += o[2];
+    let u = r() * sum, k = 0;
+    while (k < opts.length - 1 && u > opts[k][2]) { u -= opts[k][2]; k++; }
+    const [at, d0] = opts.splice(k, 1)[0];
+    let d = d0;
+    // towards the line until clear of the young trees that stand scattered before a forest edge
+    if (at === 'open' || at === 'edge') for (let k = 0; k < 14 && d > lo + 2 && surface(W, wx, d).f >= 0.4; k++) d -= 2;
+    d = d > 27.5 && d < 30 ? 27.5 : d >= 30 && d < 32.5 ? 32.5 : d;
+    const s = surface(W, wx, d);
+    if (at === 'wade' ? s.t !== T.WATER : !firm(W, s, wx, d)) continue;
+    if (!inView(W, wx, d, s.y + tall)) continue;
+    return { at, d, lake: lk };
+  }
+  return null;
+}
+// One animal's standing: its place on the ground (or in the water), the scale for its distance
+// and the lie of the ground under it. Null where it cannot stand (water, forest). wade: standing
+// in a lake instead, this deep at most (metres at life size).
+function stand(W, wx, d, yaw, wade = 0) {
+  const s = surface(W, wx, d);
+  if (wade) {
+    if (s.t !== T.WATER) return null;
+    const k = wildK(d), lk = s.lake;
+    return { wx, d, yaw, k, slope: 0, y: lk.level - Math.min(Math.max(0.1, lk.level - s.h), wade * k), level: lk.level };
+  }
+  if (!firm(W, s, wx, d)) return null;
+  const k = wildK(d), y = s.y, c = Math.cos(yaw) * 0.45 * k, sn = Math.sin(yaw) * 0.45 * k;
+  const f = surface(W, wx + c, d + sn), fy = f.t === T.WATER ? y : f.y, b = surface(W, wx - c, d - sn), by = b.t === T.WATER ? y : b.y;
+  return { wx, d, yaw, k, slope: clamp((fy - by) / (0.9 * k), -0.3, 0.3), y: (fy + by + 2 * y) / 4 - 0.02 };
+}
+// Is a group of one of these kinds within `gap` metres along the line of world x? Small clearings
+// draw every kind to the same spot, so each kind gives way to those before it in the order moose,
+// bear, wolf, eagle, deer, fox: nothing grazes beside the wolves, and no two stand in one place.
+function taken(W, wx, kinds, gap) {
+  for (const kind of kinds) {
+    const c = WILD[kind].cell;
+    for (let i = Math.floor((wx - gap - 60) / c); i <= Math.floor((wx + gap + 60) / c); i++) {
+      const g = wildGroup(W, kind, i);
+      if (g && Math.abs(g.wx - wx) < gap) return true;
+    }
+  }
+  return false;
+}
+// The animals of one world cell of one kind: null, or { kind, at, wx, d, list: [animal, ...] }.
+function wildGroup(W, kind, i) {
+  const key = kind + i;
+  if (W.wild.has(key)) return W.wild.get(key);
+  const g = makeWild(W, kind, i);
+  if (W.wild.size > 6000) W.wild.clear();
+  W.wild.set(key, g);
+  return g;
+}
+function makeWild(W, kind, i) {
+  const K = WILD[kind], r = makeRng(hashInts(W.ws, K.salt, i));
+  if (r() > K.p) return null;
+  const side = () => (r() < 0.5 ? 0 : Math.PI);                 // heading with the train or against it
+  const lakes = [];
+  if (K.lakes) for (let li = Math.floor(i * K.cell / LAKE_FAMS[0].cell) - 1; li <= Math.floor((i + 1) * K.cell / LAKE_FAMS[0].cell); li++) {
+    const lk = lakeIn(W, 0, li);
+    if (lk && lk.cx + lk.rx * 0.7 > i * K.cell && lk.cx - lk.rx * 0.7 < (i + 1) * K.cell) lakes.push(lk);
+  }
+  for (let t = 0; t < K.tries; t++) {
+    let wx = (i + 0.04 + 0.92 * r()) * K.cell;
+    const u0 = r(), u9 = r(), byLake = lakes.length > 0 && t < K.lakes;
+    if (byLake) { const lk = lakes[Math.floor(u0 * lakes.length)]; wx = clamp(lk.cx + (u9 - 0.5) * 1.5 * lk.rx, i * K.cell + 1, (i + 1) * K.cell - 1); }
+    const list = [];
+    const add = (a, more) => { if (a) list.push(Object.assign(a, more, { seed: hashInts(W.ws, K.salt + 50, i, list.length) })); return !!a; };
+    let sp = null;
+    if (kind === 'deer') {
+      sp = wildSpot(W, wx, r, { shore: 8, shoreLo: 12, far: 5, open: 3, edge: 2, strip: 1 }, 36, 125, 1);
+      if (!sp || (sp.at === 'strip' && r() > 0.7)) continue;
+      if (taken(W, wx, ['bear', 'wolf'], 180) || taken(W, wx, ['moose', 'eagle'], 40)) continue;
+      const water = sp.at === 'shore' || sp.at === 'far', strip = sp.at === 'strip';
+      const n = strip ? 1 + (r() < 0.45 ? 1 : 0) : water ? 2 + Math.floor(r() * 3) : 3 + Math.floor(r() * 4);
+      const stagAt = r() < (strip ? 0.3 : 0.6) ? Math.floor(r() * n) : -1, k0 = wildK(sp.d), gap = (2.6 + 1.6 * r()) * k0;
+      for (let j = 0; j < n; j++) {
+        const ax = wx + (j - (n - 1) / 2) * gap + (r() - 0.5) * 1.5 * k0, u1 = r(), u2 = r(), u3 = r(), u4 = r();
+        let d = sp.d + (u1 - 0.5) * (strip ? 2.5 : 7), yaw = side() + (u2 - 0.5) * 0.7, pose = u3 < 0.45 ? 'graze' : u3 < 0.8 ? 'alert' : 'walk';
+        if (water) {
+          const e = shoreNear(W, ax, sp.d, sp.at === 'far');
+          if (e == null) continue;
+          const far = sp.at === 'far' ? 1 : -1;
+          if (j === 0 || (j === 1 && u3 < 0.6)) { d = e + far * 0.5; pose = 'drink'; yaw = (yaw > 1.5 ? Math.PI + far * (0.3 + 0.5 * u2) : -far * (0.3 + 0.5 * u2)); }
+          else if (j === 1) { d = e + far * (1 + 2 * u1); pose = 'alert'; }
+          else d = e + far * (2 + 5 * u1);
+        }
+        if (strip && d > sp.d + 1) d = sp.d + 1;
+        if (d < 10.5) d = 10.5;                                 // never down on the railway's own ditch
+        const stag = j === stagAt, calf = !stag && n >= 3 && j > 0 && u4 < 0.22;
+        if (stag && pose === 'graze') pose = 'alert';
+        add(stand(W, ax, d, yaw), { stag, calf, pose, st: (u1 < 0.5 ? -1 : 1) * (0.1 + 0.05 * u2), look: pose === 'alert' ? (yaw > 1.5 ? 1 : -1) * (strip || u4 > 0.4 ? 1.1 + 0.4 * u1 : 0) : 0 });
+      }
+      if (list.length < (strip ? 1 : 2)) continue;
+    } else if (kind === 'moose') {
+      sp = wildSpot(W, wx, r, byLake ? { wade: 5, shore: 1 } : { wade: 5, shore: 1, open: 1, edge: 1 }, 36, 120, 1.6);
+      if (!sp) continue;
+      const wade = sp.at === 'wade' ? 0.42 : 0, yaw = side() + (r() - 0.5) * 0.6, bull = r() < 0.6, two = r() < 0.4;
+      if (!add(stand(W, wx, sp.d, yaw, wade), { bull, pose: wade && r() < 0.4 ? 'feed' : 'stand', look: r() < 0.4 ? (yaw > 1.5 ? 1 : -1) * 1.1 : 0 })) continue;
+      if (two) {
+        const dir = Math.cos(yaw) > 0 ? 1 : -1, k0 = wildK(sp.d), ax = wx - dir * (3.2 + 1.5 * r()) * k0;
+        add(stand(W, ax, sp.d + (r() - 0.5) * 3, yaw + (r() - 0.5) * 0.5, wade), bull ? { bull: false, pose: wade ? 'feed' : 'stand' } : { calf: true, pose: 'stand' });
+      }
+      if (!list.length) continue;
+    } else if (kind === 'wolf') {
+      sp = wildSpot(W, wx, r, byLake ? { shore: 3, far: 2 } : { shore: 3, far: 2, open: 3, edge: 1.5 }, 36, 118, 0.7);
+      if (!sp || taken(W, wx, ['moose', 'bear'], 150)) continue;
+      const n = 3 + Math.floor(r() * 4), yaw0 = side(), dir = yaw0 ? -1 : 1, k0 = wildK(sp.d), black = r() < 0.15 ? Math.floor(r() * n) : -1;
+      const howl = r() < 0.35 ? n - 1 : -1, looks = r() < 0.5 ? Math.floor(r() * n) : -1;
+      let ax = wx + dir * n * 1.6 * k0, drift = 0;
+      for (let j = 0; j < n; j++) {
+        const u1 = r(), u2 = r();
+        let d = sp.d + drift + (u1 - 0.5) * 2.2;
+        if (sp.at === 'shore') { const e = shoreNear(W, ax, sp.d, false); if (e != null) d = e - 1 - 1.6 * u1; }
+        if (sp.at === 'far') { const e = shoreNear(W, ax, sp.d, true); if (e != null) d = e + 1 + 1.6 * u1; }
+        drift += (u2 - 0.5) * 2;
+        const pose = j === howl ? 'howl' : j === looks ? 'stand' : 'trot';
+        add(stand(W, ax, d, yaw0 + (u2 - 0.5) * (pose === 'trot' ? 0.2 : 0.6)), { pose, black: j === black, look: pose === 'stand' ? -dir * 1.2 : 0, st: (j % 2 ? -1 : 1) * (0.09 + 0.07 * u1), low: u1 > 0.72 });
+        ax -= dir * (2.6 + 1.8 * r()) * k0;
+      }
+      for (const a of list) a.k *= 1.08;
+      if (list.length < 3) continue;
+    } else if (kind === 'bear') {
+      sp = wildSpot(W, wx, r, byLake ? { shore: 3, wade: 3 } : { shore: 3, wade: 3, edge: 2, open: 2 }, 36, 108, 1.2);
+      if (!sp || taken(W, wx, ['moose'], 120)) continue;
+      const wade = sp.at === 'wade', yaw = side() + (r() - 0.5) * 0.5, dir = Math.cos(yaw) > 0 ? 1 : -1, u = r();
+      const pose = wade ? (u < 0.6 ? 'fish' : 'stand') : u < 0.3 ? 'up' : u < 0.7 ? 'walk' : 'stand';
+      if (!add(stand(W, wx, sp.d, yaw, wade ? 0.3 : 0), { pose, look: pose !== 'walk' && r() < 0.6 ? -dir * 1.0 : 0 })) continue;
+      const cubs = !wade && r() < 0.4 ? 1 + (r() < 0.4 ? 1 : 0) : 0, k0 = list[0].k;
+      for (let j = 0; j < cubs; j++) add(stand(W, wx - dir * (2.3 + 1.5 * j + 0.6 * r()) * k0, sp.d - 0.6 + 2.2 * r(), yaw + (r() - 0.5) * 0.8), { cub: true, pose: r() < 0.3 ? 'up' : 'walk', look: 0 });
+    } else if (kind === 'fox') {
+      // by the line: on the strip in front of the trees, or anywhere open within 45 m
+      const near = r() < 0.7, d = near ? 11 + 13 * r() : 32.5 + 12 * r(), s = surface(W, wx, d);
+      if (!firm(W, s, wx, d) || (near && saplings(W, wx) >= 0.45) || !inView(W, wx, d, s.y + 0.4)) continue;
+      if (taken(W, wx, ['bear', 'wolf', 'moose', 'eagle', 'deer'], 40)) continue;
+      const yaw = side() + (r() - 0.5) * 0.3, pose = r() < 0.65 ? 'trot' : 'stand';
+      sp = { at: near ? 'strip' : 'open', d };
+      if (!add(stand(W, wx, d, yaw), { pose, look: (yaw > 1.5 ? 1 : -1) * 1.2 })) continue;
+      list[0].k *= 1.5;
+    } else {
+      sp = wildSpot(W, wx, r, byLake ? { shore: 3, far: 2 } : { shore: 3, far: 2, open: 2 }, 36, 112, 6);
+      if (!sp || taken(W, wx, ['bear', 'wolf', 'moose'], 40)) continue;
+      const a = stand(W, wx, sp.d, 0);
+      if (!a) continue;
+      add(a, { yaw: side(), k: a.k * 1.25, h: 6.5 + 3.5 * r(), lean: (r() - 0.5) * 0.14 });
+    }
+    return { kind, at: sp.at, wx, d: sp.d, list };
+  }
+  return null;
+}
+// The animals of this chunk whose distance falls in [dLo, dHi).
+function* wildlife(ctx, out, W, dLo, dHi) {
+  const log = globalThis.__pinewoodLog;                      // for scripts that look for them
+  for (const kind in WILD) {
+    const K = WILD[kind];
+    for (const { i } of cellsAround(ctx, K.cell, 60)) {
+      const fresh = !W.wild.has(kind + i);
+      const g = wildGroup(W, kind, i);
+      if (fresh) yield;                                        // finding a cell's animals can take a few milliseconds
+      if (!g) continue;
+      for (const a of g.list) {
+        const x = a.wx - ctx.x0;
+        if (a.d < dLo || a.d >= dHi || x < -8 || x > ctx.length + 8) continue;
+        K.draw(out, x, a.y, -a.d, a, makeRng(a.seed));
+        if (log && x >= 0 && x < ctx.length) log.push({ kind, at: g.at, wx: Math.round(a.wx), d: Math.round(a.d) });
+        if (out.due()) yield;
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Bands
 // ---------------------------------------------------------------------------------------------
 function* trackside(ctx, emit) {
@@ -1109,6 +1668,8 @@ function* trackside(ctx, emit) {
 
   // overhead line: masts every beat of world x, the field-side wires swooping between them
   yield* overheadLine(ctx, out, ctx.beatMetres || 56, { d: 3.6 });
+  // a deer or a fox on the strip between the line and the trees (first, so the limit never drops them)
+  yield* wildlife(ctx, out, W, ctx.zNear, 30);
 
   // rock cuttings
   const cuts = new Set();
@@ -1196,6 +1757,8 @@ function* near(ctx, emit) {
   const W = world(ctx);
   const dz = ctx.dials || {};
   out.limit = ctx.count * 0.62;
+  // the animals first, so the limit never drops them
+  yield* wildlife(ctx, out, W, 30, ctx.zFar);
   yield* lakeProps(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* powerLines(ctx, out, W, ctx.zNear, ctx.zFar);
   // boulders in the open and at forest edges
@@ -1472,12 +2035,18 @@ export const pinewoodBiome = {
 };
 
 // for scripts that inspect the layout
-//   _debug.layout('7', 0, 20000) -> { lakes, cabins, sites, cuttings, sidings, pylons }: world x and
+//   _debug.layout('7', 0, 20000) -> { lakes, cabins, sites, cuttings, sidings, pylons, wildlife }: world x and
 //   distance of things worth a pass strip (scripts/pass-strip.mjs)
 function debugLayout(seedStr, x0, x1) {
   const terrain = makeTerrain(hashString(String(seedStr)), TERRAIN);
   const W = world({ terrain });
-  const res = { lakes: [], cabins: [], sites: [], cuttings: [], sidings: [], pylons: [] };
+  const res = { lakes: [], cabins: [], sites: [], cuttings: [], sidings: [], pylons: [], wildlife: [] };
+  for (const kind in WILD) {
+    for (let i = Math.floor(x0 / WILD[kind].cell); i <= Math.floor(x1 / WILD[kind].cell); i++) {
+      const g = wildGroup(W, kind, i);
+      if (g && g.wx >= x0 && g.wx <= x1) res.wildlife.push({ kind, at: g.at, x: Math.round(g.wx), d: Math.round(g.d), n: g.list.length, list: g.list });
+    }
+  }
   for (let f = 0; f < 2; f++) {
     const c = LAKE_FAMS[f].cell;
     for (let i = Math.floor(x0 / c); i <= Math.floor(x1 / c); i++) {
@@ -1500,4 +2069,4 @@ function debugLayout(seedStr, x0, x1) {
   }
   return res;
 }
-export const _debug = { world, lakeIn, surface, LAKE_FAMS, TN: Object.keys(T), layout: debugLayout, props: { cabin, jetty, snowFence, boulder, pylon } };
+export const _debug = { world, lakeIn, surface, LAKE_FAMS, TN: Object.keys(T), layout: debugLayout, props: { cabin, jetty, snowFence, boulder, pylon }, wild: { WILD, wildK, wildGroup } };
