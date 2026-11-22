@@ -62,6 +62,11 @@
 //   one, with the lit surface painted bright by hand. See nightcity.js.
 // - Generators run on the main thread in slices. Stay near 2 to 3 microseconds a splat
 //   (scripts/check-biomes.mjs prints it): no per-splat searches, cache per-chunk layout once.
+// - Look at every new prop with scripts/pass-strip.mjs: it shows the thing at five angles across a
+//   pass. What is drawn only for a face-on view (one-sided sheets, half cylinders, rows of beads,
+//   splats spaced wider than they are big) turns into a cloud of loose splats at the sides of the
+//   frame. Neighbouring splats of one surface should overlap: centres no further apart than about
+//   one and a half radii, at every budget.
 import { placeholderBiome } from './placeholder.js';
 import { downsBiome } from './downs.js';
 import { saltflatBiome } from './saltflat.js';
@@ -71,6 +76,9 @@ import { karstBiome } from './karst.js';
 import { dunesBiome } from './dunes.js';
 import { himalayaBiome } from './himalaya.js';
 import { motorwayBiome } from './motorway.js';
+import { winterBiome } from './winter.js';
+import { fujiBiome } from './fuji.js';
+import { tropicsBiome } from './tropics.js';
 
 export const BIOMES = {
   downs: downsBiome,
@@ -81,6 +89,9 @@ export const BIOMES = {
   dunes: dunesBiome,
   himalaya: himalayaBiome,
   motorway: motorwayBiome,
+  winter: winterBiome,
+  fuji: fujiBiome,
+  tropics: tropicsBiome,
   placeholder: placeholderBiome,
 };
 

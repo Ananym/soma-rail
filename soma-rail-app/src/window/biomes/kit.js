@@ -61,8 +61,12 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             everything above eye level answers the beat; a biome that sets beatKinds (a list
 //             of KINDs, e.g. [KIND.TREE, KIND.BUILDING]) switches that off and has those kinds,
 //             plus anything tagged BEAT by hand, answer it instead. Lights always do.
+//   FALL      falls, and comes round again at the top of a 16 m column about the eye's height: a
+//             round splat is snow (1.3 m/s, with a sway), a splat at least 2.5 times taller than
+//             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
+//             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, VAPOUR: 5, BEAT: 6 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, VAPOUR: 5, BEAT: 6, FALL: 7 };
 
 // Direction toward the sun for baked shading: high, to the left (-x) and on the camera's side
 // (+z), so the faces the window sees are lit and tops are brightest.

@@ -17,9 +17,10 @@ const SLOT_WEIGHTS = { dawn: 0.22, day: 0.46, dusk: 0.32, night: 0 };
 
 // Kinds of scenery close enough in character to stand in for one another now and then.
 const NEIGHBOURS = {
-  downs: ['pinewood', 'karst'], pinewood: ['downs', 'himalaya'], saltflat: ['dunes', 'himalaya'],
-  nightcity: ['motorway'], motorway: ['nightcity'], karst: ['downs', 'pinewood'],
-  dunes: ['saltflat'], himalaya: ['pinewood', 'saltflat'],
+  downs: ['pinewood', 'karst'], pinewood: ['downs', 'winter'], saltflat: ['dunes', 'himalaya'],
+  nightcity: ['motorway'], motorway: ['nightcity'], karst: ['fuji', 'downs'],
+  dunes: ['saltflat'], himalaya: ['pinewood', 'winter'], winter: ['pinewood', 'himalaya'],
+  fuji: ['karst', 'downs'], tropics: ['karst', 'fuji'],
 };
 const TUNNEL_LEAD = 70;        // metres ahead that a tunnel mouth appears
 const TUNNEL_MIN_SECONDS = 5;  // shortest time spent inside one

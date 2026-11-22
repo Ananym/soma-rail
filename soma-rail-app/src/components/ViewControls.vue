@@ -49,7 +49,8 @@ defineEmits(['next-biome', 'toggle-dreamlike', 'update:cheat', 'update:fps', 'cr
 
 const NAMES = {
   downs: 'Farmland', pinewood: 'Pine forest', saltflat: 'Salt flat', nightcity: 'City at night',
-  karst: 'Karst', dunes: 'Desert', himalaya: 'Himalaya', motorway: 'Night motorway', placeholder: 'Test ground',
+  karst: 'Karst', dunes: 'Desert', himalaya: 'Himalaya', motorway: 'Night motorway', winter: 'Winter',
+  fuji: 'Japan', tropics: 'Tropics', placeholder: 'Test ground',
 };
 const nameOf = (b) => NAMES[b] || b || '';
 

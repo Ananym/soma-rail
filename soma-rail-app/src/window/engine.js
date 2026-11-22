@@ -31,6 +31,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   uniforms.uLightTint.value = new THREE.Color(1, 1, 1);
   uniforms.uBlurKeep.value = params.blurKeep;
   uniforms.uFlowWith.value = new THREE.Vector3(); uniforms.uFlowAgainst.value = new THREE.Vector3();
+  uniforms.uFall.value = new THREE.Vector2();
   // A side-window camera only translates sideways, so depth order never changes: sort by depth.
   const spark = new SparkRenderer({ renderer, sortRadial: false, extraUniforms: uniforms, minSortIntervalMs: params.sortMs });
   const patched = buildVertexShader(spark.material.vertexShader);
@@ -351,6 +352,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     uniforms.uMove.value = reducedMotion ? 0 : params.move;
     uniforms.uMoveT.value = moveT % MOVE_WRAP;
     uniforms.uTravel.value = S.travelled % MOVE_WRAP;
+    uniforms.uFall.value.set((1.3 * moveT) % 16, (9 * moveT) % 16);   // snow and rain: metres fallen
     for (let l = 0; l < 3; l++) {
       // where each lane's traffic pattern has got to, wrapped to a whole number of 48 m cells
       const w = S.travelled - LANE_SPEED[l] * moveT, a = S.travelled + LANE_SPEED[l] * moveT;

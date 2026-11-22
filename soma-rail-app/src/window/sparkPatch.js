@@ -23,6 +23,7 @@ export const PATCH_UNIFORMS = () => ({
   uTravel: { value: 0 },            // metres travelled (wrapped), so patterns can be pinned to the world
   uFlowWith: { value: null },       // THREE.Vector3: per-lane pattern offsets (m) for traffic going the train's way
   uFlowAgainst: { value: null },    // ... and for traffic coming the other way
+  uFall: { value: null },           // THREE.Vector2: metres fallen by snow (x) and rain (y), wrapped at 16
   uMoveDebug: { value: 0 },         // 1 paints each motion class a flat colour, to check the tagging
 });
 
@@ -47,7 +48,8 @@ uniform float uMoveT;
 uniform float uTravel;
 uniform float uMoveDebug;
 uniform vec3 uFlowWith;
-uniform vec3 uFlowAgainst;`,
+uniform vec3 uFlowAgainst;
+uniform vec2 uFall;`,
   },
   {
     // scatter and breathe, before the splat is moved into view space
@@ -119,6 +121,18 @@ uniform vec3 uFlowAgainst;`,
             center.x += amp * 0.3 * sin(0.31 * uMoveT + hp + 0.02 * wx + 0.015 * center.y);
             center.y += amp * 0.12 * sin(0.23 * uMoveT + 1.7 * hp + 0.03 * wx + 0.025 * center.y);
             scales *= 1.0 + 0.1 * min(uMove, 1.0) * sin(0.4 * uMoveT + 2.3 * hp + 0.05 * wx + 0.035 * center.y);
+        } else if (mv == 7) {
+            // Falling things. Snow (a round splat) drifts down slowly with a sway; rain (a splat at
+            // least 2.5 times taller than wide) falls fast and straight. Each keeps its place along
+            // and across the line and falls through a 16 m column round the eye's height, coming
+            // round again at the top; it fades in and out at the ends of the column. The CPU sends
+            // how far each kind has fallen, already wrapped.
+            float rain = step(2.5, scales.y / max(scales.x, 0.0001));
+            float hp = fract(sin(center.z * 78.233) * 43758.5453);
+            float yy = mod(center.y - mix(uFall.x, uFall.y, rain) + 6.0, 16.0) - 6.0;
+            center.y = mix(center.y, yy, min(uMove, 1.0));
+            center.x += (1.0 - rain) * uMove * 0.35 * sin(0.9 * uMoveT + 6.2832 * hp);
+            rgba.a *= smoothstep(-6.0, -4.8, yy) * (1.0 - smoothstep(8.8, 10.0, yy));
         }
     }
     if (uDissolve > 0.0) {

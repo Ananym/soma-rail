@@ -77,6 +77,7 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | `node scripts/window-shot.cjs out.png "seed=1&hour=12"` | Screenshot the view on its own (`window-harness.html`) |
 | `npm run build && node scripts/app-check.cjs` | Start the built app in five cases (the bare URL, a Start click before the stream is known, a tuned run that also presses the overlay's controls, no WebGL2, streams refusing CORS) and check each runs. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
 | `node scripts/motion-frames.cjs outDir "biome=motorway&hour=1&kmh=0" --n 24 --dt 0.1` | Capture a run of frames with the motion clock stepped by hand, to look at moving things on a machine too slow to play them |
+| `node scripts/pass-strip.mjs out.png "seed=7&biome=saltflat" --x 9013 --d 79` | One object at five angles across a pass, from the left of the frame to the right, in one image: catches things that fall apart when seen from the side |
 | `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |
 | `node scripts/check-biomes.mjs` | Test the scenery generators |
 | `node scripts/check-rng.mjs` | Check the hash and noise helpers still return exactly the values every world is built from |

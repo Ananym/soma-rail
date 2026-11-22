@@ -22,6 +22,9 @@ export const KIT_RULES = {
   nightcity: [],
   himalaya: [],
   motorway: [],
+  winter: [],
+  fuji: [],
+  tropics: [],
   placeholder: [],
 };
 
