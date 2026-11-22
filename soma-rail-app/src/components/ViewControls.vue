@@ -1,5 +1,5 @@
 <template>
-  <div class="view-controls" :class="{ 'fade-out': shouldFade }">
+  <div class="view-controls" :class="{ 'fade-out': shouldFade, touch }">
     <div class="row">
       <span class="label">Scenery</span>
       <span class="value">{{ sceneryText }}</span>
@@ -12,7 +12,14 @@
         {{ dreamWanted ? 'On' : 'Off' }}
       </button>
     </div>
-    <div class="row">
+    <div v-if="touch && wakeSupported" class="row">
+      <span class="label">Keep screen on</span>
+      <span class="value">{{ wakeNote }}</span>
+      <button type="button" class="switch" :class="{ on: keepAwake }" :aria-pressed="keepAwake" @click="$emit('update:keep-awake', !keepAwake)">
+        {{ keepAwake ? 'On' : 'Off' }}
+      </button>
+    </div>
+    <div v-if="!touch" class="row">
       <span class="label">Ignore distraction</span>
       <span class="value"></span>
       <button type="button" class="switch" :class="{ on: cheat }" :aria-pressed="cheat" @click="$emit('update:cheat', !cheat)">
@@ -43,9 +50,14 @@ const props = defineProps({
   view: { type: Object, default: null },
   cheat: { type: Boolean, default: false },
   fps: { type: Number, default: 60 },
+  // a touch screen: no distraction to ignore, and a switch to keep the screen awake where the browser can
+  touch: { type: Boolean, default: false },
+  keepAwake: { type: Boolean, default: false },
+  wakeSupported: { type: Boolean, default: false },
+  wakeNote: { type: String, default: '' },
   lastMouseMoveTime: { type: Number, default: Date.now() },
 });
-defineEmits(['next-biome', 'toggle-dreamlike', 'update:cheat', 'update:fps', 'credits']);
+defineEmits(['next-biome', 'toggle-dreamlike', 'update:cheat', 'update:fps', 'update:keep-awake', 'credits']);
 
 const NAMES = {
   downs: 'Farmland', pinewood: 'Pine forest', saltflat: 'Salt flat', nightcity: 'City at night',
@@ -116,4 +128,8 @@ button.on { background: rgba(102, 217, 239, 0.28); border-color: #66d9ef; }
 @media (max-width: 720px) {
   .view-controls { top: auto; bottom: 20px; left: 20px; right: 20px; max-width: none; min-width: 0; }
 }
+/* touch: targets a finger can hit */
+.view-controls.touch { padding: 8px 14px; }
+.view-controls.touch .row { min-height: 44px; }
+.view-controls.touch button { min-width: 56px; min-height: 34px; padding: 6px 12px; font-size: 14px; }
 </style>

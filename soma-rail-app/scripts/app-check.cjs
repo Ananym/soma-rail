@@ -1,8 +1,9 @@
 // End-to-end smoke check of the built app in headless Chromium.
 //   npm run build && node scripts/app-check.cjs [out-dir]
-// Runs five cases, clicking Start in each: the plain address, the same with tuning parameters (and a
-// check that distraction brakes the train), a browser without WebGL2 (a notice, radio still playing)
-// and streams refusing CORS (must keep playing, without analysis). No case may contact YouTube.
+// Runs six cases, clicking Start in each: the plain address, the same with tuning parameters (and a
+// check that distraction brakes the train), a browser without WebGL2 (a notice, radio still playing),
+// streams refusing CORS (must keep playing, without analysis), and an emulated phone (no distraction,
+// taps for the overlay, pause, silence in the background, both ways up). No case may contact YouTube.
 // It talks to the real SomaFM servers, so it needs network access (HTTPS_PROXY is honoured).
 // Headless Chromium renders in software here: this checks wiring, never frame rate or looks.
 const path = require('path');
@@ -34,10 +35,13 @@ const outDir = process.argv[2] || '.';
     // Streams refuse CORS requests: the audio element must be remounted without CORS and still play.
     { name: 'cors-refused', query: Q, wait: 20000, expect: 'window', tap: false, settle: 12000, noisy: true,
       route: async (page) => page.route(/ice\d\.somafm\.com/, async (route) => { const h = await route.request().allHeaders(); return h.origin ? route.abort() : route.continue(); }) },
+    // A phone held upright, then turned: emulated touch, so only the wiring is proven here.
+    { name: 'touch', query: '?budget=120000&seed=check', wait: 20000, expect: 'window', touch: true,
+      context: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 } },
   ];
   for (const c of cases.filter((k) => !process.env.ONLY || k.name === process.env.ONLY)) {
     const name = c.name;
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' });
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...(c.context || {}), userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' });
     const page = await ctx.newPage();
     if (c.init) await page.addInitScript(c.init);
     if (c.route) await c.route(page);
@@ -51,6 +55,7 @@ const outDir = process.argv[2] || '.';
     // `early` clicks Start the moment it appears, before the stream is known: one click must still do.
     if (!c.early) await page.waitForFunction(() => { const a = document.querySelector('audio'); return a && a.src; }, null, { timeout: 30000 });
     if (c.settle) await page.waitForTimeout(c.settle);     // let the CORS fallback run before Start
+    if (c.touch) c.startText = (await page.textContent('.start-button')).trim();
     await page.click('.start-overlay');
     await page.waitForTimeout(400);
     const goneAtOnce = await page.evaluate(() => !document.querySelector('.start-overlay'));
@@ -74,6 +79,79 @@ const outDir = process.argv[2] || '.';
     // (How fast it brakes cannot be judged here: on a software renderer the page's timers starve,
     // so the distraction score climbs far more slowly than on a real machine.)
     let brake = null;
+    if (c.touch) {
+      const T = {};
+      const rate = () => page.evaluate(() => window.__trainWindow.director.state.rate);
+      const audioPaused = () => page.evaluate(() => document.querySelector('audio').paused);
+      const shown = () => page.evaluate(() => !!document.querySelector('.now-playing') && !document.querySelector('.now-playing').classList.contains('fade-out'));
+      const until = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await page.waitForTimeout(500); } return false; };
+      const press = (sel) => page.evaluate((sel) => { const b = document.querySelector(sel); if (!b) throw new Error('nothing at ' + sel); b.click(); }, sel);
+      T.mediaQuery = await page.evaluate(() => matchMedia('(hover: none) and (pointer: coarse)').matches);
+      T.touchClass = await page.evaluate(() => document.querySelector('.app').classList.contains('touch'));
+      T.startText = c.startText;
+      // nothing a finger or a lost focus does may brake the train
+      await until(async () => (await rate()) === 1, 60000);
+      const r0 = await rate();
+      await page.evaluate(() => { for (let i = 0; i < 40; i++) document.dispatchEvent(new MouseEvent('mousemove', { clientX: 20 + i * 8, clientY: 300, bubbles: true })); window.dispatchEvent(new Event('blur')); });
+      await page.waitForTimeout(5000);
+      T.rateAfterFidget = await rate(); T.noDistraction = r0 === 1 && T.rateAfterFidget === 1;
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      // a tap on the glass brings the overlay up; another puts it away
+      T.hiddenAtFirst = !(await shown());
+      await page.touchscreen.tap(195, 420);
+      T.shownAfterTap = await until(shown, 4000);
+      await press('canvas');
+      T.hiddenAfterSecondTap = await until(async () => !(await shown()), 3000);
+      await press('canvas');
+      // the controls a phone gets
+      T.rows = await page.evaluate(() => [...document.querySelectorAll('.view-controls .label')].map((e) => e.textContent.trim()));
+      T.wakeLockOffered = await page.evaluate(() => 'wakeLock' in navigator);
+      T.controlsOk = !T.rows.includes('Ignore distraction') && T.rows.includes('Scenery') && (!T.wakeLockOffered || T.rows.includes('Keep screen on'));
+      T.noVolume = await page.evaluate(() => !document.querySelector('.volume-control'));
+      // pause brakes the train and silences the radio; play brings both back
+      T.overlayBeforePause = await shown();
+      await press('.pause');
+      await page.waitForTimeout(300);
+      T.pauseShowsPaused = await page.evaluate(() => document.querySelector('.pause').getAttribute('aria-pressed'));
+      T.rateSoonAfterPause = await rate();
+      T.pausedAudio = await until(audioPaused, 90000);
+      T.pausedTrain = await until(async () => (await rate()) === 0, 30000);
+      await press('.pause');
+      T.playsAgain = await until(async () => !(await audioPaused()) && (await rate()) > 0, 60000);
+      // in the background the radio stops at once, and starts again on return
+      const hide = (h) => page.evaluate((h) => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => h }); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (h ? 'hidden' : 'visible') }); document.dispatchEvent(new Event('visibilitychange')); }, h);
+      await hide(true);
+      await page.waitForTimeout(300);
+      T.silentInBackground = await audioPaused();
+      await page.waitForTimeout(3000);
+      T.stillSilent = await audioPaused();
+      await hide(false);
+      T.resumesOnReturn = await until(async () => !(await audioPaused()), 30000);
+      T.noResumePrompt = await page.evaluate(() => !document.querySelector('.resume-overlay'));
+      // both ways up: every panel inside the screen, none overlapping another
+      const layout = () => page.evaluate(() => {
+        const r = ['.now-playing', '.channel-selector', '.view-controls'].map((s) => document.querySelector(s).getBoundingClientRect());
+        const inside = r.every((b) => b.left >= 0 && b.top >= 0 && b.right <= innerWidth + 0.5 && b.bottom <= innerHeight + 0.5 && b.width > 120 && b.height > 60);
+        const apart = (a, b) => a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5;
+        const c = document.querySelector('.window-container canvas');
+        return { inside, apart: apart(r[0], r[1]) && apart(r[1], r[2]) && apart(r[0], r[2]), canvas: [c.clientWidth, c.clientHeight], view: [innerWidth, innerHeight] };
+      });
+      const keep = () => page.evaluate(() => { clearInterval(window.__keep); window.__keep = setInterval(() => document.querySelector('.now-playing').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })), 400); });
+      await press('.now-playing'); await keep();
+      T.portrait = await layout();
+      await page.screenshot({ path: path.join(outDir, 'app-touch-portrait.png'), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
+      await page.setViewportSize({ width: 844, height: 390 });
+      await page.waitForTimeout(2500);
+      T.landscape = await layout();
+      T.engineAspect = await page.evaluate(() => { const c = document.querySelector('.window-container canvas'); return +(c.width / c.height).toFixed(2); });
+      await page.screenshot({ path: path.join(outDir, 'app-touch-landscape.png'), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
+      await page.evaluate(() => clearInterval(window.__keep));
+      const lay = (l) => l.inside && l.apart && l.canvas[0] === l.view[0] && l.canvas[1] === l.view[1];
+      T.ok = T.mediaQuery && T.touchClass && T.noDistraction && T.hiddenAtFirst && T.shownAfterTap && T.hiddenAfterSecondTap && T.controlsOk && T.noVolume
+        && T.pausedAudio && T.pausedTrain && T.playsAgain && T.silentInBackground && T.stillSilent && T.resumesOnReturn && T.noResumePrompt
+        && lay(T.portrait) && lay(T.landscape) && Math.abs(T.engineAspect - 844 / 390) < 0.05;
+      brake = T;
+    }
     if (c.distraction) {
       const rate = () => page.evaluate(() => window.__trainWindow.director.state.rate);
       const before = await rate();
@@ -135,7 +213,7 @@ const outDir = process.argv[2] || '.';
     // The minutes-long IDLE run rides out the odd dropped poll through a proxy; nothing else is excused.
     if (process.env.IDLE === '1') for (let i = ours.length - 1; i >= 0; i--) if (/net::ERR_CONNECTION_RESET/.test(ours[i])) ours.splice(i, 1);
     if (youtube.length) ours.push(`requests to YouTube hosts: ${youtube.length}`);
-    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log('brake:', JSON.stringify(brake));
+    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log(c.touch ? 'touch:' : 'brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }
     const audioOk = state.audio && !state.audio.paused && state.audio.time > 0.5;
     const viewOk = c.expect === 'notice'

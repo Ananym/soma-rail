@@ -23,7 +23,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;   /* no pull-to-refresh or bounce under the window */
   background: #000;
   cursor: default;
 }
@@ -31,6 +33,7 @@ body {
 #app {
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 

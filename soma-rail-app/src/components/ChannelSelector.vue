@@ -1,5 +1,5 @@
 <template>
-  <div class="channel-selector" :class="{ 'fade-out': shouldFade }">
+  <div class="channel-selector" :class="{ 'fade-out': shouldFade, touch }">
     <div class="selector-header">
       <h2>Select Channel</h2>
       <div class="support-message">
@@ -63,6 +63,10 @@ const props = defineProps({
   lastMouseMoveTime: {
     type: Number,
     default: Date.now()
+  },
+  touch: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -211,6 +215,16 @@ function selectChannel(channelId) {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.7);
 }
+
+/* touch: tighter, so more channels fit between the other two panels */
+.channel-selector.touch { padding: 12px; -webkit-overflow-scrolling: touch; }
+.channel-selector.touch .selector-header { margin-bottom: 10px; padding-bottom: 10px; }
+.channel-selector.touch .selector-header h2 { font-size: 18px; margin-bottom: 6px; }
+.channel-selector.touch .support-message { margin-top: 6px; padding: 8px; font-size: 13px; }
+.channel-selector.touch .channels-grid { gap: 6px; }
+.channel-selector.touch .channel-item { padding: 8px; gap: 12px; }
+.channel-selector.touch .channel-image { width: 44px; height: 44px; }
+.channel-selector.touch .channel-info h3 { font-size: 15px; margin-bottom: 2px; }
 
 /* Scrollbar styling */
 .channel-selector::-webkit-scrollbar {

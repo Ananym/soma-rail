@@ -24,6 +24,7 @@ const NUM = {
   beatPin: -1,       // pins the beat pulse at this value 0..1 (screenshot scripts); -1 lets the music drive it
   moveT: -1,         // pins the motion clock at this many seconds (screenshot scripts); -1 lets it run
   tags: 0,           // 1 paints each motion class a flat colour and dims the rest (to check the tagging)
+  touch: -1,         // touch-screen behaviour: 1 on, 0 off, -1 automatic (on where the main pointer is a finger)
   debug: 0,          // 1 shows a stats readout
   preserve: 0,       // 1 keeps the drawing buffer readable (screenshot scripts only; slower)
 };
@@ -37,6 +38,7 @@ export function readParams(search = (typeof location !== 'undefined' ? location.
   }
   for (const k of Object.keys(STR)) if (q.has(k)) p[k] = q.get(k);
   p.levelFixed = q.has('level');   // an explicit level in the URL overrides the channel's
+  p.budgetGiven = q.has('budget'); // otherwise a touch screen gets a smaller one (see TrainWindow.vue)
   p.level = Math.max(0, Math.min(1, Math.round(p.level)));
   p.budget = Math.max(20000, Math.min(4000000, Math.round(p.budget)));
   return p;

@@ -254,8 +254,19 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   // shift, an off-centre projection, so verticals stay vertical and nothing else needs to know
   // except the sky and the backdrop, which draw in screen space.
   let horizonShift = 0;
+  // The vertical field of view is params.fov in a landscape window. A window taller than it is wide
+  // (a phone held upright) would turn that into a narrow slit that scenery whips across, so there
+  // the view is widened vertically until it is about 53 degrees across, up to a limit of 95 tall:
+  // the same country, with more sky above and more ground below.
+  const TAN_ACROSS = 0.5, TAN_TALL_MAX = 1.1;
+  let fovNow = params.fov;
+  function fovFor(aspect) {
+    const base = Math.tan((params.fov * Math.PI) / 360);
+    const t = Math.max(base, Math.min(TAN_TALL_MAX, TAN_ACROSS / aspect));
+    return (Math.atan(t) * 360) / Math.PI;
+  }
   function applyHorizon() {
-    const tanHalf = Math.tan((params.fov * Math.PI) / 360);
+    const tanHalf = Math.tan((fovNow * Math.PI) / 360);
     camera.projectionMatrix.elements[9] = horizonShift;
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
     frameMount.matrix.identity(); frameMount.matrix.elements[9] = -horizonShift * tanHalf;
@@ -277,14 +288,23 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * resScale;
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
-    camera.aspect = width / height; camera.updateProjectionMatrix();
+    camera.aspect = width / height;
+    fovNow = fovFor(camera.aspect); camera.fov = fovNow;
+    camera.updateProjectionMatrix();
     applyHorizon();
-    tanHalfHfov = Math.tan((params.fov * Math.PI) / 360) * camera.aspect;
-    frame.resize(camera.aspect, params.fov);
+    tanHalfHfov = Math.tan((fovNow * Math.PI) / 360) * camera.aspect;
+    frame.resize(camera.aspect, fovNow);
   }
   resize();
   setHorizon(biome, true);
   window.addEventListener('resize', resize);
+  // The canvas can change size with no window resize: a phone's address bar sliding away, a turn of
+  // the screen that settles a moment later.
+  const sizeWatch = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (w && h && (w !== width || h !== height)) resize();
+  }) : null;
+  if (sizeWatch) sizeWatch.observe(canvas);
   const onVisible = () => { last = performance.now(); };   // a hidden tab is not a hitch
   document.addEventListener('visibilitychange', onVisible);
 
@@ -357,7 +377,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
       applyHorizon();
     }
 
-    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: params.fov, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: params.beatPin >= 0 ? params.beatPin : S.beat, sparkle: S.sparkle, sky: biome.sky, shift: horizonShift,
+    sky.update({ hour: S.hour, level: S.level, dials: S.dials, time: S.time, dt, aspect: camera.aspect, fovDeg: fovNow, travelled: S.travelled, speed: S.speed, energy: S.energy, beat: params.beatPin >= 0 ? params.beatPin : S.beat, sparkle: S.sparkle, sky: biome.sky, shift: horizonShift,
       motionT: moveT, moving: !(S.speed === 0 && S.rate === 0), twinkle: reducedMotion ? 0 : Math.min(1, params.move) });
     const inTunnel = S.tunnel && S.tunnel.phase === 'inside';
     uniforms.uMotionMetres.value = S.speed * params.shutter * (reducedMotion ? 0.5 : 1);
@@ -465,6 +485,7 @@ uniforms.uFly.value = ((S.travelled % 49152) + 49152) % 49152;
       disposed = true;
       renderer.setAnimationLoop(null);
       window.removeEventListener('resize', resize);
+      if (sizeWatch) sizeWatch.disconnect();
       document.removeEventListener('visibilitychange', onVisible);
       for (const key of [...chunks.keys()]) dropChunk(key);
       if (kit) kit.dispose();

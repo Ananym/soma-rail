@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import TrainWindow from './components/TrainWindow.vue';
 import AudioPlayer from './components/AudioPlayer.vue';
 import ChannelSelector from './components/ChannelSelector.vue';
@@ -28,13 +28,28 @@ const {
   stopMetadataPolling
 } = useSomaFM();
 
+// --- touch screens ---------------------------------------------------------------------------
+// Where the main pointer is a finger (or with touch=1 in the URL) the page behaves differently:
+// there is no distraction mechanic, a tap brings the overlay up, a pause button stops the journey,
+// and the radio never plays while the page is in the background.
+const urlParams = readParams();
+const touchQuery = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(hover: none) and (pointer: coarse)') : null;
+const touch = ref(urlParams.touch === 1 || (urlParams.touch !== 0 && !!touchQuery && touchQuery.matches));
+const hasStarted = ref(false);
+const userPaused = ref(false);                  // the pause button
+const pageVisible = ref(typeof document === 'undefined' || !document.hidden);
+const needsTap = ref(false);                    // the browser refused to restart the radio without a touch
+// whether the journey should be under way (touch screens only; elsewhere distraction decides)
+const running = computed(() => hasStarted.value && !userPaused.value && pageVisible.value && !needsTap.value);
+
 // Interaction tracking
 const {
   distractionScore,
   lastMouseMoveTime,
   isFocused,
+  holdOverlay,
   resetGracePeriod
-} = useInteraction();
+} = useInteraction({ touch, running: computed(() => !hasStarted.value || running.value) });   // before Start the train is not held back
 // The overlay shows for a few seconds after the mouse moves, but never while the window is not
 // the one in use: a pointer crossing a background window should not bring it up.
 const overlayMoveTime = computed(() => (isFocused.value ? lastMouseMoveTime.value : 0));
@@ -56,7 +71,7 @@ const {
   volumeMultiplier,
   baseVolume,
   setAudioElement
-} = usePlaybackControl(distractionScore, cheat);
+} = usePlaybackControl(distractionScore, computed(() => cheat.value && !touch.value));   // nothing to ignore on a touch screen
 
 // Set saved volume
 baseVolume.value = savedVolume.value;
@@ -65,12 +80,104 @@ baseVolume.value = savedVolume.value;
 const windowRef = ref(null);
 const audioPlayerRef = ref(null);
 const audioElement = ref(null);
-const hasStarted = ref(false);
+
+// --- touch: pause, the background, and keeping the screen awake -------------------------------
+// Some phones ignore a page's volume setting, so nothing here relies on the fade to silence the
+// radio: the element itself is paused.
+const volumeSettable = (() => {
+  try { const a = document.createElement('audio'); a.volume = 0.5; return a.volume === 0.5; } catch { return false; }
+})();
+let stoppedAt = 0;          // when the radio was last paused, to know whether to rejoin the stream live
+function stopRadio() {
+  if (audioPlayerRef.value) audioPlayerRef.value.pauseNow();
+  if (!stoppedAt) stoppedAt = Date.now();
+}
+function startRadio() {
+  const rejoin = stoppedAt > 0 && Date.now() - stoppedAt > 5000;
+  stoppedAt = 0;
+  if (windowRef.value) windowRef.value.resumeAudio();
+  return audioPlayerRef.value ? audioPlayerRef.value.playNow({ rejoin }) : Promise.resolve();
+}
+// The pause button. Pausing brakes the train as distraction does on a desktop; where the volume can
+// fade the radio is paused once the train has stopped, elsewhere at once.
+function togglePause() {
+  if (!touch.value || !hasStarted.value) return;
+  if (!userPaused.value) {
+    userPaused.value = true;
+    if (!volumeSettable) stopRadio();
+  } else {
+    userPaused.value = false;
+    needsTap.value = false;
+    startRadio().catch((err) => console.warn('Could not restart the radio:', err && err.name));   // inside the tap
+  }
+  holdOverlay();
+}
+watch(distractionScore, (score) => {
+  if (touch.value && userPaused.value && score >= 100) stopRadio();
+});
+// The page left for the background (another app, another tab, the screen locked): the radio stops
+// at once. Back in view it starts again by itself, or asks for a tap where the browser insists.
+function handleVisibility() {
+  pageVisible.value = !document.hidden;
+  if (!touch.value || !hasStarted.value) return;
+  if (document.hidden) {
+    stopRadio();
+    distractionScore.value = 100;      // so the train pulls away again on return, and the music with it
+  } else if (!userPaused.value) {
+    startRadio().catch(() => { needsTap.value = true; });
+  }
+}
+function handleResumeTap() {
+  needsTap.value = false;
+  startRadio().catch((err) => console.warn('Could not restart the radio:', err && err.name));
+  resetGracePeriod();
+}
+// Something else started the radio while it should be silent (lock-screen or headset controls).
+function handlePlaying() {
+  if (touch.value && hasStarted.value && (document.hidden || userPaused.value)) stopRadio();
+}
+
+// Keeping the screen awake: off unless asked for, and only while the journey is under way. The
+// browser drops the lock whenever the page is hidden, and may refuse it (battery saver).
+const wakeSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator;
+const keepAwake = useLocalStorage('keepScreenOn', false);
+const wakeNote = ref('');
+let wakeLock = null;
+async function syncWakeLock() {
+  const want = wakeSupported && touch.value && keepAwake.value && running.value;
+  if (want && !wakeLock) {
+    try {
+      const lock = await navigator.wakeLock.request('screen');
+      lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+      wakeLock = lock;
+      wakeNote.value = '';
+      if (!(wakeSupported && touch.value && keepAwake.value && running.value)) syncWakeLock();   // changed meanwhile
+    } catch {
+      keepAwake.value = false;         // say so plainly: the switch goes back off
+      wakeNote.value = 'Not allowed';
+    }
+  } else if (!want && wakeLock) {
+    const lock = wakeLock; wakeLock = null;
+    lock.release().catch(() => {});
+  }
+}
+watch([keepAwake, running, touch], syncWakeLock);
+function setKeepAwake(on) { wakeNote.value = ''; keepAwake.value = on; }
+
+const onTouchQuery = (e) => { if (urlParams.touch !== 0 && urlParams.touch !== 1) touch.value = e.matches; };
+onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibility);
+  if (touchQuery && touchQuery.addEventListener) touchQuery.addEventListener('change', onTouchQuery);
+});
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibility);
+  if (touchQuery && touchQuery.removeEventListener) touchQuery.removeEventListener('change', onTouchQuery);
+});
 
 // The train window analyses the music, which needs the stream loaded with CORS and routed through
 // Web Audio. That is on where it is proven (see audioWanted); if CORS loading fails we remount a
 // plain audio element and carry on without analysis.
-const audioCors = ref(audioWanted(readParams()));
+const audioCors = ref(audioWanted(urlParams));
 // Set if the train window cannot start (no WebGL2, or its code failed to load).
 const viewFailed = ref(false);
 const audioKey = ref(0);
@@ -138,7 +245,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app" :class="{ started: hasStarted }">
+  <div class="app" :class="{ started: hasStarted, touch }">
     <TrainWindow
       v-if="!viewFailed"
       ref="windowRef"
@@ -149,6 +256,7 @@ onMounted(() => {
       :channel="currentChannel"
       :song="currentSong"
       :fps-cap="fpsCap"
+      :touch="touch"
       @failed="handleWindowFailed"
       @state="viewState = $event"
     />
@@ -161,7 +269,8 @@ onMounted(() => {
       :key="audioKey"
       ref="audioPlayerRef"
       :cors="audioCors"
-      :resume="hasStarted"
+      :resume="touch ? running : hasStarted"
+      @playing="handlePlaying"
       @cors-failed="handleCorsFailed"
       :stream-url="streamUrl"
       :volume="baseVolume * volumeMultiplier"
@@ -171,15 +280,24 @@ onMounted(() => {
     <StartButton
       :audio-element="audioElement"
       :view="windowRef"
+      :touch="touch"
       @started="handleStarted"
     />
 
+    <div v-if="touch && hasStarted && needsTap" class="resume-overlay" @click="handleResumeTap">
+      <div class="resume-button">Tap to resume</div>
+    </div>
+
+    <!-- The overlay's three panels. With a mouse each sits in its own corner; on a touch screen
+         they are laid out together as one sheet (see .sheet below). -->
+    <div class="panels" :class="{ sheet: touch }">
     <ChannelSelector
       v-if="hasStarted"
       :channels="channels"
       :current-channel-id="currentChannelId"
       :is-loading="isLoading"
       :error="error"
+      :touch="touch"
       :last-mouse-move-time="overlayMoveTime"
       @select-channel="handleChannelSelect"
     />
@@ -189,20 +307,17 @@ onMounted(() => {
       :view="viewFailed ? null : viewState"
       :cheat="cheat"
       :fps="fpsCap"
+      :touch="touch"
+      :keep-awake="keepAwake"
+      :wake-supported="wakeSupported"
+      :wake-note="wakeNote"
+      @update:keep-awake="setKeepAwake"
       :last-mouse-move-time="overlayMoveTime"
       @next-biome="windowRef && windowRef.nextBiome()"
       @toggle-dreamlike="windowRef && windowRef.toggleDreamlike()"
       @update:cheat="cheat = $event"
       @update:fps="fpsCap = $event"
       @credits="showCredits = true"
-    />
-
-    <CreditsPanel v-if="showCredits" @close="showCredits = false" />
-
-    <SoftCursor
-      v-if="hasStarted"
-      :distraction-score="distractionScore"
-      :last-mouse-move-time="lastMouseMoveTime"
     />
 
     <NowPlaying
@@ -212,7 +327,19 @@ onMounted(() => {
       :playback-rate="playbackRate"
       :last-mouse-move-time="overlayMoveTime"
       :volume="baseVolume"
+      :touch="touch"
+      :paused="userPaused"
       @update:volume="baseVolume = $event"
+      @toggle-pause="togglePause"
+    />
+    </div>
+
+    <CreditsPanel v-if="showCredits" @close="showCredits = false" />
+
+    <SoftCursor
+      v-if="hasStarted && !touch"
+      :distraction-score="distractionScore"
+      :last-mouse-move-time="lastMouseMoveTime"
     />
   </div>
 </template>
@@ -241,7 +368,69 @@ onMounted(() => {
 .app {
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: #000;
+}
+.app.touch {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;      /* no double-tap zoom on the glass */
+}
+
+/* With a mouse the wrapper does nothing: each panel is fixed in its own corner. */
+.panels { display: contents; }
+/* On a touch screen the three panels share the screen as one sheet: what is playing (and the pause
+   button) at the top, the channels in the middle, scrolling, and the view's controls at the bottom.
+   On its side the channels take the left half and the other two the right. Taps between the panels
+   fall through to the glass. */
+.panels.sheet {
+  display: grid;
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  padding: 12px;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  gap: 10px;
+  grid-template: "now" auto "channels" minmax(0, 1fr) "view" auto / minmax(0, 1fr);
+  z-index: 100;
+  pointer-events: none;
+}
+.panels.sheet > * {
+  position: static;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+}
+.panels.sheet > :not(.fade-out) { pointer-events: auto; }
+.panels.sheet > .now-playing { grid-area: now; }
+.panels.sheet > .channel-selector { grid-area: channels; overscroll-behavior: contain; }
+.panels.sheet > .view-controls { grid-area: view; overflow-y: auto; max-height: 100%; }
+@media (orientation: landscape) {
+  .panels.sheet {
+    grid-template: "channels now" auto "channels view" minmax(0, 1fr) / minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .panels.sheet > .view-controls { align-self: end; }
+}
+
+.resume-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+.resume-button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  padding: 18px 34px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: 2px;
 }
 </style>

@@ -21,6 +21,17 @@ While the mouse is moving an overlay shows the channel list, what is playing, an
 
 The pointer is a small soft light that dims as you settle and is gone when your distraction reaches zero.
 
+### On a phone or tablet
+
+Where the main pointer is a finger there is no distraction mechanic: touching the screen is how you ask for the controls, not a lapse of attention.
+
+- **Tap** the glass for the overlay; tap the glass again to put it away, or leave it and it fades after five seconds. On a phone the three panels are laid out as one sheet: what is playing with a **pause** button, the channels, and the view's controls.
+- **Pause** brakes the train to a stop and silences the radio; play pulls away again.
+- **In the background** (another app, another tab, the screen locked) the radio stops at once. It starts again by itself when you come back, or asks for a tap where the browser insists on one.
+- **Keep screen on** (off unless you switch it on) stops the phone sleeping while the train is running, where the browser allows it.
+- The window works **both ways up**. Held upright it is a tall window: about the same width of country, with more sky above and more ground below.
+- A phone draws half as many splats as a desktop unless `budget` says otherwise. That figure is a guess, not a measurement.
+
 ## Running Locally
 
 ```bash
@@ -51,7 +62,7 @@ Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
 | --- | --- | --- |
 | `level` | from the channel | Surreal level: `0` plausible, `1` dreamlike |
 | `biome` | from the channel | Force one biome: `downs`, `pinewood`, `saltflat`, `nightcity`, `karst`, `dunes`, `himalaya`, `motorway`, `winter`, `fuji` or `tropics` |
-| `budget` | `600000` | Total splats; lower it if the view stutters |
+| `budget` | `600000` (`300000` on a touch screen) | Total splats; lower it if the view stutters |
 | `kmh` | `100` | Cruising speed |
 | `shutter` | `0.02` | Motion-blur length in seconds |
 | `blurKeep` | `0.6` | How solid blurred splats stay, 0 to 1 |
@@ -68,6 +79,7 @@ Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
 | `audio` | automatic | `1` forces music analysis on, `0` turns it off. Automatic means on, except in Safari and iOS browsers |
 | `sortMs` | `0` | Least time between depth sorts, in milliseconds. Try `100` if the view hitches |
 | `frame` | `1` | `0` hides the window frame |
+| `touch` | automatic | `1` forces the phone and tablet behaviour, `0` the desktop behaviour. Automatic means on where the main pointer is a finger |
 | `debug` | `0` | `1` shows a readout (surreal level, scenery, time of day, speed, music, and a hitch meter: slow frames in the last 10 seconds and what the worst one spent its time on) and enables keys: `l` surreal level, `b` next biome, `t` new scenery, `g` next time slot, `h` +1 hour, `[` `]` speed. Changes of level and scenery happen at the next tunnel; the readout says what is coming |
 
 Developer scripts, run from `soma-rail-app/`. The ones that take screenshots need [Playwright](https://playwright.dev) installed.
@@ -75,7 +87,7 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | Script | What it does |
 | --- | --- |
 | `node scripts/window-shot.cjs out.png "seed=1&hour=12"` | Screenshot the view on its own (`window-harness.html`) |
-| `npm run build && node scripts/app-check.cjs` | Start the built app in five cases (the bare URL, a Start click before the stream is known, a tuned run that also presses the overlay's controls, no WebGL2, streams refusing CORS) and check each runs. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
+| `npm run build && node scripts/app-check.cjs` | Start the built app in six cases (the bare URL, a Start click before the stream is known, a tuned run that also presses the overlay's controls, no WebGL2, streams refusing CORS, and an emulated phone: taps, pause, the background, both ways up) and check each runs. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
 | `node scripts/motion-frames.cjs outDir "biome=motorway&hour=1&kmh=0" --n 24 --dt 0.1` | Capture a run of frames with the motion clock stepped by hand, to look at moving things on a machine too slow to play them |
 | `node scripts/pass-strip.mjs out.png "seed=7&biome=saltflat" --x 9013 --d 79` | One object at five angles across a pass, from the left of the frame to the right, in one image: catches things that fall apart when seen from the side |
 | `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |

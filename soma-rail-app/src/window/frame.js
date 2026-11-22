@@ -13,8 +13,8 @@
 // projects to exactly the same screen position as if it were on the wall plane. That gives depth
 // ordering without z-fighting and without seams or slivers between layers.
 //
-// All lengths below are fractions of the visible height at the wall plane, so the frame scales with
-// screen size; resize() rebuilds everything for the current aspect / fov.
+// All lengths below are fractions of the visible shorter side at the wall plane, so the frame scales
+// with screen size; resize() rebuilds everything for the current aspect / fov.
 
 const D = 0.6; // wall plane distance from the eye, metres (near plane is 0.05, scenery starts at 2.5)
 const CORNER_SEGS = 20; // segments per rounded corner: smooth at any resolution
@@ -100,21 +100,25 @@ export function createFrame(THREE) {
     const W = H * aspect;
     const hw = W / 2, hh = H / 2;
 
-    // Margins as fractions of screen height. Spec at 16:9: top <= 6%, bottom <= 9%, sides 4-5% of width.
-    const top = 0.052, bottom = 0.080;
-    const side = Math.min(0.075, Math.max(0.024, 0.042 * aspect));
-    const L = -hw + side * H, R = hw - side * H, T = hh - top * H, B = -hh + bottom * H;
+    // Margins as fractions of the screen's shorter side U (its height, in a landscape window).
+    // Spec at 16:9: top <= 6%, bottom <= 9%, sides 4-5% of width. In a window taller than wide the
+    // same surround is kept in proportion to the width, so a phone held upright gets a tall window
+    // with a frame no heavier than it has on its side.
+    const U = Math.min(H, W);
+    const top = 0.052 * U, bottom = 0.080 * U;
+    const side = aspect >= 1 ? Math.min(0.075, Math.max(0.024, 0.042 * aspect)) * H : 0.045 * W;
+    const L = -hw + side, R = hw - side, T = hh - top, B = -hh + bottom;
     const rad = 0.16 * Math.min(R - L, T - B); // proportional to the smaller dimension
 
-    // Layer widths (fractions of H), sill much deeper than the rest.
+    // Layer widths (fractions of U), sill much deeper than the rest.
     const gk = 0.005, gkSill = 0.007;
     const bv = 0.009, bvSill = 0.026;
     const fo = 0.030, foSill = 0.030;
     // Cumulative outlines, all with the same point count.
     const O0 = outline(L, R, B, T, rad);
-    const O1 = outline(L - gk * H, R + gk * H, B - gkSill * H, T + gk * H, rad + gk * H);
-    const O2 = outline(L - (gk + bv) * H, R + (gk + bv) * H, B - (gkSill + bvSill) * H, T + (gk + bv) * H, rad + (gk + bv) * H);
-    const O3 = outline(L - (gk + bv + fo) * H, R + (gk + bv + fo) * H, B - (gkSill + bvSill + foSill) * H, T + (gk + bv + fo) * H, rad + (gk + bv + fo) * H);
+    const O1 = outline(L - gk * U, R + gk * U, B - gkSill * U, T + gk * U, rad + gk * U);
+    const O2 = outline(L - (gk + bv) * U, R + (gk + bv) * U, B - (gkSill + bvSill) * U, T + (gk + bv) * U, rad + (gk + bv) * U);
+    const O3 = outline(L - (gk + bv + fo) * U, R + (gk + bv + fo) * U, B - (gkSill + bvSill + foSill) * U, T + (gk + bv + fo) * U, rad + (gk + bv + fo) * U);
 
     // Strips take one colour per loop, so the bevel uses the mean of the side and sill tones.
     const bevelIn = (C.bevelIn + C.sillIn) / 2, bevelOut = (C.bevelOut + C.sillOut) / 2;
@@ -139,7 +143,7 @@ export function createFrame(THREE) {
 
     // Blind-housing hint: a barely darker band at the very top, fading into the wall below it.
     {
-      const x = hw * ext + 0.1, yTop = hh * ext + 0.1, yFade = hh - 0.040 * H, yEdge = hh - 0.004 * H;
+      const x = hw * ext + 0.1, yTop = hh * ext + 0.1, yFade = hh - 0.040 * U, yEdge = hh - 0.004 * U;
       const g = new THREE.BufferGeometry();
       const lo = srgb(C.wall), mid = srgb(C.band), hi = srgb(C.band);
       g.setAttribute('position', new THREE.Float32BufferAttribute([

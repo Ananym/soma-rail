@@ -142,7 +142,24 @@ onUnmounted(() => {
   }
 });
 
+// For a pause button and for a page going into the background (see App.vue). playNow() must be
+// called from inside the listener's tap where the browser asks for one. With `rejoin` the stream is
+// loaded afresh first, so a radio paused for a while comes back live and not from a stale buffer.
+function pauseNow() {
+  const el = audioElement.value;
+  if (el && !el.paused) el.pause();
+}
+function playNow({ rejoin = false } = {}) {
+  const el = audioElement.value;
+  if (!el || !el.src) return Promise.reject(new Error('no stream'));
+  if (rejoin) el.load();
+  const p = el.play();
+  return p && p.then ? p : Promise.resolve();
+}
+
 defineExpose({
-  audioElement
+  audioElement,
+  pauseNow,
+  playNow
 });
 </script>

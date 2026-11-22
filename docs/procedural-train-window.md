@@ -37,6 +37,7 @@ The whole pipeline runs as the app's only view; the YouTube player was removed o
 
 | Part | State | Where |
 | --- | --- | --- |
+| Phones and tablets | Where the main pointer is a finger (`touch=1` forces it) there is no distraction mechanic. A tap brings the overlay up as one sheet (now playing with a pause button, channels, view controls) and a tap on the glass or five seconds without a touch puts it away. Pause brakes the train and then pauses the stream; a hidden page pauses it at once and restarts it on return, asking for a tap if the browser refuses. A wake-lock switch, off by default, keeps the screen on while the train runs. The frame's margins scale with the shorter side, and in a window taller than wide the camera widens vertically (to about 53 degrees across, at most 95 tall), so the window works both ways up. Half the desktop splat budget, which is a guess. Proven only in an emulated phone: not on a real one | `App.vue`, `useInteraction.js`, `engine.js` (`fovFor`), `frame.js` |
 | Starting and failing | The view starts from the bare URL. Without WebGL2 a short notice takes its place and the radio plays on. An end-to-end check covers both, and fails if anything is requested from YouTube | `App.vue`, `TrainWindow.vue`, `scripts/app-check.cjs` |
 | Overlay controls | Next scenery, a dreamlike switch, "ignore distraction" (the train and music carry on; the overlay still follows the mouse) and a frame-rate cap of 30, 60 or 120 (default 60; the resolution fallback and hitch meter judge against the cap). The system cursor is replaced by a soft light that fades with distraction. One click on Start is always enough: the radio starts by itself once its stream can play | `ViewControls.vue`, `SoftCursor.vue`, `StartButton.vue`, `AudioPlayer.vue`, `engine.js` |
 | Which scenery next | On a new track the director leaves out the kinds seen in the last three changes (two, then one, if the channel's list is short). Kinds close in character join every list at low weight, so a one-kind channel still alternates. A tunnel not yet entered takes a newer destination instead of queueing a second tunnel. Track changes are polled every 8 to 20 seconds | `director.js`, `useSomaFM.js` |
@@ -328,7 +329,7 @@ WebGPU coverage is still uneven:
 | Assets per biome | 30 MB or less | About 2 million splats of kit pieces. Compressed files measured here run from 10 to 23 MB per million splats. Keeps several biomes inside GitHub Pages. |
 | Render resolution | Scale down to hold frame rate | Blur and haze hide a lower internal resolution well |
 
-Phones are best effort. The view is built and tuned on desktop, where the mouse-driven distraction mechanic already lives; on phones it lowers resolution and splat count, and music reactivity on iPhone is not promised.
+Phones are best effort. The view is built and tuned on desktop; on phones it lowers resolution and splat count, and music reactivity on iPhone is not promised. Since 22 November 2026 a touch screen has its own behaviour (see "What is built"): no distraction, a tap for the overlay, pause, silence in the background, and a window that works upright or on its side. None of it has been run on a real phone yet: frame rate, the restart of the radio on return (iPhones may ask for a tap), the wake lock and the height of the address bar are all still to be seen.
 
 What needs watching:
 

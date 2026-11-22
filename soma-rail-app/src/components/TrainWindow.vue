@@ -26,11 +26,13 @@ const props = defineProps({
   channel: { type: Object, default: null },
   song: { type: Object, default: null },
   fpsCap: { type: Number, default: 60 },          // frames a second at most (the overlay's setting)
+  touch: { type: Boolean, default: false },       // a touch screen: a phone or tablet, with less to draw with
 });
 // 'state' carries { biome, level, next } for the overlay whenever it changes
 const emit = defineEmits(['failed', 'state']);
 
 const params = readParams();
+const TOUCH_BUDGET = 300000;
 const canvasEl = ref(null);
 const ready = ref(false);
 const statsText = ref('');
@@ -147,6 +149,9 @@ async function play() {
     const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const { createEngine } = await import('../window/engine.js');
     startChannelId = props.channel ? props.channel.id : null;
+    // Phones and tablets get half the splats unless the URL says otherwise. The figure is a guess:
+    // it has not been measured on a real phone. The engine still lowers the resolution if it must.
+    if (props.touch && !params.budgetGiven) params.budget = TOUCH_BUDGET;
     engine = createEngine({ canvas: canvasEl.value, params, reducedMotion, profile: getProfile(startChannelId) });
     engine.setRate(props.rate);
     await engine.ready;
@@ -236,7 +241,10 @@ function publish() {
   if (key !== lastPublished) { lastPublished = key; emit('state', state); }
 }
 
-defineExpose({ play, toggleDreamlike, nextBiome });
+// After the page has been in the background the analysis context may have been suspended.
+function resumeAudio() { if (tap) tap.resume(); }
+
+defineExpose({ play, toggleDreamlike, nextBiome, resumeAudio });
 </script>
 
 <style scoped>
@@ -246,6 +254,7 @@ defineExpose({ play, toggleDreamlike, nextBiome });
   left: 0;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;      /* a phone's address bar must not cover the sill */
   z-index: 0;
   overflow: hidden;
   background: #000;

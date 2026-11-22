@@ -1,5 +1,5 @@
 <template>
-  <div class="now-playing" :class="{ 'fade-out': shouldFade }">
+  <div class="now-playing" :class="{ 'fade-out': shouldFade, touch }">
     <div v-if="channel" class="channel-art">
       <img
         v-if="channel.image"
@@ -15,6 +15,11 @@
       <div v-if="!song.title && !song.artist" class="song-title">Loading...</div>
     </div>
 
+    <button v-if="touch" type="button" class="pause" :aria-label="paused ? 'Play' : 'Pause'" :aria-pressed="paused" @click="$emit('toggle-pause')">
+      <svg v-if="paused" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
+      <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z" fill="currentColor"/></svg>
+    </button>
+
     <div class="playback-indicator">
       <div class="playback-bar">
         <div
@@ -25,7 +30,7 @@
       <div class="playback-text">{{ playbackRate.toFixed(2) }}x</div>
     </div>
 
-    <div class="volume-control">
+    <div v-if="!touch" class="volume-control">
       <label for="volume-slider">Volume</label>
       <input
         id="volume-slider"
@@ -65,10 +70,20 @@ const props = defineProps({
   volume: {
     type: Number,
     default: 0.7
+  },
+  // A touch screen: a compact strip with a pause button, and no volume slider (the phone has
+  // its own volume keys, and some phones ignore a page's volume anyway).
+  touch: {
+    type: Boolean,
+    default: false
+  },
+  paused: {
+    type: Boolean,
+    default: false
   }
 });
 
-const emit = defineEmits(['update:volume']);
+const emit = defineEmits(['update:volume', 'toggle-pause']);
 
 const currentTime = ref(Date.now());
 let intervalId = null;
@@ -243,4 +258,39 @@ function handleVolumeChange(event) {
   min-width: 40px;
   text-align: right;
 }
+
+/* touch: one strip: the channel's art, what is playing, the pause button; the speed bar beneath */
+.now-playing.touch {
+  display: grid;
+  grid-template: "art info pause" auto "bar bar bar" auto / auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 10px;
+  padding: 12px 14px;
+}
+.now-playing.touch .channel-art { grid-area: art; margin: 0; }
+.now-playing.touch .channel-art img { display: block; width: 52px; height: 52px; object-fit: cover; border-radius: 6px; }
+.now-playing.touch .song-info { grid-area: info; margin: 0; min-width: 0; }
+.now-playing.touch .channel-name { font-size: 12px; margin-bottom: 2px; }
+.now-playing.touch .song-title { font-size: 15px; margin-bottom: 1px; }
+.now-playing.touch .song-artist { font-size: 13px; }
+.now-playing.touch .song-title, .now-playing.touch .song-artist, .now-playing.touch .channel-name {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.now-playing.touch .playback-indicator { grid-area: bar; }
+.pause {
+  grid-area: pause;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.pause svg { width: 26px; height: 26px; }
+.pause:focus-visible { outline: 2px solid #66d9ef; outline-offset: 2px; }
+.pause[aria-pressed="true"] { background: rgba(102, 217, 239, 0.28); border-color: #66d9ef; }
 </style>

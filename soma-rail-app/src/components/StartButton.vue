@@ -1,7 +1,7 @@
 <template>
   <div v-if="visible" class="start-overlay" @click="handleStart">
     <div class="start-button">
-      Click to Start
+      {{ touch ? 'Tap to Start' : 'Click to Start' }}
     </div>
   </div>
 </template>
@@ -17,6 +17,10 @@ const props = defineProps({
   view: {
     type: Object,
     default: null
+  },
+  touch: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -48,6 +52,7 @@ function handleStart() {
   left: 0;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   background: rgba(0, 0, 0, 0.8);
   display: flex;
   align-items: center;
