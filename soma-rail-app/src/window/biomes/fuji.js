@@ -17,7 +17,8 @@
 // the lakes, the river's channel and levees, gentle swells in the mid band, foothills in the far band
 // and the Fujis themselves.
 //
-// Fuji: one cone every 21 km or so of line (cell FCELL), its summit about 11 km out, 3.3-3.6 km high
+// Fuji: there is one, and it does not scroll past. It is a backdrop that stays with the journey (the
+// engine's backdrop mesh), about 11 km out and 3.3-3.6 km high: see theFuji and backdropPose.
 // and 16-18 km across at the foot, so it stays in the window for some 20 km of travel and drifts back
 // slowly while the country slides past. It is drawn by every far chunk it reaches, piecewise, on a
 // lattice anchored to the mountain (rows up its profile spaced by how fast they climb the window,
@@ -208,22 +209,27 @@ function world(ctx) {
 // A copy of ctx standing on this biome's terrain; every kit call must get this one.
 function local(ctx) { const W = world(ctx); return [{ ...ctx, terrain: W.terr }, W]; }
 
-// --- Fuji: one per FCELL of line (most cells) ---
-const FCELL = 21000;   // its summit is in the window for about 18 km of travel: so one is nearly always in view
+// --- Fuji: there is one. It does not stand at a place along the line and scroll past like the rest
+// of the country: it is a backdrop that stays with the journey (see the engine's backdrop and the
+// biome's export below), drifting slowly across the window and turning a little as the line bends
+// round it. Each world (each new stretch of scenery) has its own variant of the one mountain.
+const FCELL = 9000;      // spacing of the things that used to stand before a Fuji (the dreamlike torii)
 const AM = 2.3;          // the lattice goes this far round the cone each way from the side facing the line
-function fujiSite(W, i) {
-  return cget(W.fujis, i, () => {
-    const r = makeRng(hashInts(W.ws, 3001, i));
-    if (r() < 0) return null;
+const FUJI_D = 11000;    // its axis stands this far from the line
+function theFuji(W) {
+  return cget(W.fujis, 'one', () => {
+    const r = makeRng(hashInts(W.ws, 3001, 0));
     const H = 3300 + 300 * r();
     return makeCone({
-      i, wx: (i + 0.42 + 0.16 * r()) * FCELL, d: 10700 + 700 * r(), H, R: H * (2.35 + 0.2 * r()),
-      p: 1.6 + 0.15 * r(), u0: 0.03 + 0.008 * r(), s: hashInts(W.ws, 3002, i),
+      i: 0, wx: 0, d: FUJI_D, H, R: H * (2.35 + 0.2 * r()),
+      p: 1.6 + 0.15 * r(), u0: 0.03 + 0.008 * r(), s: hashInts(W.ws, 3002, 0),
       snow: 0.52 + 0.18 * r(), osawa: (r() - 0.5) * 1.4,
       belt: r() < 0.4, cap: r() < 0.22, bank: r() < 0.16,
     });
   });
 }
+// Nothing in the scrolling world is a Fuji any more: the lookups below find none.
+function fujiSite() { return null; }
 function makeCone(c) {
   c.ng = 8.5 + 3 * h01(c.s, 1, 1);           // gullies per radian round the cone
   c.hoei = (h01(c.s, 2, 1) - 0.5) * 2;       // where the side crater sits
@@ -238,8 +244,9 @@ function fujiNear(W, wx) {
   }
   return best;
 }
-// 1 right in front of a Fuji, 0 well away from one.
-function fujiFront(W, wx) { const f = fujiNear(W, wx); return f ? smooth(7500, 3500, Math.abs(f.wx - wx)) : 0; }
+// 1 where the country lies open towards the mountain, 0 where low hills rise and hide it for a
+// while: slow stretches along the line.
+function fujiFront(W, wx) { return smooth(0.36, 0.56, noise1(wx / 7000, W.ws + 3003)); }
 
 // The cone's height at (rho, theta) round its axis. theta = 0 faces the line.
 function gullyOf(c, rho, th) {
@@ -863,7 +870,7 @@ function* drawCones(ctx, out, W, cones, delta, kind0) {
           const hr = (coneHeight(c, rr + er, tt) - h) / er, ht = (coneHeight(c, rr, tt + et) - h) / et;
           let nx = -hr * st - (ht * ct) / rr, ny = 1, nz = -hr * ct + (ht * st) / rr;
           const nl = Math.hypot(nx, ny, nz); nx /= nl; ny /= nl; nz /= nl;
-          const y = baseAt(W, wx, d, fl) + h;
+          const y = (ctx.flatBase != null ? ctx.flatBase : baseAt(W, wx, d, fl)) + h;
           const col = fujiColor(c, h, rr, tt, nx, ny, nz, jh, g);
           const q = quatUV(ct, 0, -st, nx, ny, nz);       // local x round the cone, y the normal
           const sx = Math.max(0.72 * rr * dth, 1), sz = 0.72 * dr * Math.sqrt(1 + hr * hr);
@@ -2056,14 +2063,16 @@ function* lineside(ctx, out, W) {
 // ---------------------------------------------------------------------------------------------
 // Scale: a torii vast enough to frame Fuji's summit, standing on the plain in front of it.
 function* giantTorii(ctx, out, W, dLo, dHi, scale) {
+  const d = 2300;
+  if (!inD(d, dLo, dHi)) return;
   const i0 = Math.floor((ctx.x0 - 3000) / FCELL), i1 = Math.floor((ctx.x0 + ctx.length + 3000) / FCELL);
   for (let i = i0; i <= i1; i++) {
-    const f = fujiSite(W, i);
-    if (!f) continue;
-    const d = 2300;
-    if (!inD(d, dLo, dHi) || !inX(ctx, f.wx, 1600)) continue;
-    const H = (f.H / f.d) * d * (1.1 + 0.25 * scale);
-    yield* torii(ctx, out, f.wx - ctx.x0, W.H(f.wx, d) - 2, d, H, KIND.SURREAL, 0);
+    const r = makeRng(hashInts(W.ws, 3050, i));
+    if (r() > 0.75) continue;
+    const wx = (i + 0.2 + 0.6 * r()) * FCELL;
+    if (!inX(ctx, wx, 1600)) continue;
+    const H = (3450 / FUJI_D) * d * (1.1 + 0.25 * scale);
+    yield* torii(ctx, out, wx - ctx.x0, W.H(wx, d) - 2, d, H, KIND.SURREAL, 0);
   }
 }
 // Topology: carp the size of airships swimming through the sky.
@@ -2172,16 +2181,6 @@ function* far(ctx0, emit) {
   const dz = ctx.dials || {};
   out.limit = Infinity;
   const logic = dz.logic || 0;
-  const i0 = Math.floor((ctx.x0 - 12000) / FCELL), i1 = Math.floor((ctx.x0 + ctx.length + 12000) / FCELL);
-  for (let i = i0; i <= i1; i++) {
-    const f = fujiSite(W, i);
-    if (!f || f.wx + f.R * 1.6 < ctx.x0 || f.wx - f.R * 1.6 > ctx.x0 + ctx.length) continue;
-    const cones = fujiGroup(W, f, logic);
-    const load = groupLoad(W, (logic > 0 ? 'g1:' : 'g0:') + i, cones);
-    const delta = Math.sqrt(load / (FUJI_SHARE * ctx.count));
-    yield* drawCones(ctx, out, W, cones, delta, KIND.ROCK);
-    for (const c of cones) yield* fujiClouds(ctx, out, W, c);
-  }
   if (logic > 0) {
     for (const { i } of cellsAround(ctx, RCELL, 3000)) {
       const c = ringCone(W, i);
@@ -2193,14 +2192,51 @@ function* far(ctx0, emit) {
   yield* fillFar(ctx, out, W);
 }
 
+// The one mountain, drawn in its own coordinates (its axis at x = 0, FUJI_D out) for the engine's
+// backdrop mesh: the cone (and at level 1 its smaller twin) and its cloud.
+const BD = { x0: -16000, length: 32000, zNear: 1500, zFar: 21000, pivot: FUJI_D };
+function latticePoints(cones, delta) {
+  let n = 0;
+  for (const c of cones) {
+    const { rho } = coneRows(c, delta);
+    for (let k = 0; k < rho.length; k++) for (const sg of [1, -1]) {
+      let th = sg * colStep(c, rho[k], 0, delta) * 0.5;
+      while (Math.abs(th) < AM) { n++; th += sg * colStep(c, rho[k], th, delta); }
+    }
+  }
+  return n;
+}
+function* backdrop(ctx0, emit) {
+  const [ctx, W] = local(ctx0);
+  ctx.flatBase = -1;                       // it stands on a level plain: the real one scrolls beneath it
+  const out = makeOut(ctx, emit, { zMargin: 600 });
+  out.limit = Infinity;
+  const cones = fujiGroup(W, theFuji(W), (ctx.dials || {}).logic || 0);
+  // the lattice spacing that spends this mesh's splats on the cones (points go as 1 / spacing^2)
+  const delta = D0 * Math.sqrt(latticePoints(cones, D0) / (0.97 * ctx.count));
+  yield* drawCones(ctx, out, W, cones, delta, KIND.ROCK);
+  for (const c of cones) yield* fujiClouds(ctx, out, W, c);
+}
+// Where it stands in the window: a slow drift from side to side (at most a seventh of the train's
+// own speed, and never out of view, whatever the window's shape) and a slow turn of up to 24
+// degrees, as if the line were bending round the mountain. A new stretch of scenery starts it
+// somewhere else.
+function backdropPose(travelled, seed, tanHalfHfov = 0.83) {
+  const a = ((seed >>> 4) % 6283) / 1000, b = ((seed >>> 13) % 6283) / 1000;
+  const reach = Math.min(3400, 0.4 * FUJI_D * tanHalfHfov);
+  return { x: reach * Math.sin(travelled / 26000 + a), yaw: 0.42 * Math.sin(travelled / 17000 + b) };
+}
+
 export const fujiBiome = {
   name: 'fuji',
   palette: PAL,
   terrain: TERRAIN,
   // a clear day: Fuji, 11 km out, keeps about half its contrast
   hazeDist: 16000,
-  // the cone needs a good far share; the trackside is mostly ground under motion blur
-  shares: { trackside: 0.14, near: 0.36, mid: 0.24, far: 0.26 },
+  // the trackside is mostly ground under motion blur
+  shares: { trackside: 0.13, near: 0.35, mid: 0.24, far: 0.17 },
+  // the mountain itself: one mesh that stays with the journey
+  backdrop: { share: 0.11, ...BD, generate: backdrop, pose: backdropPose },
   // Fuji stays still on the beat: buildings (houses, pagoda, torii, lanterns, viaduct) and lights
   // answer it, and farmers and egrets by hand (MOVE.BEAT)
   beatKinds: [KIND.BUILDING, KIND.LIGHT],

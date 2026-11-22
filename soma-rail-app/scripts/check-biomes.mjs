@@ -56,7 +56,39 @@ function run(biome, layer, seedStr, level, index, budget, beatMetres = 56, hour 
 let failures = 0, runs = 0;
 const fail = (what, msg) => { failures++; if (failures <= 60) console.log(`FAIL ${what}: ${msg}`); };
 
+// A biome's backdrop (see engine.js): the right number of splats, finite values, natural colours
+// capped, regular yields, and the same splats every time.
+function runBackdrop(biome, seedStr, level, budget) {
+  const B = biome.backdrop, seed = hashString(seedStr), splats = [];
+  let since = 0, maxSince = 0;
+  const emit = (...a) => { splats.push(a); since++; };
+  const ctx = {
+    rng: makeRng(hashInts(seed, 7717)), x0: B.x0, length: B.length, zNear: B.zNear, zFar: B.zFar, count: Math.max(200, Math.round(budget * (B.share || 0.1))), index: 0,
+    terrain: makeTerrain(seed, biome.terrain), palette: biome.palette, dials: { ...LEVELS[level] }, level, beatMetres: 56, layer: 'backdrop', seed, hour: 12,
+  };
+  const gen = B.generate(ctx, emit);
+  for (;;) { const r = gen.next(); maxSince = Math.max(maxSince, since); since = 0; if (r.done) break; }
+  return { splats, ctx, maxSince };
+}
+function checkBackdrop(name, biome) {
+  for (const seedStr of SEEDS) for (const level of [0, 1]) for (const budget of BUDGETS) {
+    runs++;
+    const what = `${name} backdrop seed=${seedStr} level=${level} budget=${budget}`;
+    const a = runBackdrop(biome, seedStr, level, budget), n = a.splats.length, want = a.ctx.count;
+    if (n < want * 0.8 || n > want * 1.2) fail(what, `${n} splats for a count of ${want}`);
+    if (a.maxSince > 1500) fail(what, `${a.maxSince} splats without a yield`);
+    for (const sp of a.splats) {
+      if (!sp.slice(0, 10).every(Number.isFinite)) { fail(what, 'a value is not finite'); break; }
+      if (sp[14] !== KIND.LIGHT && Math.max(sp[6], sp[7], sp[8]) > 0.8001) { fail(what, 'a natural colour above 0.8'); break; }
+    }
+    const b = runBackdrop(biome, seedStr, level, budget).splats;
+    if (b.length !== n || b.some((sp, i) => sp[0] !== a.splats[i][0] || sp[1] !== a.splats[i][1])) fail(what, 'not the same twice');
+    for (const t of [0, 5000, 90000]) { const p = biome.backdrop.pose(t, a.ctx.seed, 0.83); if (!Number.isFinite(p.x) || !Number.isFinite(p.yaw)) fail(what, 'pose not finite'); }
+  }
+}
+
 for (const [name, biome] of Object.entries(BIOMES)) {
+  if (biome.backdrop) checkBackdrop(name, biome);
   const timing = {};
   for (const layer of LAYERS) {
     for (const seedStr of SEEDS) {

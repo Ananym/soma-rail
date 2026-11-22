@@ -450,6 +450,7 @@ Decided on 21 November 2026:
 | Distraction in the generated view | The train slows to a stop; no fade to black | The stopping train, sharpening as its blur shrinks, is the whole visual penalty. Audio still quietens |
 | Video or generated view | The generated view only; the YouTube player is removed | No flag and no video fallback. A browser without WebGL2 gets a notice and the radio |
 | Compute when nothing changes | Idle when the train is stopped or the tab is hidden | A stopped view is redrawn twice a second; scenery is only generated while moving |
+| Mount Fuji | One mountain that stays with the journey, not a cone at a place along the line | A Fuji that scrolled past had to repeat every 20 km to stay in view, and the point of Fuji is that there is one. It is a separate "backdrop" mesh that drifts slowly across the window (at most a seventh of the train's speed, never out of view) and turns by up to 24 degrees, as if the line bent round it. Any biome can have a backdrop |
 | Traffic on the night motorway | Separate vehicles, drawn by the shader along continuous lanes | Splats cannot travel, but the shader can light only the lane splats under a vehicle's lamps and move that pattern along. The unbroken ribbons of the first version read oddly and are gone (they return only with `move=0`) |
 
 Answered earlier by the checks:

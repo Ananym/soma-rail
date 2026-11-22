@@ -11,6 +11,11 @@
 //             everything above eye level does, which suits flat country but not a biome whose
 //             high ground is the scenery (towers, dunes): there, name the things that should
 //             answer the music (trees, buildings, tents, boats). MOVE.BEAT tags single splats.
+//   backdrop  optional: one great far thing that stays with the journey instead of scrolling past
+//             (Japan's single Fuji). { share, x0, length, zNear, zFar, pivot, generate(ctx, emit),
+//             pose(travelled, seed, tanHalfHfov) -> { x, yaw } }: generated once per world like a
+//             chunk; each frame it stands x metres right of straight ahead, turned by yaw about a
+//             vertical axis pivot metres out. Its share comes out of the same budget as `shares`.
 //   gold      optional 0..1: how much of the warm dawn and dusk grade this biome takes (default 1;
 //             snow country takes less, or its snow turns the colour of sand)
 //   horizon   optional 0..0.6: lowers the horizon in the frame to give the sky more room

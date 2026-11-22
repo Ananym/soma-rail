@@ -151,6 +151,39 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     return chunk;
   }
 
+  // A backdrop: one great far thing that stays with the journey instead of scrolling past (a
+  // biome's single mountain). The biome supplies { share, x0, length, zNear, zFar, pivot,
+  // generate(ctx, emit), pose(travelled, seed, tanHalfHfov) -> { x, yaw } }: it is generated once
+  // per world like a chunk, in its own coordinates, and each frame the engine stands it `x` metres
+  // to the right of straight ahead and turns it by `yaw` about a vertical axis `pivot` metres out.
+  const BACKDROP = { name: 'backdrop' };
+  function startBackdrop() {
+    const B = biome.backdrop;
+    const count = Math.max(200, Math.round(params.budget * (B.share || 0.1)));
+    const packed = new PackedSplats();
+    packed.ensureSplats(Math.ceil(count * 1.25));
+    let n = 0;
+    const beatKinds = biome.beatKinds ? new Set(biome.beatKinds) : null;
+    const emit = (x, y, z, sx, sy, sz, r, g, b, opacity = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = 0, move = 0) => {
+      tmp.c.set(B.x0 + x, y, z + B.pivot); tmp.s.set(sx, sy, sz); tmp.q.set(qx, qy, qz, qw); tmp.col.setRGB(r, g, b);
+      if (!move && beatKinds && beatKinds.has(kind)) move = 6;
+      packed.pushSplat(tmp.c, tmp.s, tmp.q, opacity, tmp.col); tagLast(packed, move); n++;
+    };
+    const ctx = {
+      rng: makeRng(hashInts(S.seed, 7717)), x0: B.x0, length: B.length, zNear: B.zNear, zFar: B.zFar, count, index: 0,
+      terrain, palette: biome.palette, dials: S.dials, level: S.level, beatMetres: worldBeat, layer: 'backdrop', seed: S.seed, hour: S.hour,
+    };
+    const chunk = { layer: BACKDROP, index: 0, x0: 0, packed, gen: B.generate(ctx, emit), mesh: null, done: false, epoch, count: () => n, backdrop: B };
+    chunks.set('backdrop:0', chunk);
+  }
+  // Where a finished chunk's mesh stands this frame.
+  function place(ch) {
+    if (ch.backdrop) {
+      const p = ch.backdrop.pose(S.travelled, S.seed, tanHalfHfov);
+      ch.mesh.position.set(p.x, 0, -ch.backdrop.pivot); ch.mesh.rotation.y = p.yaw;
+    } else ch.mesh.position.x = ch.x0 - S.travelled;
+  }
+
   function dropChunk(key) {
     const ch = chunks.get(key);
     if (!ch) return;
@@ -169,20 +202,22 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
         if (!chunks.has(key)) startChunk(layer, i);
       }
     }
+    if (biome.backdrop) { wanted.add('backdrop:0'); if (!chunks.has('backdrop:0')) startBackdrop(); }
     for (const key of [...chunks.keys()]) if (!wanted.has(key)) dropChunk(key);
   }
 
   // Run chunk generators for a few milliseconds, nearest bands first.
+  const order = (c) => (c.backdrop ? LAYERS.length : LAYERS.indexOf(c.layer));   // the backdrop last: it is the furthest thing
   function generate(budgetMs) {
     const t0 = performance.now();
     const pending = [...chunks.values()].filter((c) => !c.done)
-      .sort((a, b) => LAYERS.indexOf(a.layer) - LAYERS.indexOf(b.layer) || Math.abs(a.x0 - S.travelled) - Math.abs(b.x0 - S.travelled));
+      .sort((a, b) => order(a) - order(b) || Math.abs(a.x0 - S.travelled) - Math.abs(b.x0 - S.travelled));
     for (const ch of pending) {
       for (;;) {
         const r = ch.gen.next();
         if (r.done) {
           ch.done = true;
-          if (ch.count() > 0) { ch.mesh = new SplatMesh({ packedSplats: ch.packed }); ch.mesh.position.set(ch.x0 - S.travelled, 0, 0); scene.add(ch.mesh); }
+          if (ch.count() > 0) { ch.mesh = new SplatMesh({ packedSplats: ch.packed }); place(ch); scene.add(ch.mesh); }
           frameNote = `${ch.layer.name} chunk arrived (${Math.round(ch.count() / 1000)}k)`;
           // While the train is running, hand over one finished chunk per frame at most: uploading
           // several in the same frame is the likeliest cause of a hitch.
@@ -374,7 +409,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     lastAllDone = allDone;
     if (allDone && rebuilding) { rebuilding = false; director.worldReady(); }
     if (allDone && readyResolve) { readyResolve(); readyResolve = null; }
-    for (const ch of chunks.values()) if (ch.mesh) ch.mesh.position.x = ch.x0 - S.travelled;
+    for (const ch of chunks.values()) if (ch.mesh) place(ch);
     if (kit) kit.update({ travelled: S.travelled, biomeName: biome.name, terrain, seed: S.seed, tanHalfHfov, lead: LEAD });
     updateTunnel();
     sky.object3d.visible = !inTunnel;

@@ -55,6 +55,26 @@ for (const layer of LAYERS) {
     genMs += performance.now() - t0;
   }
 }
+// a biome's backdrop (its one great far thing, which stays with the journey: see engine.js)
+if (biome.backdrop && (!only || only.includes('backdrop'))) {
+  const B = biome.backdrop, P = B.pose(travelled, seed, tanH);
+  const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw), hq = [0, Math.sin(P.yaw / 2), 0, Math.cos(P.yaw / 2)];
+  const ctx = {
+    rng: makeRng(hashInts(seed, 7717)), x0: B.x0, length: B.length, zNear: B.zNear, zFar: B.zFar, count: Math.max(200, Math.round(budget * (B.share || 0.1))), index: 0,
+    terrain, palette: biome.palette, dials: { ...LEVELS[level] }, level, beatMetres: beat, layer: 'backdrop', seed, hour: Number(q.get('hour') || 12),
+  };
+  const emit = (x, y, z, sx, sY, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1) => {
+    const lx = B.x0 + x, lz = z + B.pivot;
+    // turn about the pivot, then stand it P.x to the right of straight ahead
+    const wx = travelled + P.x + lx * cy + lz * sy, wz = -lx * sy + lz * cy - B.pivot;
+    const rq = [hq[3] * qx + hq[1] * qz, hq[3] * qy + hq[1] * qw, hq[3] * qz - hq[1] * qx, hq[3] * qw - hq[1] * qy];
+    splats.push([wx, y, wz, sx, sY, sz, r, g, b, o, rq[0], rq[1], rq[2], rq[3]]);
+  };
+  const t0 = performance.now();
+  const gen = B.generate(ctx, emit);
+  while (!gen.next().done);
+  genMs += performance.now() - t0;
+}
 // sort far to near
 splats.sort((a, b) => a[2] - b[2]);
 const img = new Float32Array(W * H * 3);
