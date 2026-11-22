@@ -12,9 +12,20 @@
 // budget density and how crowded the world is around it (never on where the chunk borders fall),
 // so a tower cut by a chunk border is generated identically by both chunks and the halves meet.
 //
-// The beat: the towers and hills stay still (beatKinds below); houses, pagodas, trees, boats,
-// buffalo and village lanterns answer it. Mist and kitchen smoke billow (MOVE.VAPOUR), washing and
-// boat pennants flutter (MOVE.FLAG).
+// The beat: the towers and hills stay still (beatKinds below); houses, pagodas, temples, trees,
+// boats, people, buffalo and village lanterns answer it. Mist and kitchen smoke billow
+// (MOVE.VAPOUR), washing and boat pennants flutter (MOVE.FLAG).
+//
+// The country is worked and lived in (see "People and working animals"): buffalo ploughing,
+// wallowing, grazing, led and ridden; planters bent in rows; people on the bunds with carrying
+// poles; bicycles and carts on the lane; anglers and washing on the river bank; cormorant rafts;
+// neighbours, children and markets in the villages. All of them are placed first in the near band,
+// from sites hashed out of the world (lifeSites), and the trees and bamboo keep clear of them.
+// Not all of the valley floor is paddy: landUse() turns stretches of a kilometre or two into
+// rough pasture, lotus and fish ponds, orchards or bamboo woods (zoneProps draws what stands on
+// them). And the middle distance has things to look at (landmarks): a pagoda on a hill, a temple
+// on a tower's flank, a pavilion on a crag, a village at a tower's foot, a walled ridge; and now
+// and then an old stone bridge over the river.
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     towers of impossible height and thinness rising into the sky
@@ -83,7 +94,7 @@ const TERRAIN = { cutting: 2.2, roll: 0.4, rollScale: 700, rise: 0.0, hills: 8, 
 // Surface types
 const T = { PADDY: 0, RIVER: 1, GRAVEL: 2, BANK: 3, VILLAGE: 4, LANE: 5, STREAM: 6 };
 // Paddy kinds
-const P = { WATER: 0, YOUNG: 1, RICE: 2, MUD: 3, VEG: 4, POND: 5 };
+const P = { WATER: 0, YOUNG: 1, RICE: 2, MUD: 3, VEG: 4, POND: 5, PASTURE: 6, LOTUS: 7, ORCHARD: 8, WOOD: 9 };
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers
@@ -210,8 +221,29 @@ function panelInfo(W, k, j) {
       const g = r();
       t = g < 0.55 - 0.45 * season ? P.WATER : g < 0.85 - 0.2 * season ? P.YOUNG : P.RICE;
     }
-    return { t, tone: 0.92 + 0.16 * r(), green: 0.3 + 0.4 * r(), dir: r() < 0.55, period: 1.4 + 1.2 * r(), muddy: r() < 0.25 ? 0.3 + 0.5 * r() : 0, buffalo: t === P.WATER && r() < 0.07 };
+    const info = { t, tone: 0.92 + 0.16 * r(), green: 0.3 + 0.4 * r(), dir: r() < 0.55, period: 1.4 + 1.2 * r(), muddy: r() < 0.25 ? 0.3 + 0.5 * r() : 0, buffalo: t === P.WATER && r() < 0.07 };
+    // Not all of it is paddy: in stretches the valley floor is rough pasture, lotus and fish
+    // ponds, orchards or bamboo woods (landUse), and the fields round a village are vegetables.
+    // (decided from a hash of its own, after the draws above, so the paddies stay as they were)
+    const lu = landUse(W, cx), h = (hashInts(W.ws, 1603, k, j) & 4095) / 4095;
+    if (lu.s > 0 && q.D < 600 && h < lu.s * 0.92) {
+      const g = h / (lu.s * 0.92);
+      if (lu.kind === P.WOOD) info.t = q.D >= 36 ? (q.D < 420 && g < 0.62 ? P.WOOD : q.D < 420 ? P.PASTURE : t) : g < 0.3 ? P.VEG : g < 0.75 ? P.PASTURE : t;
+      else if (lu.kind === P.ORCHARD) info.t = q.D >= 28 ? (q.D < 300 ? P.ORCHARD : t) : P.VEG;
+      else if (lu.kind === P.LOTUS) info.t = g < 0.45 ? P.LOTUS : g < 0.7 && k >= 2 ? P.POND : P.WATER;
+      else info.t = P.PASTURE;
+    } else if ((t === P.WATER || t === P.YOUNG || t === P.RICE) && h > 0.4 && q.D < 400 && nearVillage(W, cx, q.D + q.gap / 2)) info.t = P.VEG;
+    return info;
   });
+}
+// The kind of country a stretch of the line runs through: paddies for rather more than half of
+// it, and between them, a kilometre or two at a time, pasture, ponds, orchards or woods.
+const LU = { kind: 0, s: 0 };
+function landUse(W, wx) {
+  const a = noise1(wx / 2400, W.ws + 1601);
+  LU.s = smooth(0.17, 0.27, Math.abs(a - 0.5));
+  if (LU.s > 0) { const b = noise1(wx / 1900, W.ws + 1602); LU.kind = a > 0.5 ? (b > 0.5 ? P.PASTURE : P.LOTUS) : b > 0.5 ? P.ORCHARD : P.WOOD; }
+  return LU;
 }
 
 // --- river: a broad band in stretches; elsewhere it swings far off across the valley ---
@@ -291,6 +323,14 @@ function makeVillage(W, i) {
   for (let k = 0; k < 4; k++) v.trees.push({ wx: cx + (r() - 0.5) * 1.6 * R, d: dc + Rd * (0.8 + 0.3 * r()), type: 'bamboo', seed: hashInts(h, 15, k) });
   return v;
 }
+function nearVillage(W, wx, d) {
+  const i = Math.floor(wx / VCELL);
+  for (let k = i - 1; k <= i + 1; k++) {
+    const v = village(W, k);
+    if (v && ((wx - v.cx) / (v.R + 55)) ** 2 + ((d - v.dc) / (v.Rd + 40)) ** 2 < 1) return true;
+  }
+  return false;
+}
 function villageAt(W, wx, d) {
   const i = Math.floor(wx / VCELL);
   for (let k = i - 1; k <= i + 1; k++) {
@@ -368,7 +408,7 @@ const HCELL = 2300;
 function terraceSite(W, i) {
   return cache(W.misc, 'h' + i, () => {
     const r = makeRng(hashInts(W.ws, 931, i));
-    if (r() > 0.4 || noise1(i * HCELL / 5000, W.ws + 932) < 0.35) return null;
+    if (r() > 0.62 || noise1(i * HCELL / 5000, W.ws + 932) < 0.3) return null;
     const near = r() < 0.35;
     const wx = (i + 0.2 + 0.6 * r()) * HCELL;
     const d = near ? 150 + 70 * r() : 460 + 700 * r();
@@ -377,7 +417,7 @@ function terraceSite(W, i) {
     const rn = riverN(W, wx);
     if (d - R * 0.6 < rn + riverW(W, wx) + 10 && d + R * 0.6 > rn - 10) return null;
     if (villageAt(W, wx, d)) return null;
-    return { wx, d, R, Rd: R * (0.5 + 0.2 * r()), Hh, seed: hashInts(W.ws, 933, i) };
+    return { wx, d, R, Rd: R * (0.5 + 0.2 * r()), Hh, seed: hashInts(W.ws, 933, i), tea: (hashInts(W.ws, 934, i) & 3) < 2 };
   });
 }
 const MCELL = 3400;
@@ -434,7 +474,7 @@ function surface(W, wx, d) {
   S.edge = Math.min(d - edgeD(W, k, wx), k + 1 < W.rows.length ? edgeD(W, k + 1, wx) - d : 1e9,
     Math.abs(wx - colEdge(W, k, j, d)), Math.abs(colEdge(W, k, j + 1, d) - wx));
   S.farEdge = k + 1 < W.rows.length ? edgeD(W, k + 1, wx) - d : 1e9;
-  if (S.info.t === P.WATER || S.info.t === P.YOUNG || S.info.t === P.POND) S.y = h + 0.05;
+  if (S.info.t === P.WATER || S.info.t === P.YOUNG || S.info.t === P.POND || S.info.t === P.LOTUS) S.y = h + 0.05;
   void q;
   return S;
 }
@@ -478,6 +518,19 @@ function paddyColor(W, s, wx, d, rng) {
       break;
     case P.RICE: c = mul3(C.rice, f.tone * (0.92 + 0.16 * noise2(wx / 3, d / 3, W.ws + 524))); break;
     case P.MUD: c = mix3(C.mud, [0.33, 0.3, 0.24], noise2(wx / 4, d / 3, W.ws + 525)); break;
+    case P.PASTURE: {
+      // rough grazing: sour green and ochre in patches, darker tussocks
+      c = mix3([0.3, 0.4, 0.15], [0.45, 0.44, 0.22], smooth(0.4, 0.75, noise2(wx / 9, d / 5, W.ws + 1611)));
+      if (noise2(wx / 2.2, d / 1.6, W.ws + 1612) > 0.68) c = mul3(c, 0.74);
+      c = mul3(c, f.tone);
+      break;
+    }
+    case P.LOTUS:
+      // lotus: the water all but hidden under the big leaves
+      c = rng() < 0.74 ? jitter(mix3([0.2, 0.4, 0.2], [0.32, 0.5, 0.25], noise2(wx / 3, d / 2, W.ws + 1613)), rng, 0.1) : mul3([0.3, 0.37, 0.35], f.tone);
+      break;
+    case P.ORCHARD: c = mul3(mix3([0.27, 0.39, 0.15], [0.19, 0.29, 0.11], smooth(0.45, 0.7, noise2(wx / 4, d / 3, W.ws + 1614))), f.tone); break;
+    case P.WOOD: c = mul3(mix3([0.14, 0.22, 0.09], [0.22, 0.28, 0.13], noise2(wx / 5, d / 4, W.ws + 1615)), f.tone); break;
     default: {
       // dry field of vegetables in tidy rows
       const coord = f.dir ? wx : d * 2.2;
@@ -533,7 +586,7 @@ function* fillSurface(ctx, out, W, opts = {}) {
     const water = s.t === T.RIVER || s.t === T.STREAM || (s.t === T.PADDY && (s.info.t === P.WATER || s.info.t === P.POND));
     if (water) out(x, s.y, -d, r * 1.4 * ax, r * 0.05, r * 0.7, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
     else {
-      const crop = s.t === T.PADDY && (s.info.t === P.RICE || s.info.t === P.VEG) ? 0.25 : 0;
+      const crop = s.t !== T.PADDY ? 0 : s.info.t === P.RICE || s.info.t === P.VEG ? 0.25 : s.info.t === P.LOTUS ? 0.4 : s.info.t === P.PASTURE ? 0.1 : 0;
       const tuft = opts.tuft && d < opts.tuft && (s.t === T.BANK || s.t === T.PADDY) ? 1 - d / opts.tuft : 0;
       out(x, s.y + 0.03 + crop + tuft * r * 0.4 * rng(), -d, r * ax, r * (0.12 + 0.3 * tuft), r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
     }
@@ -1114,8 +1167,9 @@ export function* terraceHill(ctx, out, x, d, opts = {}) {
   for (let k = 0; k < levels; k++) {
     const hk = k * step, e = eAt(hk), e2 = eAt(hk + step);
     const m = Math.max(3, Math.round(n * 0.85 * e / tot / 2));    // each sample: a riser and a lip
-    const water = (hashInts(salt, k) & 3) !== 0;
-    const lipC = water ? C.paddyWater : C.youngRice;
+    // (opts.tea: a tea garden, each terrace a clipped dark hedge of bushes over a line of red soil)
+    const tea = !!opts.tea, water = !tea && (hashInts(salt, k) & 3) !== 0;
+    const lipC = tea ? [0.15, 0.33, 0.12] : water ? C.paddyWater : C.youngRice;
     const ringL = 2 * AM * R * e;
     const sx = Math.max(0.3, ringL / m * 0.75);
     for (let i = 0; i < m; i++) {
@@ -1125,12 +1179,12 @@ export function* terraceHill(ctx, out, x, d, opts = {}) {
       const nx = Math.sin(a), nz = Math.cos(a);
       const qq = quatYaw(a);
       // the riser: a grassy, shaded bank
-      const cr = jitter(shade(mix3([0.18, 0.26, 0.1], [0.3, 0.28, 0.2], rng() * 0.4), nx, 0.15, nz, 0.5, 0.6), rng, 0.08);
+      const cr = jitter(shade(tea ? mix3([0.12, 0.24, 0.09], [0.44, 0.3, 0.2], rng() < 0.3 ? 0.8 : 0) : mix3([0.18, 0.26, 0.1], [0.3, 0.28, 0.2], rng() * 0.4), nx, 0.15, nz, 0.5, 0.6), rng, 0.08);
       out.q(px, y0 + hk + step * 0.5, -pd, sx, step * 0.5, Math.max(0.2, sx * 0.2), cr, 1, qq, kind);
       // the lip of the panel above it (and a little of the panel surface behind)
       const c = jitter(shade(lipC, nx * 0.2, 1, nz * 0.2, 0.75, 0.3), rng, 0.05);
       const pw = (e - e2) * Rd * lu;
-      out.q(px - Math.sin(a) * pw * 0.3, y0 + hk + step * 0.98, -(pd + Math.cos(a) * pw * 0.3), sx, Math.max(0.12, step * 0.07), Math.max(0.3, pw * 0.5), c, 1, qq, kind);
+      out.q(px - Math.sin(a) * pw * 0.3, y0 + hk + step * 0.98, -(pd + Math.cos(a) * pw * 0.3), sx, Math.max(0.12, step * (tea ? 0.2 : 0.07)), Math.max(0.3, pw * 0.5), c, 1, qq, kind);
       if (out.due()) yield;
     }
   }
@@ -1259,18 +1313,1014 @@ export function* archBridge(ctx, out, x, d, opts = {}) {
   }
 }
 
-// A water buffalo standing in a paddy: a dark heavy body, head low, swept-back horns, now and then
-// a white egret riding on its back. One of the few things that answer the beat (MOVE.BEAT), so it
-// is a handful of splats; the ripple round it in flooded panels does not.
-function* buffalo(ctx, out, x, y, d, rng, wet = true) {
-  const c = [0.15, 0.14, 0.14], dir = rng() < 0.5 ? -1 : 1, B = MOVE.BEAT, K = KIND.OTHER;
-  out(x, y + 0.75, -d, 1.15, 0.5, 0.55, c[0], c[1], c[2], 1, 0, 0, 0, 1, K, B);
-  out(x + dir * 1.25, y + 0.7, -d, 0.35, 0.3, 0.28, c[0] * 0.9, c[1] * 0.9, c[2] * 0.9, 1, 0, 0, 0, 1, K, B);
-  out(x + dir * 1.15, y + 1.0, -d, 0.45, 0.06, 0.08, 0.3, 0.28, 0.25, 1, 0, 0, 0, 1, K, B);
-  if (!wet) for (const lx of [-0.75, 0.75]) out(x + lx, y + 0.25, -d, 0.12, 0.3, 0.12, c[0], c[1], c[2], 1, 0, 0, 0, 1, K, B);
-  if (rng() < 0.3) out(x - dir * 0.3, y + 1.32, -d, 0.17, 0.12, 0.1, 0.78, 0.78, 0.74, 1, 0, 0, 0, 1, K, B);   // egret
-  if (wet) out(x, y + 0.1, -d, 1.5, 0.04, 0.6, 0.35, 0.38, 0.36, 0.8, 0, 0, 0, 1, KIND.GROUND);      // ripple
+// ---------------------------------------------------------------------------------------------
+// People and working animals. Drawn larger than life (people 1.5 times, buffalo 1.6 times, and
+// larger again beyond 90 m) so that they read from a moving train; a fixed handful of shaped
+// splats each, whatever the budget; limbs, poles, cords and horns are struts sized from distance.
+// Every splat is tagged MOVE.BEAT. Each figure is built in its own frame: u along its heading,
+// h up, v to its left, in life-size metres times the frame's scale.
+// ---------------------------------------------------------------------------------------------
+const BEAT = MOVE.BEAT, KO = KIND.OTHER;
+const PK = 1.5, BK = 1.6;
+const farK = (d) => 1 + 0.45 * smooth(45, 170, d);
+const CLOTH = [[0.16, 0.22, 0.42], [0.76, 0.75, 0.7], [0.66, 0.22, 0.18], [0.3, 0.45, 0.62], [0.46, 0.43, 0.28], [0.11, 0.11, 0.13], [0.72, 0.42, 0.46], [0.74, 0.6, 0.2]];
+const KIDS = [[0.72, 0.2, 0.16], [0.76, 0.66, 0.2], [0.78, 0.78, 0.74], [0.25, 0.42, 0.7], [0.74, 0.4, 0.5]];
+const SKIN = [[0.6, 0.44, 0.33], [0.52, 0.37, 0.27], [0.66, 0.5, 0.38]];
+const STRAW = [0.77, 0.68, 0.43], WICKER = [0.6, 0.5, 0.3], WOOD = [0.36, 0.28, 0.2];
+const LOADS = [[0.3, 0.5, 0.2], [0.74, 0.64, 0.32], [0.64, 0.2, 0.14], [0.7, 0.7, 0.66], [0.76, 0.46, 0.12]];
+const pick = (list, r) => list[Math.min(list.length - 1, Math.floor(r() * list.length))];
+// for scripts that look for them (as tropics.js does)
+function note(ctx, what, wx, d) { const log = globalThis.__karstLog; if (log && wx >= ctx.x0 && wx < ctx.x0 + ctx.length) log.push({ what, wx, d }); }
+
+// x is chunk-local; yaw 0 faces +x (the way the train runs), pi/2 faces away from the line.
+function frame(x, y, d, yaw, k) {
+  const ca = Math.cos(yaw), sa = Math.sin(yaw);
+  return { x, y, d, yaw, k, ca, sa, thin: Math.max(0.035, 0.0007 * d), P: (u, h, v = 0) => [x + (u * ca - v * sa) * k, y + h * k, -(d + (u * sa + v * ca) * k)] };
+}
+// A frame standing at (u, v) of frame f, h above its base, turned by `turn`, at scale k.
+function sub(f, u, v, k = f.k, turn = 0, h = 0) { return frame(f.x + (u * f.ca - v * f.sa) * f.k, f.y + h * f.k, f.d + (u * f.sa + v * f.ca) * f.k, f.yaw + turn, k); }
+// An ellipsoid: ru along the heading (tilted up by `pitch`), rh up, rv across.
+function ell(out, f, u, h, v, ru, rh, rv, c, pitch = 0, move = BEAT, kind = KO) {
+  const p = f.P(u, h, v), cp = Math.cos(pitch), q = quatXTo(f.ca * cp, Math.sin(pitch), -f.sa * cp);
+  out(p[0], p[1], p[2], ru * f.k, rh * f.k, rv * f.k, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind, move);
+}
+// A limb, pole or cord from a to b (points from f.P), r thick in life-size metres.
+function lim(out, f, a, b, r, c, n = 2, move = BEAT) { strutM(out, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(r * f.k, f.thin), c, n, KO, move); }
+function ripple(out, x, y, d, rx, rz, c = [0.7, 0.73, 0.73], op = 0.6) { out(x, y + 0.03, -d, rx, 0.025, rz, c[0], c[1], c[2], op, 0, 0, 0, 1, KIND.GROUND); }
+
+// A person. o: { pose: 'stand' | 'walk' | 'bent' (planting, double) | 'squat' | 'sit', arms: 'down' |
+// 'swing' | 'fwd' | 'up' | 'low' | 'pole', hat (a conical straw hat; default yes for adults), wade
+// (metres of leg under water or crop, not drawn), seat (sitting height), shirt, child }
+function person(out, f, r, o = {}) {
+  const pose = o.pose || 'stand', wade = o.wade || 0;
+  const shirt = o.shirt || pick(o.child ? KIDS : CLOTH, r), trous = r() < 0.7 ? [0.13, 0.14, 0.18] : [0.3, 0.3, 0.34], skin = pick(SKIN, r);
+  const hat = o.hat != null ? o.hat : !o.child, hd = o.child ? 1.25 : 1;
+  const L = (a, b, c, rr = 0.065) => lim(out, f, a, b, rr, c);
+  if (pose === 'bent') {
+    for (const v of [-0.1, 0.1]) L(f.P(0, 0.84, v), f.P(0.03, wade, v * 1.15), trous);
+    ell(out, f, 0.26, 0.94, 0, 0.31, 0.17, 0.18, shirt, 0.3);
+    for (const v of [-0.16, 0.16]) L(f.P(0.47, 0.98, v), f.P(0.62, Math.max(wade, 0.05) + 0.1, v * 0.7), mul3(shirt, 0.88), 0.045);
+    ell(out, f, 0.66, 0.99, 0, 0.105 * hd, 0.105 * hd, 0.105 * hd, skin);
+    if (hat) { ell(out, f, 0.73, 1.07, 0, 0.055, 0.3, 0.3, STRAW, 0.75); ell(out, f, 0.79, 1.13, 0, 0.1, 0.14, 0.14, mul3(STRAW, 0.9), 0.75); }
+    else ell(out, f, 0.68, 1.05, 0, 0.11, 0.08, 0.11, [0.08, 0.07, 0.07]);
+    return;
+  }
+  let hip = 0.86;
+  if (pose === 'squat') { ell(out, f, 0.1, 0.3, 0, 0.22, 0.15, 0.19, trous); hip = 0.34; }
+  else if (pose === 'sit') {
+    hip = o.seat != null ? o.seat : 0.45;
+    for (const v of [-0.1, 0.1]) { L(f.P(0, hip, v), f.P(0.4, hip - 0.02, v), trous); L(f.P(0.4, hip - 0.02, v), f.P(0.46, Math.max(0, hip - 0.45), v), trous); }
+  } else {
+    const st = pose === 'walk' ? 0.2 : 0.02;
+    L(f.P(0, hip, -0.09), f.P(st, wade, -0.1), trous);
+    L(f.P(0, hip, 0.09), f.P(-st, wade, 0.1), mul3(trous, 0.8));
+  }
+  ell(out, f, 0, hip + 0.3, 0, 0.16, 0.29, 0.19, shirt);
+  const sy = hip + 0.55, hy = hip + 0.72 + 0.02 * hd, arms = o.arms || (pose === 'walk' ? 'swing' : 'down'), sleeve = mul3(shirt, 0.88);
+  for (const sg of [-1, 1]) {
+    let b;
+    if (arms === 'fwd') b = f.P(0.42, sy - 0.38, sg * 0.14);
+    else if (arms === 'up') b = f.P(0.1, sy + 0.42, sg * 0.3);
+    else if (arms === 'low') b = f.P(0.42, sy - 0.62, sg * 0.1);
+    else if (arms === 'swing') b = f.P(sg * 0.17, sy - 0.47, sg * 0.23);
+    else if (arms === 'pole' && sg > 0) b = f.P(0.3, sy + 0.04, 0.08);
+    else b = f.P(0.04, sy - 0.48, sg * 0.24);
+    L(f.P(0, sy, sg * 0.2), b, sleeve, 0.045);
+  }
+  ell(out, f, 0.02, hy, 0, 0.105 * hd, 0.11 * hd, 0.105 * hd, skin);
+  if (hat) { ell(out, f, 0.02, hy + 0.12, 0, 0.3, 0.05, 0.3, STRAW); ell(out, f, 0.02, hy + 0.2, 0, 0.14, 0.08, 0.14, mul3(STRAW, 0.9)); }
+  else ell(out, f, -0.01, hy + 0.07 * hd, 0, 0.11 * hd, 0.07 * hd, 0.11 * hd, [0.08, 0.07, 0.07]);
+}
+// A carrying pole across the shoulder with a basket hanging from each end (use arms: 'pole').
+function shoulderPole(out, f, r, load = pick(LOADS, r)) {
+  lim(out, f, f.P(-1.0, 1.45, 0.06), f.P(1.0, 1.45, 0.06), 0.022, [0.5, 0.42, 0.26], 3);
+  for (const e of [-1, 1]) {
+    for (const s of [-0.15, 0.15]) lim(out, f, f.P(e, 1.45, 0.06), f.P(e + s, 0.86, 0.06), 0.012, [0.3, 0.27, 0.2], 1);
+    ell(out, f, e, 0.7, 0.06, 0.21, 0.15, 0.21, WICKER);
+    ell(out, f, e, 0.88, 0.06, 0.17, 0.1, 0.17, load);
+  }
+}
+
+// A water buffalo: a heavy slate-grey body with a deep belly, the head carried low and forward,
+// and the great crescent horns swept back over the neck. o: { pose: 'stand' | 'graze' | 'wallow'
+// (only the back, the head and the horns above the water), wade, egret, col }
+function buffalo(out, f, r, o = {}) {
+  const pose = o.pose || 'stand', wade = o.wade || 0;
+  const base = o.col || jitter([0.22, 0.21, 0.21], r, 0.12), hi = [base[0] * 1.5 + 0.04, base[1] * 1.5 + 0.04, base[2] * 1.5 + 0.05], lo = mul3(base, 0.72);
+  const horns = (u, h, bu, bh) => {       // from the poll, sweeping out and back along (bu, bh)
+    const nu = -bh, nh = bu;
+    for (const sg of [-1, 1]) {
+      const pt = (t, s, v) => f.P(u + bu * t + nu * s, h + bh * t + nh * s, sg * v);
+      const a = pt(0, 0, 0.1), b = pt(0.22, 0.07, 0.42), c = pt(0.55, 0.12, 0.52), e = pt(0.8, 0.13, 0.38);
+      lim(out, f, a, b, 0.05, [0.5, 0.48, 0.42], 1); lim(out, f, b, c, 0.042, [0.56, 0.54, 0.47], 1); lim(out, f, c, e, 0.032, [0.6, 0.58, 0.5], 1);
+    }
+  };
+  if (pose === 'wallow') {
+    ell(out, f, -0.15, 0.5, 0, 0.62, 0.34, 0.33, base);
+    ell(out, f, -0.2, 0.84, 0, 0.46, 0.07, 0.2, hi);
+    ell(out, f, 0.72, 0.62, 0, 0.3, 0.2, 0.18, base, 0.4);
+    ell(out, f, 1.05, 0.8, 0, 0.26, 0.14, 0.15, base, 0.2);
+    ell(out, f, 1.3, 0.84, 0, 0.1, 0.085, 0.1, lo);
+    horns(0.92, 0.95, -0.93, 0.36);
+    if (o.egret) egret(out, sub(f, -0.35, 0, 1.7 * f.k / BK, 0, 0.9));
+    return;
+  }
+  const graze = pose === 'graze';
+  if (wade < 0.7) for (const [u, v, c] of [[0.6, -0.2, lo], [-0.52, -0.2, lo], [0.5, 0.2, base], [-0.62, 0.2, base]]) lim(out, f, f.P(u, 0.75, v), f.P(u + 0.03, wade, v), 0.085, c);
+  ell(out, f, -0.55, 1.0, 0, 0.4, 0.3, 0.27, base);
+  ell(out, f, 0.0, 0.93, 0, 0.5, 0.33, 0.3, base);
+  ell(out, f, 0.52, 1.05, 0, 0.33, 0.31, 0.27, base);
+  ell(out, f, -0.05, 1.27, 0, 0.62, 0.07, 0.2, hi);
+  const hu = graze ? 1.14 : 1.32, hh = graze ? 0.42 : 0.98;
+  ell(out, f, graze ? 0.9 : 0.98, graze ? 0.78 : 1.03, 0, 0.3, 0.17, 0.16, base, graze ? -0.9 : -0.12);
+  ell(out, f, hu, hh, 0, 0.25, 0.13, 0.14, base, graze ? -1.0 : -0.25);
+  ell(out, f, hu + (graze ? 0.06 : 0.2), hh - (graze ? 0.22 : 0.07), 0, 0.1, 0.09, 0.1, lo);
+  if (graze) horns(hu - 0.12, hh + 0.2, -0.45, 0.9); else horns(hu - 0.17, hh + 0.13, -0.93, 0.36);
+  lim(out, f, f.P(-0.93, 1.1, 0), f.P(-1.04, 0.55, 0), 0.035, base, 2);
+  ell(out, f, -1.04, 0.46, 0, 0.07, 0.11, 0.07, lo);
+  if (o.egret) egret(out, sub(f, -0.3, 0, 1.7 * f.k / BK, 0, 1.3));
+}
+// A white egret (frame scale about 1.7).
+function egret(out, f) {
+  const w = [0.8, 0.8, 0.77];
+  for (const v of [-0.04, 0.04]) lim(out, f, f.P(0, 0.5, v), f.P(0.02, 0, v), 0.012, [0.14, 0.14, 0.12], 1);
+  ell(out, f, -0.03, 0.6, 0, 0.21, 0.1, 0.1, w, 0.45);
+  lim(out, f, f.P(0.12, 0.68, 0), f.P(0.2, 0.95, 0), 0.03, w, 1);
+  ell(out, f, 0.21, 1.0, 0, 0.055, 0.045, 0.045, w);
+  lim(out, f, f.P(0.24, 1.0, 0), f.P(0.4, 0.96, 0), 0.014, [0.78, 0.6, 0.16], 1);
+}
+// A duck on the water (frame scale about 1.8).
+function duck(out, f, c) {
+  ell(out, f, 0, 0.11, 0, 0.2, 0.1, 0.13, c);
+  ell(out, f, 0.19, 0.27, 0, 0.065, 0.065, 0.065, c);
+  ell(out, f, 0.28, 0.25, 0, 0.05, 0.022, 0.035, [0.78, 0.5, 0.12]);
+}
+// A fishing cormorant, upright, hooked bill; `spread` holds its wings out to dry.
+function cormorant(out, f, spread) {
+  const c = [0.07, 0.07, 0.08];
+  ell(out, f, 0, 0.32, 0, 0.21, 0.1, 0.1, c, 1.15);
+  lim(out, f, f.P(0.07, 0.5, 0), f.P(0.1, 0.74, 0), 0.035, c, 1);
+  ell(out, f, 0.13, 0.77, 0, 0.06, 0.05, 0.05, c);
+  lim(out, f, f.P(0.15, 0.77, 0), f.P(0.31, 0.8, 0), 0.016, [0.62, 0.55, 0.3], 1);
+  if (spread) for (const sg of [-1, 1]) ell(out, f, -0.02, 0.44, sg * 0.3, 0.05, 0.14, 0.26, c);
+}
+// A spoked wheel in the figure's own plane, v off its centre line.
+function wheel(out, f, u, h, v, R, c, spokes = 3) {
+  let a = f.P(u + R, h, v);
+  for (let i = 1; i <= 8; i++) { const t = (i / 8) * 2 * Math.PI, b = f.P(u + R * Math.cos(t), h + R * Math.sin(t), v); lim(out, f, a, b, 0.05, c, 1); a = b; }
+  for (let i = 0; i < spokes; i++) { const t = (i * Math.PI) / spokes + 0.3; lim(out, f, f.P(u - R * Math.cos(t), h - R * Math.sin(t), v), f.P(u + R * Math.cos(t), h + R * Math.sin(t), v), 0.025, c, 2); }
+}
+// A cyclist; `load` straps a bundle on the rack; at night the lamp is lit.
+function* cyclist(ctx, out, f, r, load, night) {
+  const fc = [0.12, 0.12, 0.13];
+  wheel(out, f, -0.52, 0.34, 0, 0.34, fc); wheel(out, f, 0.52, 0.34, 0, 0.34, fc);
+  for (const [a, b] of [[[-0.52, 0.34], [-0.18, 0.9]], [[-0.18, 0.9], [0.36, 0.86]], [[0.36, 0.86], [0.52, 0.34]], [[-0.18, 0.9], [0.02, 0.32]], [[0.02, 0.32], [0.36, 0.86]], [[-0.52, 0.34], [0.02, 0.32]], [[0.36, 0.86], [0.34, 1.06]]]) lim(out, f, f.P(a[0], a[1], 0), f.P(b[0], b[1], 0), 0.02, fc, 1);
+  const shirt = pick(CLOTH, r), trous = [0.14, 0.14, 0.18], skin = pick(SKIN, r);
+  lim(out, f, f.P(-0.18, 0.98, 0.09), f.P(0.14, 0.7, 0.1), 0.065, trous); lim(out, f, f.P(0.14, 0.7, 0.1), f.P(0.04, 0.22, 0.1), 0.06, trous);
+  lim(out, f, f.P(-0.18, 0.98, -0.09), f.P(0.1, 0.78, -0.1), 0.065, mul3(trous, 0.8)); lim(out, f, f.P(0.1, 0.78, -0.1), f.P(-0.02, 0.44, -0.1), 0.06, mul3(trous, 0.8));
+  ell(out, f, -0.1, 1.28, 0, 0.3, 0.17, 0.19, shirt, 1.25);
+  for (const sg of [-1, 1]) lim(out, f, f.P(-0.02, 1.5, sg * 0.2), f.P(0.34, 1.08, sg * 0.2), 0.045, mul3(shirt, 0.88));
+  ell(out, f, 0.04, 1.68, 0, 0.105, 0.11, 0.105, skin);
+  if (r() < 0.75) { ell(out, f, 0.04, 1.8, 0, 0.3, 0.05, 0.3, STRAW); ell(out, f, 0.04, 1.88, 0, 0.14, 0.08, 0.14, mul3(STRAW, 0.9)); }
+  else ell(out, f, 0.02, 1.76, 0, 0.11, 0.07, 0.11, [0.08, 0.07, 0.07]);
+  if (load) { const c = pick(LOADS, r); ell(out, f, -0.62, 1.08, 0, 0.26, 0.22, 0.3, c); ell(out, f, -0.6, 1.4, 0, 0.2, 0.14, 0.24, mul3(c, 0.85)); }
+  if (night) { const p = f.P(0.5, 0.95, 0); yield* lamp(ctx, out, p[0], p[1], -p[2], [1, 0.9, 0.62], { size: 0.1, halo: 1 }); }
+}
+// A two-wheeled cart: a flat bed between spoked wheels, shafts forward, a load on it. The bed is
+// at u 0, the shafts run forward to u = `reach` at height `sh`.
+function cart(out, f, r, R, reach, sh, load) {
+  for (const v of [-0.62, 0.62]) wheel(out, f, 0, R, v, R, v < 0 ? [0.2, 0.16, 0.12] : [0.3, 0.24, 0.17], 2);
+  ell(out, f, -0.1, R + 0.12, 0, 0.95, 0.07, 0.5, WOOD);
+  for (const v of [-0.42, 0.42]) lim(out, f, f.P(0.6, R + 0.12, v), f.P(reach, sh, v), 0.03, WOOD, 2);
+  if (load) {
+    const c = pick([[0.68, 0.56, 0.26], [0.3, 0.48, 0.2], [0.68, 0.66, 0.6], [0.5, 0.36, 0.22]], r);
+    ell(out, f, -0.3, R + 0.45, 0, 0.6, 0.26, 0.42, c);
+    ell(out, f, -0.35, R + 0.8, 0, 0.42, 0.2, 0.32, mul3(c, 1.08));
+  }
+}
+// A dog trotting.
+function dog(out, f, r) {
+  const c = pick([[0.6, 0.45, 0.25], [0.2, 0.18, 0.16], [0.72, 0.7, 0.64]], r);
+  for (const [u, v] of [[0.26, 0.07], [0.3, -0.07], [-0.26, 0.07], [-0.3, -0.07]]) lim(out, f, f.P(u, 0.34, v), f.P(u + 0.03, 0, v), 0.035, c, 1);
+  ell(out, f, 0, 0.42, 0, 0.33, 0.14, 0.13, c);
+  ell(out, f, 0.42, 0.55, 0, 0.14, 0.11, 0.1, c);
+  lim(out, f, f.P(-0.33, 0.48, 0), f.P(-0.5, 0.72, 0), 0.03, c, 1);
+}
+
+// --- scenes in the paddies ---
+function* paddyScene(ctx, out, s, r) {
+  const x = s.wx - ctx.x0, kk = farK(s.d), pk = PK * kk, bk = BK * kk, t = s.pt;
+  const wet = t === P.WATER || t === P.YOUNG || t === P.POND || t === P.LOTUS;
+  const u = r();
+  let what;
+  if (t === P.WATER) what = u < 0.32 ? 'plough' : u < 0.6 ? 'plant' : u < 0.77 ? 'wallow' : u < 0.88 ? 'ducks' : 'herd';
+  else if (t === P.YOUNG) what = u < 0.55 ? 'plant' : u < 0.82 ? 'weed' : 'herd';
+  else if (t === P.RICE) what = 'weed';
+  else if (t === P.MUD) what = u < 0.65 ? 'plough' : 'herd';
+  else if (t === P.POND) what = u < 0.5 ? 'ducks' : 'wallow';
+  else if (t === P.PASTURE) what = u < 0.82 ? 'herd' : 'carry';
+  else if (t === P.LOTUS) what = 'lotus';
+  else if (t === P.ORCHARD) what = 'pick';
+  else what = u < 0.65 ? 'veg' : 'carry';
+  if (what === 'plough' && s.hw < 6.5) what = wet ? 'wallow' : 'herd';
+  note(ctx, what, s.wx, s.d);
+  const side = () => (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.5;       // broadside to the window, more or less
+  if (what === 'plough') {
+    // a buffalo drawing a wooden plough through the flooded field, the farmer wading behind;
+    // churned mud trails behind them, and egrets follow for what the plough turns up
+    const wade = wet ? 0.22 : 0, yaw = (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.25;
+    const fb = frame(x + (r() - 0.5) * Math.max(0, s.hw - 6), s.y - wade * bk, s.d, yaw, bk);
+    buffalo(out, fb, r, { wade });
+    lim(out, fb, fb.P(0.62, 1.4, -0.3), fb.P(0.62, 1.4, 0.3), 0.04, WOOD, 1);                 // the yoke
+    for (const v of [-0.3, 0.3]) lim(out, fb, fb.P(0.62, 1.36, v), fb.P(-1.5, 0.55 + wade, 0), 0.014, [0.3, 0.27, 0.2], 3);   // traces
+    lim(out, fb, fb.P(-1.5, 0.55 + wade, 0), fb.P(-2.1, wade + 0.06, 0), 0.05, WOOD, 2);      // beam and share
+    lim(out, fb, fb.P(-2.1, wade + 0.06, 0), fb.P(-2.45, 1.02 + wade, 0), 0.035, WOOD, 2);    // the handle
+    const pp = fb.P(-2.85, 0, 0);
+    person(out, frame(pp[0], s.y - wade * pk, -pp[2], yaw, pk), r, { pose: 'walk', arms: 'fwd', wade });
+    const mud = wet ? [0.44, 0.42, 0.34] : [0.3, 0.25, 0.19];
+    for (let j = 0; j < 4; j++) { const p = fb.P(-3.9 - j * 1.5, 0, 0); out(p[0], s.y + 0.05, p[2], 1.3 * bk, 0.03, 0.5 * bk, mud[0], mud[1], mud[2], 0.85, 0, 0, 0, 1, KIND.GROUND); }
+    if (wet) { const p = fb.P(-0.6, 0, 0); ripple(out, p[0], s.y, -p[2], 2.6 * bk, 0.5 * bk); }
+    const ne = Math.floor(r() * 3.5);
+    for (let j = 0; j < ne; j++) { const p = fb.P(-4.2 - 1.6 * j - r(), 0, (r() - 0.5) * 2.2); egret(out, frame(p[0], s.y - (wet ? 0.1 : 0), -p[2], side(), 1.7 * kk)); }
+  } else if (what === 'plant' || what === 'weed') {
+    // a line of planters bent double, shin-deep, conical hats down; one now and then straightens up.
+    // In front of each, the short bright rows just set
+    const plant = what === 'plant', wade = plant ? 0.2 : 0.24, top = plant ? s.y : s.y + 0.2;
+    const n = plant ? clamp(Math.round(s.hw / 1.3), 2, 6) : 1 + Math.floor(r() * 3), gap = Math.min(2.6, (2 * s.hw) / n);
+    const face = r() < 0.4 ? -Math.PI / 2 : r() < 0.5 ? 0 : Math.PI;
+    for (let i = 0; i < n; i++) {
+      const px = x + (i - (n - 1) / 2) * gap * (plant ? 1 : 1.6) + (r() - 0.5) * 0.6, pd = s.d + (r() - 0.5) * (plant ? 1.6 : 4);
+      const f = frame(px, top - wade * pk, pd, face + (r() - 0.5) * 0.7, pk), up = r() < (plant ? 0.22 : 0.45);
+      person(out, f, r, { pose: up ? 'stand' : 'bent', wade });
+      if (plant) {
+        if (up) ell(out, f, 0.1, 0.92, 0.3, 0.1, 0.17, 0.1, [0.36, 0.56, 0.2]);
+        ripple(out, px, s.y, pd, 0.9 * pk, 0.45);
+        for (let j = 1; j <= 4; j++) for (const v of [-0.35, 0.35]) { const p = f.P(0.75 + j * 0.42, 0, v); out(p[0], s.y + 0.16, p[2], 0.07 * pk, 0.15, 0.07 * pk, 0.34, 0.56, 0.18, 1, 0, 0, 0, 1, KIND.GROUND); }
+      }
+    }
+    if (!plant && r() < 0.3) {
+      // a scarecrow: crossed poles, a ragged shirt and a straw hat
+      const f = frame(x + s.hw * 0.6, s.y, s.d + 1.5, 0.3, pk);
+      lim(out, f, f.P(0, 0, 0), f.P(0, 1.75, 0), 0.03, WOOD, 3); lim(out, f, f.P(-0.6, 1.4, 0), f.P(0.6, 1.4, 0), 0.03, WOOD, 2);
+      const c = pick(CLOTH, r), p = f.P(0, 1.15, 0);
+      out(p[0], p[1], p[2], 0.34 * pk, 0.3 * pk, 0.05, c[0], c[1], c[2], 1, 0, 0, 0, 1, KO, MOVE.FLAG);
+      ell(out, f, 0, 1.78, 0, 0.3, 0.05, 0.3, STRAW); ell(out, f, 0, 1.86, 0, 0.14, 0.08, 0.14, mul3(STRAW, 0.9));
+    }
+  } else if (what === 'wallow' || what === 'herd') {
+    // buffalo lying in the water with only back, head and horns showing; or standing about
+    const n = t === P.PASTURE ? 2 + Math.floor(r() * 3.6) : what === 'herd' ? 1 + Math.floor(r() * 2.4) : 1 + Math.floor(r() * 3);
+    for (let i = 0; i < n; i++) {
+      const bx = x + (i - (n - 1) / 2) * 5.4 * kk + (r() - 0.5) * 1.5, bd = s.d + (i % 2 ? 1 : -1) * (0.8 + 2.2 * r());
+      if (Math.abs(bx - x) > s.hw + 2) continue;
+      const lie = what === 'wallow' && (i === 0 || r() < 0.7);
+      if (lie) { buffalo(out, frame(bx, s.y - 0.02, bd, side(), bk), r, { pose: 'wallow', egret: r() < 0.3 }); ripple(out, bx, s.y, bd, 2.3 * bk, 0.55 * bk); }
+      else {
+        const wade = wet ? 0.28 : 0, calf = what === 'herd' && i === n - 1 && n > 1 && r() < 0.6, k = calf ? bk * 0.62 : bk;
+        buffalo(out, frame(bx, s.y - wade * k, bd, side(), k), r, { wade, pose: wet || r() < 0.4 ? 'stand' : 'graze', egret: !calf && r() < 0.35 });
+        if (wet) ripple(out, bx, s.y, bd, 1.9 * k, 0.5 * k);
+      }
+    }
+    if (what === 'herd' && r() < 0.5) {
+      // the herd child, sitting on the grass or standing in the water with a switch
+      const f = frame(x + (n * 2.3 + 1.5) * kk * (r() < 0.5 ? -1 : 1), s.y - (wet ? 0.15 * pk * 0.66 : 0), s.d + 1, side(), pk * 0.66);
+      person(out, f, r, { child: true, hat: r() < 0.5, pose: wet ? 'stand' : 'sit', seat: 0.12, wade: wet ? 0.15 : 0 });
+    }
+  } else if (what === 'ducks') {
+    // a flock of ducks dabbling, and the duck herd wading after them with a long cane
+    const n = 6 + Math.floor(r() * 6), dir = r() < 0.5 ? 0 : Math.PI, dk = 1.8 * kk, len = Math.min(s.hw, 7);
+    for (let i = 0; i < n; i++) {
+      const dx = x + (r() * 2 - 1) * len, dd = s.d + (r() - 0.5) * 3.5;
+      duck(out, frame(dx, s.y, dd, dir + (r() - 0.5) * 1.2, dk), r() < 0.75 ? [0.8, 0.8, 0.76] : [0.42, 0.33, 0.22]);
+    }
+    ripple(out, x, s.y, s.d, len * 0.9, 1.6);
+    if (r() < 0.65) {
+      const f = frame(x - Math.cos(dir) * (len + 2.2), s.y - 0.2 * pk, s.d + 0.8, dir, pk);
+      person(out, f, r, { pose: 'stand', arms: 'fwd', wade: 0.2 });
+      lim(out, f, f.P(0.2, 0.9, 0.14), f.P(3.4, 1.9, 0.14), 0.014, [0.55, 0.5, 0.3], 4);
+    }
+  } else if (what === 'lotus') {
+    // gathering lotus: waist-deep among the leaves, a wooden tub floating alongside
+    const n = 1 + Math.floor(r() * 2);
+    for (let i = 0; i < n; i++) {
+      const f = frame(x + (i - (n - 1) / 2) * 4.5, s.y - 0.45 * pk, s.d + (r() - 0.5) * 2, side(), pk);
+      person(out, f, r, { pose: r() < 0.5 ? 'bent' : 'stand', wade: 0.5, arms: 'low' });
+      ell(out, f, -0.9, 0.62, 0.3, 0.45, 0.16, 0.36, WOOD); ell(out, f, -0.9, 0.8, 0.3, 0.34, 0.1, 0.27, r() < 0.5 ? [0.74, 0.44, 0.54] : [0.34, 0.52, 0.24]);
+    }
+    if (r() < 0.5) egret(out, frame(x + 5 + 2 * r(), s.y + 0.2, s.d + 1, side(), 1.7 * kk));
+  } else if (what === 'pick') {
+    // picking fruit: a ladder against a tree, baskets filling on the grass
+    const f = frame(x, s.y, s.d, side(), pk);
+    lim(out, f, f.P(0.5, 0, -0.22), f.P(1.0, 2.6, -0.22), 0.025, WOOD, 3); lim(out, f, f.P(0.5, 0, 0.22), f.P(1.0, 2.6, 0.22), 0.025, WOOD, 3);
+    for (const h of [0.5, 1.0, 1.5, 2.0]) lim(out, f, f.P(0.5 + h * 0.19, h, -0.22), f.P(0.5 + h * 0.19, h, 0.22), 0.018, WOOD, 1);
+    person(out, sub(f, 0.55, 0, pk, 0, 0.75), r, { arms: 'up', hat: r() < 0.6 });
+    const g = frame(x - 2.4 * kk, s.y, s.d - 0.6, side(), pk);
+    person(out, g, r, { pose: r() < 0.5 ? 'squat' : 'stand', arms: 'low' });
+    for (const v of [-0.6, 0.5]) { ell(out, g, 0.8, 0.22, v, 0.26, 0.18, 0.26, WICKER); ell(out, g, 0.8, 0.42, v, 0.21, 0.11, 0.21, [0.8, 0.46, 0.1]); }
+  } else if (what === 'veg') {
+    // hoeing the vegetable rows; someone squats picking into a basket
+    const f = frame(x - 1.5, s.y, s.d, side(), pk);
+    person(out, f, r, { pose: 'stand', arms: 'fwd' });
+    lim(out, f, f.P(0.3, 1.2, 0), f.P(1.15, 0.1, 0), 0.02, WOOD, 3);
+    ell(out, f, 1.17, 0.1, 0, 0.05, 0.1, 0.12, [0.3, 0.3, 0.32]);
+    if (r() < 0.7) {
+      const g = frame(x + 2.2, s.y, s.d + (r() - 0.5) * 3, side(), pk);
+      person(out, g, r, { pose: 'squat', arms: 'low' });
+      ell(out, g, 0.75, 0.2, 0.2, 0.24, 0.17, 0.24, WICKER); ell(out, g, 0.75, 0.38, 0.2, 0.19, 0.1, 0.19, pick(LOADS, r));
+    }
+  } else {
+    const f = frame(x, s.y, s.d, side(), pk);
+    person(out, f, r, { pose: 'walk', arms: 'pole' }); shoulderPole(out, f, r);
+  }
   if (out.due()) yield;
+}
+
+// --- on the bunds: people and animals walking the raised paths between the fields ---
+function* bundScene(ctx, out, s, r) {
+  const x = s.wx - ctx.x0, kk = farK(s.d), pk = PK * kk, bk = BK * kk;
+  const yaw = r() < 0.5 ? 0 : Math.PI, u = r();
+  const what = u < 0.3 ? 'pole' : u < 0.52 ? 'lead' : u < 0.68 ? 'ride' : u < 0.82 ? 'hoe' : 'graze';
+  note(ctx, 'bund-' + what, s.wx, s.d);
+  if (what === 'pole') {
+    const n = r() < 0.4 ? 2 : 1;
+    for (let i = 0; i < n; i++) { const f = frame(x + i * 3.4 * pk * Math.cos(yaw), s.y, s.d, yaw, pk); person(out, f, r, { pose: 'walk', arms: 'pole' }); shoulderPole(out, f, r); }
+  } else if (what === 'lead') {
+    // a child leading a buffalo home by a rope through its nose
+    const fb = frame(x, s.y, s.d, yaw, bk);
+    buffalo(out, fb, r, { egret: r() < 0.25 });
+    const fc = sub(fb, 2.7, 0.1, pk * 0.68);
+    person(out, fc, r, { child: true, pose: 'walk', hat: r() < 0.6 });
+    lim(out, fb, fb.P(1.5, 0.92, 0), fc.P(-0.17, 0.92, -0.23), 0.012, [0.34, 0.3, 0.22], 2);
+  } else if (what === 'ride') {
+    // a child riding home on the buffalo's back
+    const fb = frame(x, s.y, s.d, yaw, bk);
+    buffalo(out, fb, r);
+    person(out, sub(fb, -0.1, 0, pk * 0.66, 0, 1.22), r, { child: true, pose: 'sit', seat: 0.08, arms: 'fwd', hat: r() < 0.6 });
+  } else if (what === 'hoe') {
+    const f = frame(x, s.y, s.d, yaw, pk);
+    person(out, f, r, { pose: 'walk', arms: 'pole' });
+    lim(out, f, f.P(0.32, 1.42, 0.1), f.P(-0.75, 1.95, 0.1), 0.02, WOOD, 3); ell(out, f, -0.78, 1.9, 0.1, 0.05, 0.12, 0.1, [0.3, 0.3, 0.32]);
+    if (r() < 0.6) dog(out, sub(f, -1.6, 0, pk), r);
+    if (r() < 0.5) person(out, sub(f, 1.7, 0, pk * 0.64), r, { child: true, pose: 'walk' });
+  } else {
+    buffalo(out, frame(x, s.y, s.d, yaw + (r() - 0.5) * 0.4, bk), r, { pose: 'graze', egret: r() < 0.5 });
+    if (r() < 0.6) person(out, frame(x - Math.cos(yaw) * 3.4 * kk, s.y, s.d, yaw + Math.PI, pk * 0.66), r, { child: true, pose: 'sit', seat: 0.1, hat: r() < 0.5 });
+    if (r() < 0.5) egret(out, frame(x + Math.cos(yaw) * 3.6 * kk, s.y, s.d - 0.5, yaw, 1.7 * kk));
+  }
+  if (out.due()) yield;
+}
+
+// --- on the lane: bicycles, carts, people going to and from the fields ---
+function* laneScene(ctx, out, s, r, night) {
+  const x = s.wx - ctx.x0, kk = farK(s.d), pk = PK * kk, bk = BK * kk;
+  const yaw = r() < 0.5 ? 0 : Math.PI, u = r();
+  const what = night ? 'cycle' : u < 0.34 ? 'cycle' : u < 0.54 ? 'handcart' : u < 0.74 ? 'oxcart' : 'walk';
+  note(ctx, 'lane-' + what, s.wx, s.d);
+  if (what === 'cycle') {
+    const n = !night && r() < 0.35 ? 2 : 1;
+    for (let i = 0; i < n; i++) yield* cyclist(ctx, out, frame(x - i * 4.2 * pk * Math.cos(yaw), s.y, s.d + i * 0.4, yaw, pk), r, r() < 0.45, night);
+  } else if (what === 'handcart') {
+    // two people with a loaded handcart: one in the shafts, one pushing
+    const f = frame(x, s.y, s.d, yaw, pk);
+    cart(out, f, r, 0.42, 1.9, 0.92, true);
+    person(out, sub(f, 2.0, 0), r, { pose: 'walk', arms: 'down' });
+    person(out, sub(f, -1.6, 0), r, { pose: 'walk', arms: 'fwd' });
+  } else if (what === 'oxcart') {
+    // a buffalo cart: big wheels, a heaped load, the driver sitting up front
+    const fb = frame(x, s.y, s.d, yaw, bk), fc = sub(fb, -2.9, 0);
+    buffalo(out, fb, r);
+    lim(out, fb, fb.P(0.62, 1.4, -0.34), fb.P(0.62, 1.4, 0.34), 0.04, WOOD, 1);
+    cart(out, fc, r, 0.62, 3.5, 1.36, true);
+    person(out, sub(fc, 0.72, 0, pk, 0, 0.74), r, { pose: 'sit', seat: 0.06, arms: 'fwd' });
+  } else {
+    const n = 1 + Math.floor(r() * 2.5), kids = r() < 0.4;
+    for (let i = 0; i < n; i++) {
+      const f = frame(x - i * 2.1 * pk * Math.cos(yaw) * (kids ? 0.6 : 1), s.y, s.d + (r() - 0.5) * 0.8, yaw, kids ? pk * 0.66 : pk);
+      if (kids) { person(out, f, r, { child: true, pose: 'walk' }); ell(out, f, -0.2, 1.1, 0, 0.1, 0.16, 0.16, pick(CLOTH, r)); }       // a satchel
+      else if (r() < 0.6) { person(out, f, r, { pose: 'walk', arms: 'pole' }); shoulderPole(out, f, r); }
+      else person(out, f, r, { pose: 'walk' });
+    }
+    if (r() < 0.3) dog(out, frame(x + 2.6 * pk * Math.cos(yaw), s.y, s.d - 0.5, yaw, pk), r);
+  }
+  if (out.due()) yield;
+}
+
+// --- on the river bank: anglers, washing at the water's edge, a buffalo brought down to drink ---
+function* bankScene(ctx, out, s, r, night) {
+  const x = s.wx - ctx.x0, kk = farK(s.d), pk = PK * kk, bk = BK * kk, wy = s.y - 0.7;
+  const u = r(), what = night ? 'fish' : u < 0.48 ? 'fish' : u < 0.78 ? 'wash' : 'drink';
+  note(ctx, 'bank-' + what, s.wx, s.d);
+  if (what === 'fish') {
+    const n = !night && r() < 0.4 ? 2 : 1;
+    for (let i = 0; i < n; i++) {
+      const sg = r() < 0.5 ? -1 : 1, yaw = Math.PI / 2 + sg * (0.7 + 0.5 * r());
+      const sit = r() < 0.5, f = frame(x + (i - (n - 1) / 2) * 5.5, s.y, s.d + 0.3, yaw, pk);
+      person(out, f, r, { pose: sit ? 'sit' : 'stand', seat: 0.32, arms: 'fwd' });
+      const hy = sit ? 0.5 : 1.05, tip = f.P(3.5, hy + 1.5, 0);
+      lim(out, f, f.P(0.42, hy, 0), tip, 0.014, [0.5, 0.45, 0.28], 4);
+      strutM(out, tip[0], tip[1], tip[2], tip[0], wy + 0.1, tip[2] - 0.5, f.thin * 0.7, [0.7, 0.7, 0.68], 2, KO, BEAT);
+      out(tip[0], wy + 0.14, tip[2] - 0.5, 0.09 * kk, 0.09 * kk, 0.09 * kk, 0.78, 0.16, 0.1, 1, 0, 0, 0, 1, KO, BEAT);
+      ell(out, f, -0.2, 0.2, -0.5, 0.2, 0.18, 0.2, WICKER);
+      if (night) { const p = f.P(0.3, 0.45, 0.5); yield* lamp(ctx, out, p[0], p[1], -p[2], [1, 0.66, 0.32], { size: 0.12, halo: 1 }); }
+    }
+  } else if (what === 'wash') {
+    // washing clothes at the water's edge: squatting on the stones, bright cloth in the water
+    const n = 2 + Math.floor(r() * 2);
+    for (let i = 0; i < n; i++) {
+      const sg = r() < 0.5 ? -1 : 1, f = frame(x + (i - (n - 1) / 2) * 2.7, s.y - 0.25, s.d + 1.0, Math.PI / 2 + sg * (0.5 + 0.6 * r()), pk);
+      person(out, f, r, { pose: 'squat', arms: 'low', hat: r() < 0.5 });
+      const c = pick([[0.76, 0.76, 0.72], [0.66, 0.2, 0.16], [0.24, 0.36, 0.64], [0.76, 0.62, 0.2]], r);
+      ell(out, f, 0.62, 0.12, 0, 0.26, 0.07, 0.2, c);
+      out(f.x, s.y - 0.3, -(s.d + 1.2), 1.1, 0.12, 0.7, 0.6, 0.59, 0.55, 1, 0, 0, 0, 1, KIND.GROUND);     // the stone they squat on
+      ell(out, f, -0.5, 0.22, sg * 0.5, 0.24, 0.17, 0.24, WICKER); ell(out, f, -0.5, 0.42, sg * 0.5, 0.2, 0.12, 0.2, pick([[0.74, 0.74, 0.7], [0.3, 0.4, 0.6], [0.64, 0.24, 0.2]], r));
+    }
+    ripple(out, x, wy, s.d + 3.2, n * 1.6, 0.8);
+    if (r() < 0.5) { const f = frame(x + (n * 1.4 + 2) * (r() < 0.5 ? -1 : 1), s.y, s.d - 0.6, r() < 0.5 ? 0 : Math.PI, pk); person(out, f, r, { pose: 'walk', arms: 'pole' }); shoulderPole(out, f, r, [0.7, 0.7, 0.66]); }
+  } else {
+    const bd = s.d + 4.2, yaw = (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.5;
+    buffalo(out, frame(x, wy - 0.3 * bk, bd, yaw, bk), r, { wade: 0.3, egret: r() < 0.3 });
+    ripple(out, x, wy, bd, 2.2 * bk, 0.6 * bk);
+    if (r() < 0.5) { buffalo(out, frame(x + 5 * kk, wy - 0.02, bd + 1.5, yaw + 0.3, bk), r, { pose: 'wallow' }); ripple(out, x + 5 * kk, wy, bd + 1.5, 2.2 * bk, 0.6 * bk); }
+    person(out, frame(x - 3.6 * kk, s.y, s.d - 0.3, 0.4, pk * 0.68), r, { child: true, pose: 'sit', seat: 0.1, hat: r() < 0.6 });
+  }
+  if (out.due()) yield;
+}
+
+// --- in the villages: neighbours talking, children and dogs, the old men under the banyan,
+// chores in the yard, and now and then a market under coloured awnings ---
+const villK = (d) => lerp(1.45, 2.0, smooth(50, 200, d));
+function* villageScene(ctx, out, s, r) {
+  const x = s.wx - ctx.x0, pk = villK(s.d);
+  note(ctx, 'village-' + s.what, s.wx, s.d);
+  if (s.what === 'market') {
+    const n = 3 + Math.floor(r() * 2), sp = 4.4 * pk / 1.3;
+    for (let i = 0; i < n; i++) {
+      const sx = x + (i - (n - 1) / 2) * sp, ks = pk / 1.3;
+      const [ca, cb] = pick([[[0.7, 0.2, 0.15], [0.76, 0.75, 0.7]], [[0.2, 0.36, 0.62], [0.76, 0.75, 0.7]], [[0.76, 0.6, 0.18], [0.76, 0.6, 0.18]], [[0.22, 0.45, 0.4], [0.22, 0.45, 0.4]], [[0.7, 0.2, 0.15], [0.7, 0.2, 0.15]]], r);
+      const pr = Math.max(0.05, 0.0006 * s.d);
+      for (const [px, pz, ph] of [[-1.6, -1.1, 2.2], [1.6, -1.1, 2.2], [-1.6, 1.1, 3.0], [1.6, 1.1, 3.0]]) strutM(out, sx + px * ks, s.y, -(s.d + pz * ks), sx + px * ks, s.y + ph * ks, -(s.d + pz * ks), pr, [0.4, 0.34, 0.24], 2, KO, BEAT);
+      const q = quatPitch(0.34);
+      for (let j = 0; j < 4; j++) { const c = j % 2 ? cb : ca; out(sx + (j - 1.5) * 0.92 * ks, s.y + 2.62 * ks, -s.d, 0.52 * ks, 0.05, 1.0 * ks, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KO, BEAT); }
+      out(sx, s.y + 0.85 * ks, -(s.d + 0.2 * ks), 1.3 * ks, 0.07 * ks, 0.45 * ks, 0.4, 0.32, 0.22, 1, 0, 0, 0, 1, KO, BEAT);     // the table
+      for (let j = 0; j < 4; j++) { const c = pick(LOADS, r); out(sx + (j - 1.5) * 0.62 * ks, s.y + 1.06 * ks, -(s.d + 0.1 * ks), 0.26 * ks, 0.17 * ks, 0.26 * ks, c[0], c[1], c[2], 1, 0, 0, 0, 1, KO, BEAT); }
+      person(out, frame(sx + (r() - 0.5) * ks, s.y, s.d + 1.0 * ks, -Math.PI / 2 + (r() - 0.5), pk), r, { hat: r() < 0.4 });       // the seller
+      const nb = Math.floor(r() * 2.6);
+      for (let j = 0; j < nb; j++) {
+        const f = frame(sx + (r() - 0.5) * 2.6 * ks, s.y, s.d - (1.5 + 1.6 * r()) * ks, Math.PI / 2 + (r() - 0.5) * 1.6, pk);
+        if (r() < 0.25) { person(out, f, r, { pose: 'stand', arms: 'pole' }); shoulderPole(out, f, r); }
+        else person(out, f, r, { hat: r() < 0.5, child: false, arms: r() < 0.3 ? 'fwd' : 'down' });
+      }
+    }
+    // a squatting seller with baskets at each end, and a child or a dog about
+    for (const e of [-1, 1]) { const f = frame(x + e * (n / 2 * sp + 1.6), s.y, s.d - 0.5, Math.PI / 2 - e * 1.2, pk); person(out, f, r, { pose: 'squat', arms: 'low' }); for (const v of [-0.5, 0.5]) { ell(out, f, 0.7, 0.2, v, 0.24, 0.17, 0.24, WICKER); ell(out, f, 0.7, 0.4, v, 0.2, 0.11, 0.2, pick(LOADS, r)); } }
+    if (r() < 0.6) dog(out, frame(x + (r() - 0.5) * n * sp, s.y, s.d - 3.6, r() * 6.3, pk), r);
+  } else if (s.what === 'talk') {
+    const n = 2 + Math.floor(r() * 2);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 2 * Math.PI + r(), f = frame(x + Math.cos(a) * 1.1 * pk, s.y, s.d + Math.sin(a) * 0.7 * pk, a + Math.PI, pk);
+      if (i === 0 && r() < 0.5) { person(out, f, r, { arms: 'pole' }); shoulderPole(out, f, r); } else person(out, f, r, { hat: r() < 0.45, arms: r() < 0.3 ? 'fwd' : 'down' });
+    }
+    if (r() < 0.5) person(out, frame(x + 2.2 * pk, s.y, s.d - 0.6, r() * 6.3, pk * 0.64), r, { child: true });
+  } else if (s.what === 'kids') {
+    // children running after a ball, a dog after the children
+    const n = 3 + Math.floor(r() * 2), yaw = r() < 0.5 ? 0 : Math.PI;
+    for (let i = 0; i < n; i++) person(out, frame(x + (i - n / 2) * 1.9 * pk + r(), s.y, s.d + (r() - 0.5) * 2.5, yaw + (r() - 0.5) * 0.8, pk * (0.58 + 0.12 * r())), r, { child: true, pose: 'walk', arms: r() < 0.5 ? 'up' : 'swing' });
+    out(x + Math.cos(yaw) * (n * 1.1 + 1.5) * pk, s.y + (0.5 + r()) * pk, -s.d, 0.17 * pk, 0.17 * pk, 0.17 * pk, 0.74, 0.16, 0.1, 1, 0, 0, 0, 1, KO, BEAT);
+    dog(out, frame(x - Math.cos(yaw) * (n * 1.0 + 1.2) * pk, s.y, s.d + 0.6, yaw, pk), r);
+  } else if (s.what === 'elders') {
+    // the old men at a low table, on stools
+    const n = 2 + Math.floor(r() * 2);
+    out(x, s.y + 0.5 * pk, -s.d, 0.42 * pk, 0.05 * pk, 0.42 * pk, 0.42, 0.32, 0.2, 1, 0, 0, 0, 1, KO, BEAT);
+    strutM(out, x, s.y, -s.d, x, s.y + 0.5 * pk, -s.d, Math.max(0.05, 0.0006 * s.d), WOOD, 1, KO, BEAT);
+    for (let i = 0; i < n; i++) {
+      const a = [Math.PI, 0, -Math.PI / 2][i] + (r() - 0.5) * 0.5, f = frame(x - Math.cos(a) * 1.05 * pk, s.y, s.d - Math.sin(a) * 0.9 * pk, a, pk);
+      person(out, f, r, { pose: 'sit', seat: 0.42, arms: 'fwd', hat: r() < 0.3, shirt: pick([[0.3, 0.42, 0.62], [0.74, 0.73, 0.68], [0.72, 0.72, 0.68], [0.6, 0.56, 0.44]], r) });
+    }
+    if (r() < 0.6) person(out, frame(x + 2.4 * pk, s.y, s.d + 0.4, Math.PI + (r() - 0.5), pk), r, { hat: false });
+  } else {
+    // chores: sweeping the yard, water from the well on a pole, hens underfoot
+    const f = frame(x, s.y, s.d, (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.6, pk);
+    person(out, f, r, { arms: 'fwd', hat: r() < 0.5 });
+    lim(out, f, f.P(0.36, 1.25, 0), f.P(1.0, 0.12, 0), 0.02, [0.5, 0.42, 0.26], 3); ell(out, f, 1.05, 0.12, 0, 0.1, 0.12, 0.2, STRAW);
+    if (r() < 0.6) { const g = frame(x + (3 + 2 * r()) * pk * (r() < 0.5 ? -1 : 1), s.y, s.d + 0.8, r() < 0.5 ? 0 : Math.PI, pk); person(out, g, r, { pose: 'walk', arms: 'pole' }); shoulderPole(out, g, r, [0.5, 0.52, 0.55]); }
+    const nh = 3 + Math.floor(r() * 4);
+    for (let i = 0; i < nh; i++) {
+      const g = frame(x + (r() - 0.5) * 7 * pk, s.y, s.d - 0.8 + (r() - 0.5) * 2.4, r() * 6.3, pk * 1.5), c = pick([[0.56, 0.3, 0.14], [0.76, 0.74, 0.68], [0.16, 0.14, 0.13]], r);
+      ell(out, g, 0, 0.17, 0, 0.13, 0.1, 0.09, c); ell(out, g, 0.12, 0.3, 0, 0.05, 0.05, 0.05, c); ell(out, g, 0.13, 0.36, 0, 0.03, 0.025, 0.02, [0.74, 0.14, 0.1]);
+    }
+  }
+  if (out.due()) yield;
+}
+// Places in a village where people can be seen from the line: in front of every house and clear
+// of the trees, 33 m out or more. Cached on the village.
+function villageSpots(W, v) {
+  if (v.spots) return v.spots;
+  const r = makeRng(hashInts(v.seed, 51)), spots = [];
+  const want = clamp(2 + Math.floor(v.houses.length / 8), 2, 6);
+  const clear = (wx, d, m = 0) => {
+    if (d < 33.5 || d > 235) return false;
+    for (const h of v.houses) { const hw = Math.max(h.w, h.dep) / 2; if (Math.abs(wx - h.wx) < hw + 2.2 + m && d > h.d - hw - (h.court ? 7 : 2.2)) return false; }
+    for (const t of v.trees) if (t.d < d + 2.5 && Math.abs(wx - t.wx) < (t.type === 'banyan' ? 8 : 5.5) + m) return false;
+    const sf = surface(W, wx, d);
+    return sf.t === T.VILLAGE || sf.t === T.LANE;
+  };
+  const add = (wx, d, what) => {
+    for (const s of spots) if (Math.abs(s.wx - wx) < 10 && Math.abs(s.d - d) < 7) return false;
+    spots.push({ kind: 'village', wx, d, y: W.H(wx, d), what, half: what === 'market' ? 12 : 5, seed: hashInts(v.seed, 53, spots.length) });
+    return true;
+  };
+  // a market along the front of the village, where there is room for one
+  if (r() < 0.45) for (let k = 0; k < 8; k++) {
+    const a = (r() - 0.5) * 1.1 * v.R, d = v.dc - v.Rd * Math.sqrt(1 - (a / v.R) ** 2) * 0.88;
+    if (clear(v.cx + a, d, 7)) { add(v.cx + a, d, 'market'); break; }
+  }
+  // the old men under the village banyan
+  const big = v.trees.find((t) => t.big);
+  if (big && r() < 0.7) { const wx = big.wx + (r() - 0.5) * 3, d = big.d - 4.5; let ok = d >= 33.5 && d < 235; for (const h of v.houses) { const hw = Math.max(h.w, h.dep) / 2; if (Math.abs(wx - h.wx) < hw + 2.2 && d > h.d - hw - 2.2) ok = false; } if (ok) add(wx, d, 'elders'); }
+  for (let k = 0; k < 70 && spots.length < want; k++) {
+    const a = (r() * 2 - 1) * 0.95 * v.R, e = Math.sqrt(1 - (a / v.R) ** 2), d = v.dc + v.Rd * e * (-0.93 + 1.2 * r() * r());
+    const what = pick(['talk', 'kids', 'chores', 'talk', 'elders', 'kids', 'chores'], r);
+    if (clear(v.cx + a, d)) add(v.cx + a, d, what);
+  }
+  v.spots = spots;
+  return spots;
+}
+
+// A rick of rice straw built round a pole.
+function hayrick(out, x, y, d, k) {
+  for (const [h, rr, sh] of [[0.8, 1.45, 0.74], [1.8, 1.4, 0.88], [2.8, 1.05, 1.0], [3.55, 0.6, 1.06]]) out(x, y + h * k, -d, rr * k * 0.62, 0.62 * k, rr * k * 0.62, 0.72 * sh, 0.6 * sh, 0.3 * sh, 1, 0, 0, 0, 1, KIND.BUILDING);
+  strutM(out, x, y + 3.6 * k, -d, x, y + 4.7 * k, -d, Math.max(0.06, 0.0006 * d), [0.3, 0.25, 0.18], 1, KIND.BUILDING, 0);
+}
+// An orchard tree: a short trunk, a round glossy crown lit from the left, fruit showing near to.
+function fruitTree(out, x, y, d, h) {
+  const u = (n) => ((h >>> n) & 15) / 15;
+  const H = 3.6 + 1.2 * u(4), R = 1.15 + 0.4 * u(12), g = [0.13 + 0.04 * u(20), 0.29 + 0.07 * u(20), 0.1];
+  strutM(out, x, y - 0.1, -d, x, y + H * 0.5, -d, Math.max(0.1, 0.0008 * d), [0.26, 0.21, 0.16], 1, KIND.TREE, 0);
+  const cy = y + H * 0.64;
+  out(x, cy - R * 0.1, -d, R, R * 0.8, R * 0.9, g[0], g[1], g[2], 1, 0, 0, 0, 1, KIND.TREE);
+  if (d > 170) return;
+  out(x - R * 0.4, cy + R * 0.35, -(d - R * 0.3), R * 0.6, R * 0.5, R * 0.6, g[0] * 1.7, g[1] * 1.5, g[2] * 1.5, 1, 0, 0, 0, 1, KIND.TREE);
+  out(x + R * 0.45, cy + R * 0.1, -(d - R * 0.2), R * 0.55, R * 0.5, R * 0.55, g[0] * 1.25, g[1] * 1.2, g[2] * 1.2, 1, 0, 0, 0, 1, KIND.TREE);
+  if (d > 115) return;
+  const fc = (h & 3) === 0 ? [0.74, 0.7, 0.26] : [0.8, 0.46, 0.1];
+  for (let k = 0; k < 4; k++) out(x + (u(k * 4 + 2) - 0.5) * R * 2.2, cy + (u(k * 4 + 9) - 0.55) * R * 1.5, -(d - R * 0.95), 0.17, 0.17, 0.17, fc[0], fc[1], fc[2], 1, 0, 0, 0, 1, KIND.TREE);
+}
+// What stands on the ground that is not paddy: the orchard trees in their rows, the bamboo and
+// broad trees along the edge of a wood and the dark canopy behind them, the leaves and flowers of
+// the lotus, a lift net over a fish pond. Everything from world hashes, panel by panel.
+function* zoneProps(ctx, out, W, dLo, dHi, sites) {
+  const xa = ctx.x0 - 16, xb = ctx.x0 + ctx.length + 16;
+  for (let k = 1; k + 1 < W.rows.length; k++) {
+    const q = W.rows[k];
+    if (q.D > Math.min(dHi, 430)) break;
+    if (W.rows[k + 1].D < dLo) continue;
+    const dm0 = q.D + q.gap / 2;
+    for (let j = Math.floor(xa / q.W) - 1, j1 = Math.floor(xb / q.W) + 1; j <= j1; j++) {
+      const f = panelInfo(W, k, j);
+      if (f.t !== P.POND && f.t < P.LOTUS) continue;
+      const xl = colEdge(W, k, j, dm0), xr = colEdge(W, k, j + 1, dm0);
+      if (xr < xa || xl > xb) continue;
+      const cx = (xl + xr) / 2, d0 = edgeD(W, k, cx), d1 = edgeD(W, k + 1, cx);
+      const inPanel = (wx, d, m) => { const s = surface(W, wx, d); return s.t === T.PADDY && s.k === k && s.j === j && s.edge > m; };
+      if (f.t === P.ORCHARD) {
+        const sp = 6.5;
+        if (out.n + ((xr - xl) * (d1 - d0) / (sp * sp)) * 8 > out.limit) continue;
+        for (let gd = Math.ceil((d0 - 3) / sp) * sp; gd < d1 + 3; gd += sp) {
+          if (gd < dLo || gd >= dHi) continue;
+          for (let gx = Math.ceil(Math.max(xl - 5, xa) / sp) * sp; gx < Math.min(xr + 5, xb); gx += sp) {
+            const h = hashInts(W.ws, 1632, Math.round(gx / sp), Math.round(gd / sp));
+            const tx = gx + ((h & 255) / 255 - 0.5) * 1.6, td = gd + (((h >>> 8) & 255) / 255 - 0.5) * 1.6;
+            if ((h >>> 16) % 11 === 0 || !inPanel(tx, td, 1.3)) continue;
+            let gap = false;
+            for (const s of sites) if (Math.abs(tx - s.wx) < s.half + 2 && td > s.d - 9 && td < s.d + 2) gap = true;
+            if (!gap) fruitTree(out, tx - ctx.x0, SURF.y, td, h);
+          }
+          if (out.due()) yield;
+        }
+      } else if (f.t === P.WOOD) {
+        const front = k < 2 || panelInfo(W, k - 1, j0of(W, k - 1, cx, d0 - 2)).t !== P.WOOD;
+        if (front && d0 < 85) {
+          // the edge of the wood: a rank of bamboo and broad trees drawn whole, a second rank behind
+          for (let gx = Math.ceil(Math.max(xl, xa) / 8) * 8; gx < Math.min(xr, xb); gx += 8) {
+            for (let rank = 0; rank < 2; rank++) {
+              const tr = makeRng(hashInts(W.ws, 1633, k, Math.round(gx / 8), rank));
+              const tx = gx + (tr() - 0.5) * 5 + rank * 4, td = d0 + 3 + rank * 7 + tr() * 3;
+              if (td < dLo || td >= dHi || !inPanel(tx, td, 1.5) || hides(sites, tx, td, 7)) continue;
+              const y = SURF.y - 0.2, nk = rank ? 0.16 : lerp(0.42, 0.28, smooth(45, 120, td));
+              if (out.n + treeSplats(out, td, 12) * 1.5 * nk > out.limit) continue;      // whole or not at all
+              note(ctx, 'wood-tree', tx, td);
+              if (tr() < 0.6) yield* bamboo(ctx, out, tx - ctx.x0, td, { rng: tr, height: 10 + 6 * tr(), width: 6 + 5 * tr(), y, n: Math.round(treeSplats(out, td, 11) * 1.5 * nk) });
+              else yield* broadCrown(ctx, out, tx - ctx.x0, td, { rng: tr, height: 11 + 7 * tr(), crown: 10 + 7 * tr(), y, n: Math.round(treeSplats(out, td, 13) * nk) });
+            }
+          }
+        }
+        // the canopy behind: dark groves, lighter where bamboo stands among the trees
+        const dm = (d0 + d1) / 2, dep = (d1 - d0) / 2;
+        if (dm >= dLo && dm < dHi) for (let gx = Math.ceil(Math.max(xl, xa) / 24) * 24; gx < Math.min(xr, xb); gx += 24) {
+          const tr = makeRng(hashInts(W.ws, 1634, k, Math.round(gx / 24)));
+          if (!inPanel(gx, dm, 0) || hides(sites, gx, dm, 12)) continue;
+          const gs = detail(out, dm, 1.0), gh = 5.5 + 2.5 * tr(), gn = Math.round(clamp(14 * gh * 3 / (gs * gs), 16, 260));
+          if (out.n + gn > out.limit) continue;
+          note(ctx, 'wood-grove', gx, dm);
+          yield* blob(ctx, out, gx - ctx.x0 + (tr() - 0.5) * 6, SURF.y + gh * 1.05, dm + (front ? 4 : 0), 15, gh, Math.max(4, dep * 0.75), { n: gn, color: tr() < 0.35 ? C.bambooLeaf : C.camphor, rng: tr, kind: KIND.HEDGE, inner: 0.3, amb: 0.55 });
+        }
+      } else if (f.t === P.LOTUS) {
+        if (d0 > 135 || d1 < dLo) continue;
+        const r = makeRng(hashInts(W.ws, 1635, k, j));
+        const n = Math.min(150, Math.round((xr - xl) * (d1 - d0) / 3));
+        if (out.n + n * 1.2 > out.limit) continue;
+        for (let i = 0; i < n; i++) {
+          const wx = xl + r() * (xr - xl), d = d0 + r() * (d1 - d0), R = 0.45 + 0.35 * r(), up = 0.3 + 0.6 * r(), fl = r(), tl = r() - 0.5;
+          const c = jitter([0.22, 0.45, 0.22], r, 0.16), qq = quatUpTo(tl * 0.5, 1, 0.35);
+          if (wx < xa || wx > xb || d < dLo || !inPanel(wx, d, 0.8)) continue;
+          out(wx - ctx.x0, SURF.y + up, -d, R, 0.05, R * 0.85, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], KIND.GROUND);
+          if (fl < 0.2) out(wx - ctx.x0 + 0.3, SURF.y + up + 0.45, -d, 0.2, 0.25, 0.2, fl < 0.05 ? 0.78 : 0.76, fl < 0.05 ? 0.76 : 0.42, fl < 0.05 ? 0.72 : 0.54, 1, 0, 0, 0, 1, KO, BEAT);
+        }
+      } else {
+        // a fish pond: now and then a square lift net hung from four bowed canes on a long pole
+        const r = makeRng(hashInts(W.ws, 1636, k, j));
+        const bd = d0 + 1, wx = cx + (r() - 0.5) * 4;
+        if (r() > 0.22 || bd < dLo || bd > 140 || bd >= dHi || xr - xl < 12 || d1 - d0 < 9 || !inPanel(wx, bd + 5, 2)) continue;
+        const x = wx - ctx.x0, y = SURF.y, pr = Math.max(0.05, 0.0006 * bd), cane = [0.52, 0.47, 0.28];
+        const hx = x + 0.6, hy = y + 6.2, hz = -(bd + 5);
+        strutM(out, x - 0.4, y + 0.3, -bd, hx, hy, hz, pr * 1.3, cane, 5, KO, BEAT);
+        const cs = [[-2.7, -2.4], [2.7, -2.4], [2.7, 2.4], [-2.7, 2.4]].map(([a, b]) => [hx + a, y + 1.3, hz - b]);
+        for (const c of cs) { strutM(out, hx, hy, hz, (hx + c[0]) / 2 + (c[0] - hx) * 0.25, hy - 1.3, (hz + c[2]) / 2, pr, cane, 2, KO, BEAT); strutM(out, (hx + c[0]) / 2 + (c[0] - hx) * 0.25, hy - 1.3, (hz + c[2]) / 2, c[0], c[1], c[2], pr, cane, 2, KO, BEAT); }
+        for (let i = 0; i < 4; i++) { const a = cs[i], b = cs[(i + 1) % 4]; strutM(out, a[0], a[1], a[2], (a[0] + b[0]) / 2, a[1] - 0.5, (a[2] + b[2]) / 2, pr * 0.8, [0.62, 0.62, 0.56], 2, KO, BEAT); strutM(out, (a[0] + b[0]) / 2, a[1] - 0.5, (a[2] + b[2]) / 2, b[0], b[1], b[2], pr * 0.8, [0.62, 0.62, 0.56], 2, KO, BEAT); }
+        for (const [i, m] of [[0, 2], [1, 3]]) strutM(out, cs[i][0], cs[i][1], cs[i][2], cs[m][0], cs[m][1] - 0.2, cs[m][2], pr * 0.7, [0.62, 0.62, 0.56], 3, KO, BEAT);
+        person(out, frame(x - 1.3, y + 0.3, bd - 0.2, 0.4, PK * farK(bd)), r, { arms: 'fwd' });
+        note(ctx, 'liftnet', wx, bd);
+      }
+      if (out.due()) yield;
+    }
+  }
+}
+// The column of row k that holds world x at distance d.
+function j0of(W, k, wx, d) { return colAt(W, k, wx, d); }
+
+// ---------------------------------------------------------------------------------------------
+// Things to see in the distance: a pagoda on a wooded hill, a temple with its gate on the flank
+// of a tower, a pavilion or a slim pagoda on a crag, a white-walled village at a tower's foot,
+// an old wall with watch towers along a ridge. Built well over life size, in proportion to their
+// distance, so that they read through the haze at 400 to 2500 m. At most one to a 1300 m cell of
+// the line, hashed from the world; drawn whole, before the towers take their share of the band.
+// ---------------------------------------------------------------------------------------------
+const LMCELL = 1300;
+const STONE = [0.6, 0.58, 0.53];
+function landmark(W, i) {
+  return cache(W.misc, 'L' + i, () => {
+    const r = makeRng(hashInts(W.ws, 1701, i));
+    if (r() > 0.85) return null;
+    const x0 = i * LMCELL, u = r(), seed = hashInts(W.ws, 1702, i);
+    let what = u < 0.2 ? 'temple' : u < 0.38 ? 'crag' : u < 0.56 ? 'hamlet' : u < 0.78 ? 'wall' : 'pagoda';
+    if (what === 'temple' || what === 'crag' || what === 'hamlet') {
+      // these belong to a tower: the most prominent one of this cell that suits
+      let best = null, bs = 0;
+      for (const t of towersIn(W, x0, x0 + LMCELL, 420, what === 'hamlet' ? 1700 : 2500)) {
+        if (t.wx < x0 || t.wx >= x0 + LMCELL || t.R < 40) continue;
+        if (what === 'crag' && (t.H > 0.36 * t.d || t.d < 600)) continue;      // its top must be in the frame
+        const sc = (t.R * t.H) / (t.d * t.d);
+        if (sc > bs) { bs = sc; best = t; }
+      }
+      if (best) return { what, t: best, wx: best.wx, d: best.d, seed };
+      what = 'pagoda';
+    }
+    // a hill of its own on the valley floor, clear of the river, the villages and the towers
+    for (let k = 0; k < 8; k++) {
+      const wx = x0 + (0.15 + 0.7 * r()) * LMCELL, d = 460 + 1500 * Math.pow(r(), 1.5);
+      const rn = riverN(W, wx);
+      if (d > rn - 150 && d < rn + riverW(W, wx) + 150) continue;
+      if (villageAt(W, wx, d) || villageAt(W, wx, d - 120)) continue;
+      let hit = false;
+      for (const t of towersIn(W, wx - 600, wx + 600, d - 700, d + 400)) if (Math.abs(t.wx - wx) < t.R * 1.3 + (what === 'wall' ? 140 : 110) && t.d - t.R * 1.3 < d + 130) hit = true;
+      if (!hit) return { what, wx, d, seed };
+    }
+    return null;
+  });
+}
+// The summit of a tower (the lean is replayed from the first draws of karstTower).
+function towerTop(W, t) {
+  const r = makeRng(t.seed);
+  r(); r(); r(); r();
+  const lx = (r() - 0.5) * 0.22, ld = (r() - 0.5) * 0.12;
+  return { wx: t.wx + lx * t.H, d: t.d + ld * t.H, y: W.H(t.wx, t.d) - 1.5 + t.H };
+}
+
+// A hall in the Chinese manner: a stone plinth, red or ochre walls with dark bays between the
+// columns, and a great tiled roof, hipped, hollow in the slope, its eaves swept up at the corners.
+// Drawn for the distance, from the front and both ends, in splats of size s.
+//   o: { w, dep, h (wall height), roofH, wall, tile, s, kind, open (a pavilion: columns and no walls),
+//        double (a second, smaller storey with its own roof) }
+function* hall(ctx, out, x, y, d, o) {
+  const w = o.w, dep = o.dep || w * 0.5, h = o.h || w * 0.3, rh = o.roofH || w * 0.32, s = o.s, kind = o.kind != null ? o.kind : KIND.BUILDING;
+  const wall = o.wall || [0.62, 0.2, 0.14], tile = o.tile || C.tile, over = 0.2 * w, zf = -(d - dep / 2);
+  const nu = Math.max(3, Math.round(w / (s * 1.5))), nv = Math.max(2, Math.round(h / (s * 1.5))), bays = Math.max(3, Math.round(w / (h * 0.9))) | 1;
+  for (let i = 0; i < nu; i++) out(x + ((i + 0.5) / nu - 0.5) * w * 1.1, y + h * 0.05, zf + 0.3 * s, (w * 1.1 / nu) * 0.62, h * 0.07, s * 0.4, STONE[0], STONE[1], STONE[2], 1, 0, 0, 0, 1, kind);
+  for (let i = 0; i < nu; i++) {
+    for (let j = 0; j < nv; j++) {
+      const a = (i + 0.5) / nu, b = (j + 0.5) / nv, ph = Math.abs(((a * bays) % 1) - 0.5);
+      const c = (o.open ? ph < 0.36 : ph < 0.3 && b < 0.72) ? [0.1, 0.08, 0.07] : faceTone(wall, 0, 1);
+      out(x + (a - 0.5) * w, y + h * (0.1 + 0.9 * b), zf, (w / nu) * 0.62, (h * 0.9 / nv) * 0.62, s * 0.3, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+    }
+  }
+  const nd = Math.max(2, Math.round(dep / (s * 1.5)));
+  for (const sg of [-1, 1]) {
+    const c = o.open ? [0.14, 0.1, 0.09] : faceTone(wall, sg, 0);
+    for (let i = 0; i < nd; i++) for (let j = 0; j < nv; j++) out(x + sg * w / 2, y + h * (0.1 + 0.9 * (j + 0.5) / nv), -(d - dep / 2 + (i + 0.5) / nd * dep), s * 0.3, (h * 0.9 / nv) * 0.62, (dep / nd) * 0.62, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+  }
+  if (out.due()) yield;
+  // the roof
+  const run = dep / 2 + over, ey = y + h - over * 0.22, rise = rh + over * 0.22, slope = Math.hypot(rise, run);
+  const mu = Math.max(5, Math.round((w + 2 * over) / (s * 1.35))), mv = Math.max(2, Math.round(slope / (s * 1.35)));
+  const qf = quatPitch(Math.atan2(rise, run)), ridge = w * 0.3;
+  const eave = (u, t) => (1 - t) * (1 - t) * Math.pow(Math.abs(u), 3) * rh * 0.5 - Math.sin(Math.PI * t) * rh * 0.1;
+  for (let i = 0; i < mu; i++) {
+    for (let j = 0; j < mv; j++) {
+      const u = ((i + 0.5) / mu) * 2 - 1, t = (j + 0.5) / mv, half = lerp(w / 2 + over, ridge, t);
+      const c = shade(tile, u * 0.3, 0.7, 0.6, 0.6, 0.55);
+      out.q(x + u * half, ey + t * rise + eave(u, t), -(d - run * (1 - t)), (half / mu) * 1.3, s * 0.3, (slope / mv) * 0.62, c, 1, qf, kind);
+    }
+  }
+  const md = Math.max(2, Math.round((2 * run) / (s * 1.6))), se = Math.hypot(rise, w / 2 + over - ridge), te = Math.atan2(rise, w / 2 + over - ridge);
+  for (const sg of [-1, 1]) {
+    const qe = quatUpTo(sg * Math.sin(te), Math.cos(te), 0), c = shade(tile, sg * 0.75, 0.6, 0.1, 0.55, 0.6);
+    for (let i = 0; i < md; i++) for (let j = 0; j < mv; j++) {
+      const v = ((i + 0.5) / md) * 2 - 1, t = (j + 0.5) / mv;
+      out.q(x + sg * lerp(w / 2 + over, ridge, t), ey + t * rise + eave(v, t), -(d + v * run * (1 - t)), (se / mv) * 0.62, s * 0.3, (run * (1 - t) / md) * 1.3 + s * 0.2, c, 1, qe, kind);
+    }
+  }
+  // the ridge, its ends turned up, and the dark line of the eaves with their upswept corners
+  const lr = Math.max(s * 0.4, rh * 0.07);
+  strutM(out, x - ridge, ey + rise, -d, x + ridge, ey + rise, -d, lr, C.ridge, Math.max(2, Math.round(mu / 2)), kind, 0);
+  for (const sg of [-1, 1]) strutM(out, x + sg * ridge * 0.86, ey + rise, -d, x + sg * ridge * 1.12, ey + rise + rh * 0.2, -d, lr, C.ridge, 1, kind, 0);
+  const ne = Math.max(6, Math.round(mu * 0.8)), fz = -(d - run);
+  for (let i = 0; i < ne; i++) {
+    const u0 = (i / ne) * 2 - 1, u1 = ((i + 1) / ne) * 2 - 1, hw = w / 2 + over;
+    strutM(out, x + u0 * hw, ey + eave(u0, 0), fz, x + u1 * hw, ey + eave(u1, 0), fz, lr * 0.8, [0.14, 0.14, 0.15], 1, kind, 0);
+  }
+  if (out.due()) yield;
+  if (o.double) yield* hall(ctx, out, x, y + h + rise * 0.42, d, { ...o, double: false, w: w * 0.6, dep: dep * 0.6, h: h * 0.5, roofH: rh * 0.85 });
+}
+// A village house for the distance: white wall, grey roof, both gables.
+function farHouse(out, x, y, d, w, h, s, wall, kind) {
+  const nu = Math.max(2, Math.round(w / (s * 1.6))), dep = w * 0.6, rh = h * 0.62, q = quatPitch(Math.atan2(rh, dep / 2));
+  for (let i = 0; i < nu; i++) {
+    const cx = x + ((i + 0.5) / nu - 0.5) * w, c = mul3(wall, 1.02), dark = (i * 7 + nu) % 3 === 0;
+    out(cx, y + h * 0.5, -(d - dep / 2), (w / nu) * 0.62, h * 0.5, s * 0.3, c[0] * (dark ? 0.82 : 1), c[1] * (dark ? 0.82 : 1), c[2] * (dark ? 0.82 : 1), 1, 0, 0, 0, 1, kind);
+    const t = shade(C.tile, 0, 0.75, 0.6, 0.6, 0.55);
+    out.q(cx * 1 + (cx - x) * 0.12, y + h + rh * 0.45, -(d - dep * 0.3), (w * 1.12 / nu) * 0.66, s * 0.3, dep * 0.42, t, 1, q, kind);
+  }
+  for (const sg of [-1, 1]) { const c = faceTone(wall, sg, 0); out(x + sg * w / 2, y + h * 0.6, -d, s * 0.3, h * 0.6, dep * 0.45, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind); }
+  strutM(out, x - w * 0.56, y + h + rh * 0.95, -d, x + w * 0.56, y + h + rh * 0.95, -d, Math.max(s * 0.3, h * 0.05), C.ridge, 2, kind, 0);
+}
+function* landmarks(ctx, out, W, dLo, dHi) {
+  const lim = out.limit;
+  out.limit = Infinity;
+  for (let i = Math.floor((ctx.x0 - 700) / LMCELL), i1 = Math.floor((ctx.x0 + ctx.length + 700) / LMCELL); i <= i1; i++) {
+    const m = landmark(W, i);
+    if (!m || m.d < dLo || m.d >= dHi) continue;
+    const r = makeRng(m.seed), d = m.d, sc = clamp(d / 450, 1, 3.4), yb = W.H(m.wx, d) - 1, s = Math.max(0.3, detail(out, d, 0.42));
+    note(ctx, 'far-' + m.what, m.wx, d);
+    if (m.what === 'pagoda') {
+      // (terracotta or whitewash, to stand out from the grey limestone behind)
+      const Hp = Math.min(125, 44 * Math.pow(sc, 0.95));
+      yield* moundWith(ctx, out, W, m.wx, d, 50 * Math.sqrt(sc) + 15 * r(), (20 + 8 * r()) * Math.pow(sc, 0.7), r, 'pagoda', 0, KIND.HEDGE, Hp, r() < 0.6 ? [0.7, 0.38, 0.25] : [0.8, 0.78, 0.7]);
+    } else if (m.what === 'temple') {
+      // on a wooded shoulder part-way up the tower: a terrace wall, the great hall with a hall
+      // either side, and the gate lower down with the stair climbing to it
+      const t = m.t, S = clamp(0.05 * t.d, 30, 90), a = (r() - 0.5) * 0.7, up = Math.max(S * 0.9, (0.16 + 0.12 * r()) * t.H);
+      const x = t.wx + Math.sin(a) * t.R * 0.85 - ctx.x0, td = t.d - Math.cos(a) * t.R * 0.9 - S * 0.5, y0 = W.H(t.wx, t.d) - 1, ty = y0 + up;
+      const ns = Math.round(clamp((S * 3.2 * up) / (s * s * 9), 40, 500));
+      yield* blob(ctx, out, x, y0 + up * 0.48, td + S * 0.2, S * 1.7, up * 0.56, S * 0.9, { n: ns, color: C.veg, rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.55 });
+      const wn = Math.max(6, Math.round((S * 2.6) / (s * 1.5)));
+      for (let k = 0; k < wn; k++) for (let j = 0; j < 2; j++) { const c = mul3(STONE, 0.78 + 0.2 * j + 0.08 * r()); out(x + ((k + 0.5) / wn - 0.5) * S * 2.6, ty - S * (0.2 - 0.12 * j), -(td - S * 0.62), (S * 2.6 / wn) * 0.62, S * 0.075, s * 0.3, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING); }
+      const wall = r() < 0.6 ? [0.64, 0.2, 0.14] : [0.74, 0.56, 0.22], tile = r() < 0.35 ? [0.62, 0.5, 0.16] : C.tile;
+      yield* hall(ctx, out, x, ty, td, { w: S, dep: S * 0.5, h: S * 0.26, roofH: S * 0.3, wall, tile, s, double: true });
+      for (const sg of [-1, 1]) yield* hall(ctx, out, x + sg * S * 0.98, ty, td - S * 0.12, { w: S * 0.5, dep: S * 0.34, h: S * 0.2, roofH: S * 0.2, wall, tile, s });
+      // the gate, lower down, and the stair
+      const gx = x + (r() - 0.5) * S * 0.6, gy = ty - Math.min(up * 0.55, S * 0.75), gd = td - S * 1.05, pr = Math.max(s * 0.35, S * 0.02);
+      yield* hall(ctx, out, gx, gy, gd, { w: S * 0.42, dep: S * 0.16, h: S * 0.24, roofH: S * 0.16, wall, tile, s, open: true });
+      strutM(out, gx, gy + S * 0.02, -gd, x, ty - S * 0.1, -(td - S * 0.6), pr, [0.7, 0.68, 0.62], 4, KIND.BUILDING, 0);
+      strutM(out, gx, gy, -gd, gx + (r() - 0.5) * S, y0 + 1, -(gd - S * 0.5), pr, [0.7, 0.68, 0.62], 4, KIND.BUILDING, 0);
+      // dark cypresses beside the halls
+      for (const sg of [-1.55, 1.5, -0.55]) out(x + sg * S, ty + S * 0.32, -(td - S * 0.3), S * 0.09, S * 0.3, S * 0.09, 0.07, 0.15, 0.08, 1, 0, 0, 0, 1, KIND.HEDGE);
+    } else if (m.what === 'crag') {
+      // on the very top of a tower
+      const tp = towerTop(W, m.t), S = clamp(0.024 * tp.d, 14, 50), x = tp.wx - ctx.x0, y = tp.y - m.t.H * 0.03;
+      yield* blob(ctx, out, x, y, tp.d, S * 0.9, S * 0.22, S * 0.6, { n: Math.round(clamp((S * S) / (s * s * 5), 12, 120)), color: C.veg, rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.6 });
+      if (r() < 0.5) yield* hall(ctx, out, x, y + S * 0.1, tp.d, { w: S, dep: S * 0.7, h: S * 0.36, roofH: S * 0.34, wall: [0.5, 0.16, 0.12], s, open: true, double: r() < 0.5 });
+      else yield* pagoda(ctx, out, x, tp.d, { rng: r, height: S * 2.3, tiers: 5, y: y + S * 0.1, s, color: r() < 0.5 ? [0.7, 0.38, 0.25] : [0.8, 0.78, 0.7] });
+    } else if (m.what === 'hamlet') {
+      // a village on the rising ground at the foot of a tower: white walls and grey roofs in
+      // ranks one above another among dark trees, the ancestral hall in the middle
+      const t = m.t, hs = clamp(t.d / 260, 1.8, 4.2), hw = 10.5 * hs, hh = 5.4 * hs, rise = 0.045 * t.H, y0 = W.H(t.wx, t.d) - 0.5 + rise;
+      const cx = t.wx + (r() - 0.5) * t.R * 0.7, d0 = t.d - t.R * 1.45 - hw * 1.9;
+      const sf = surface(W, cx, d0);
+      if (sf.t === T.RIVER || sf.t === T.GRAVEL || d0 < dLo + 20) continue;
+      const rows = 3, per = 4 + Math.floor(r() * 3), sh = Math.max(s, hw / 7);
+      // (on a green rise, so that it stands clear of the mist on the valley floor)
+      yield* blob(ctx, out, cx - ctx.x0, y0 - rise * 0.55, d0 + hw * 0.8, per * hw * 1.0, rise * 0.75, hw * 1.8, { n: Math.round(clamp((per * hw * rise * 4) / (s * s * 16), 20, 300)), color: [0.2, 0.31, 0.13], rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.6 });
+      yield* blob(ctx, out, cx - ctx.x0, y0 + hh * 1.5, d0 + hw * 2.4, per * hw * 0.8, hh * 1.6, hw, { n: Math.round(clamp((per * hw * hh * 5) / (s * s * 16), 30, 400)), color: C.camphor, rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.55 });
+      for (let j = rows - 1; j >= 0; j--) {
+        for (let k = 0; k < per + (j % 2); k++) {
+          const hx = cx + (k - (per - 1 + (j % 2)) / 2) * hw * 1.32 + (r() - 0.5) * hw * 0.3 - ctx.x0, hd = d0 + j * hw * 0.85 + (r() - 0.5) * 3, hy = y0 + j * hh * 0.62;
+          const big = j === 0 && k === Math.floor(per / 2), u = r();
+          if (!big && u < 0.14) { out(hx, hy + hh * 0.9, -hd, hw * 0.42, hh * 0.9, hw * 0.4, 0.09, 0.17, 0.08, 1, 0, 0, 0, 1, KIND.HEDGE); continue; }
+          if (big) yield* hall(ctx, out, hx, hy, hd - hw * 0.3, { w: hw * 1.5, dep: hw * 0.8, h: hh * 0.9, roofH: hh * 0.75, wall: [0.74, 0.72, 0.66], s });
+          else farHouse(out, hx, hy, hd, hw * (0.8 + 0.3 * r()), hh * (u < 0.5 ? 1.25 : 0.85), sh, WALLS[Math.floor(r() * 3)], KIND.BUILDING);
+        }
+        if (out.due()) yield;
+      }
+    } else {
+      // a ridge with an old wall running along its crest from watch tower to watch tower
+      const Lh = Math.min(520, (210 + 160 * r()) * Math.sqrt(sc)), Hr = Math.min(135, (34 + 26 * r()) * Math.pow(sc, 0.8)), Rd = Hr * 0.9, salt = Math.floor(r() * 9999);
+      const hAt = (u) => Hr * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(u), 2.3)), 0.85) * (0.78 + 0.3 * noise1(u * 2.1 + 5, salt));
+      const nb = 16;
+      for (let k = 0; k < nb; k++) {
+        const u = ((k + 0.5) / nb) * 2 - 1, hk = hAt(u);
+        if (hk < 3) continue;
+        const gn = Math.round(clamp(((Lh / nb) * 3 * hk * 3) / (s * s * 14), 14, 220));
+        yield* blob(ctx, out, m.wx + u * Lh - ctx.x0, yb + hk * 0.42, d + Rd * 0.3, (Lh / nb) * 1.5, hk * 0.6, Rd * 0.5, { n: gn, color: k % 3 ? C.camphor : C.veg, rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.55 });
+      }
+      const wh = clamp(0.011 * d, 5, 20), nw = 44, wz = -(d - Rd * 0.12);
+      const py = (u) => yb + hAt(u) * 0.97 + wh * 0.2;
+      for (let k = 0; k < nw; k++) {
+        const u0 = (k / nw) * 1.7 - 0.85, u1 = ((k + 1) / nw) * 1.7 - 0.85, xa = m.wx + u0 * Lh - ctx.x0, xb = m.wx + u1 * Lh - ctx.x0, ya = py(u0), yc = py(u1);
+        const q = quatXTo(xb - xa, yc - ya, 0), c = mul3(STONE, 0.9 + 0.12 * ((k * 5) % 3) / 2);
+        out((xa + xb) / 2, (ya + yc) / 2, wz, Math.hypot(xb - xa, yc - ya) * 0.6, wh * 0.5, s * 0.3, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.BUILDING);
+        if (k % 2 === 0) out((xa + xb) / 2, (ya + yc) / 2 + wh * 0.62, wz, Math.hypot(xb - xa, yc - ya) * 0.28, wh * 0.16, s * 0.3, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.BUILDING);
+      }
+      const tw = clamp(0.019 * d, 9, 36);
+      for (const u of [-0.62, 0.02 + (r() - 0.5) * 0.3, 0.6]) {
+        const tx = m.wx + u * Lh - ctx.x0, ty = py(u) - wh * 0.4, th = tw * (u > -0.3 && u < 0.3 ? 1.5 : 1.05), nt = Math.max(2, Math.round(tw / (s * 1.5))), nh = Math.max(2, Math.round(th / (s * 1.5)));
+        for (let a = 0; a < nt; a++) for (let b = 0; b < nh; b++) { const c = mul3(faceTone(STONE, 0, 1), b === 0 ? 0.85 : 1); out(tx + ((a + 0.5) / nt - 0.5) * tw, ty + ((b + 0.5) / nh) * th, wz + tw * 0.35, (tw / nt) * 0.62, (th / nh) * 0.62, s * 0.3, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING); }
+        for (const sg of [-1, 1]) { const c = faceTone(STONE, sg, 0); for (let b = 0; b < nh; b++) out(tx + sg * tw / 2, ty + ((b + 0.5) / nh) * th, wz, s * 0.3, (th / nh) * 0.62, tw * 0.35, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING); }
+        out(tx, ty + th * 0.55, wz + tw * 0.36, tw * 0.12, th * 0.12, s * 0.3, 0.1, 0.09, 0.08, 1, 0, 0, 0, 1, KIND.BUILDING);
+        yield* hall(ctx, out, tx, ty + th, d - Rd * 0.12, { w: tw * 1.15, dep: tw * 0.8, h: tw * 0.34, roofH: tw * 0.36, wall: [0.5, 0.16, 0.12], s, open: true });
+      }
+    }
+    if (out.due()) yield;
+  }
+  out.limit = lim;
+}
+
+// An old stone bridge of many arches over the river, here and there where the river runs near
+// the line: humped, askew to the line so that its flank shows, with people crossing.
+const BRCELL = 2700;
+function riverBridge(W, i) {
+  return cache(W.misc, 'B' + i, () => {
+    const r = makeRng(hashInts(W.ws, 1751, i));
+    if (r() > 0.75) return null;
+    const wx = (i + 0.2 + 0.6 * r()) * BRCELL, rn = riverN(W, wx), rw = riverW(W, wx);
+    if (rn < 42 || rn + rw > 245 || villageAt(W, wx, rn - 25) || villageAt(W, wx, rn + rw + 25)) return null;
+    return { wx, d0: rn - 10, d1: rn + rw + 10, skew: (r() < 0.5 ? -1 : 1) * (0.7 + 0.35 * r()), seed: hashInts(W.ws, 1752, i) };
+  });
+}
+function* bridge(ctx, out, W, b) {
+  const r = makeRng(b.seed), dm = (b.d0 + b.d1) / 2, hy = Math.hypot(1, b.skew), L = (b.d1 - b.d0) * hy;
+  const ux = b.skew / hy, ud = 1 / hy, px = ud, pd = -ux;            // along the bridge, and across it
+  const wy = W.H(b.wx, dm) - 0.7, yb = W.H(b.wx, b.d0), nA = Math.max(3, Math.round(L / 23)), span = L / nA, HW = 2.4;
+  const s = Math.max(0.3, detail(out, dm, 1.1)), q = quatXTo(ux, 0, -ud);
+  const at = (t, off) => [b.wx - ctx.x0 + (t - 0.5) * L * ux + off * px, dm + (t - 0.5) * L * ud + off * pd];
+  const deck = (t) => yb + 1.0 + 7.2 * (1 - (2 * t - 1) ** 2), stone = mul3(STONE, 0.86);
+  const inArch = (t, y) => {
+    const k = Math.min(nA - 1, Math.floor(t * nA)), tc = (k + 0.5) / nA, a = span * 0.39, ar = Math.min(a * 1.1, deck(tc) - wy - 1.3);
+    return ar > 1 && ((t - tc) * L / a) ** 2 + ((y - wy) / ar) ** 2 < 1 ? ar : 0;
+  };
+  note(ctx, 'bridge', b.wx, dm);
+  const nu = Math.max(8, Math.round(L / (s * 1.4)));
+  for (const sg of [-1, 1]) {
+    const tone = faceTone(stone, sg * px, -sg * pd);
+    for (let i = 0; i < nu; i++) {
+      const t = (i + 0.5) / nu, top = deck(t) + 1.0, nv = Math.max(2, Math.round((top - wy) / (s * 1.4))), [x, d] = at(t, sg * HW);
+      for (let j = 0; j < nv; j++) {
+        const y = wy + ((j + 0.5) / nv) * (top - wy);
+        if (inArch(t, y)) continue;
+        const c = mul3(tone, (y > top - 1.2 ? 1.08 : 0.86 + 0.16 * noise2(t * L / 3, y / 1.5, 91)) * (0.96 + 0.08 * r()));
+        out(x, y, -d, (L / nu) * 0.62, ((top - wy) / nv) * 0.62, s * 0.3, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.BUILDING);
+      }
+      if (out.due()) yield;
+    }
+  }
+  // the vault of each arch, in shadow, and the roadway
+  for (let k = 0; k < nA; k++) {
+    const tc = (k + 0.5) / nA, a = span * 0.39, ar = Math.min(a * 1.1, deck(tc) - wy - 1.3), na = Math.max(5, Math.round((Math.PI * a) / (s * 1.6)));
+    if (ar <= 1) continue;
+    for (let i = 0; i < na; i++) {
+      const an = ((i + 0.5) / na) * Math.PI, [x, d] = at(tc + (Math.cos(an) * a) / L, 0), c = mul3(STONE, 0.3 + 0.14 * Math.sin(an));
+      out(x, wy + Math.sin(an) * ar, -d, Math.max(s, (Math.PI * a) / na * 0.6), Math.max(s, (Math.PI * ar) / na * 0.45), HW, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.BUILDING);
+    }
+  }
+  for (let i = 0; i < nu; i += 2) { const t = (i + 1) / nu, [x, d] = at(t, 0); out(x, deck(t), -d, (L / nu) * 1.3, 0.12, HW, 0.5, 0.49, 0.45, 1, q[0], q[1], q[2], q[3], KIND.BUILDING); }
+  if (!isNight(ctx)) {
+    const n = 1 + Math.floor(r() * 3), yaw = Math.atan2(ud, ux) + (r() < 0.5 ? 0 : Math.PI);
+    for (let i = 0; i < n; i++) {
+      const t = 0.3 + 0.4 * r(), [x, d] = at(t, (r() - 0.5) * 2), f = frame(x, deck(t) + 0.1, d, yaw, PK * farK(d));
+      if (r() < 0.6) { person(out, f, r, { pose: 'walk', arms: 'pole' }); shoulderPole(out, f, r); } else person(out, f, r, { pose: 'walk' });
+    }
+  }
+}
+
+// Where the people and animals of a chunk stand: every site is hashed from the world (a paddy
+// panel, a stretch of bund, lane or bank, a village), so both chunks that share one agree. The
+// trees and bamboo placed afterwards keep clear of them (hides()).
+function lifeSites(ctx, W) {
+  const M = 45, xa = ctx.x0 - M, xb = ctx.x0 + ctx.length + M, sites = [];
+  const busy = (wx) => 0.55 + 0.9 * noise1(wx / 800, W.ws + 1500);
+  // the paddies: more to a panel where the strip between the line and the river is narrow
+  for (let k = 0; k + 1 < W.rows.length; k++) {
+    const q = W.rows[k];
+    if (q.D > 215) break;
+    if (W.rows[k + 1].D < 30) continue;
+    const dm0 = q.D + q.gap / 2;
+    for (let j = Math.floor(xa / q.W) - 1, j1 = Math.floor(xb / q.W) + 1; j <= j1; j++) {
+      const xl = colEdge(W, k, j, dm0), xr = colEdge(W, k, j + 1, dm0), cx = (xl + xr) / 2;
+      if (cx < xa || cx >= xb) continue;
+      const r = makeRng(hashInts(W.ws, 1501, k, j));
+      const d0 = edgeD(W, k, cx), d1 = edgeD(W, k + 1, cx), d = Math.max(34, lerp(d0, d1, 0.35 + 0.3 * r()));
+      if (d > d1 - 2.2 || d > 215) continue;
+      const rn = riverN(W, cx), rf = rn + riverW(W, cx);
+      let p;
+      if (d < rn - 9) { if (d > 135) continue; p = 0.065 * Math.pow(100 / clamp(Math.min(rn - 9, 135) - 32, 12, 100), 0.8); }
+      else if (d > rf + 9) p = 0.05;
+      else continue;
+      if (r() > p * busy(cx) * (panelInfo(W, k, j).t === P.PASTURE ? 1.8 : 1)) continue;
+      const s = surface(W, cx, d);
+      if (s.t !== T.PADDY || s.k !== k || s.j !== j || s.info.t === P.WOOD) continue;
+      const hw = (xr - xl) / 2 - 1.2;
+      if (hw < 2.5) continue;
+      sites.push({ kind: 'paddy', wx: cx, d, y: s.y, pt: s.info.t, hw, half: Math.min(hw, 9), seed: hashInts(W.ws, 1502, k, j) });
+    }
+  }
+  // the bunds between the rows, which run along the line and show whoever walks them broadside
+  for (let k = 1; k < W.rows.length; k++) {
+    const q = W.rows[k];
+    if (q.D < 33) continue;
+    if (q.D > 132) break;
+    for (let i = Math.floor(xa / 90), i1 = Math.floor(xb / 90); i <= i1; i++) {
+      const r = makeRng(hashInts(W.ws, 1511, k, i)), wx = (i + r()) * 90;
+      if (wx < xa || wx >= xb || r() > 0.075 * busy(wx)) continue;
+      const d = edgeD(W, k, wx);
+      if (d < 34 || d > riverN(W, wx) - 9) continue;
+      if (surface(W, wx, d - 1.5).t !== T.PADDY || surface(W, wx, d + 1.5).t !== T.PADDY || surface(W, wx - 4, d + 1.5).t !== T.PADDY || surface(W, wx + 4, d - 1.5).t !== T.PADDY) continue;
+      sites.push({ kind: 'bund', wx, d, y: W.H(wx, d) + 0.32 + 0.0024 * d, half: 6, seed: hashInts(W.ws, 1512, k, i) });
+    }
+  }
+  // the lane
+  for (let i = Math.floor(xa / 70), i1 = Math.floor(xb / 70); i <= i1; i++) {
+    const r = makeRng(hashInts(W.ws, 1521, i)), wx = (i + 0.1 + 0.8 * r()) * 70;
+    if (wx < xa || wx >= xb || r() > 0.55) continue;
+    if (!laneOn(W, wx) || !laneOn(W, wx - 8) || !laneOn(W, wx + 8)) continue;
+    const ld = laneD(W, wx);
+    if (ld < 35 || villageAt(W, wx, ld) || streamAt(W, wx - 5, ld) || streamAt(W, wx + 5, ld)) continue;
+    sites.push({ kind: 'lane', wx, d: ld - 1.0, y: W.H(wx, ld) + 0.42, half: 7, seed: hashInts(W.ws, 1522, i) });
+  }
+  // a bridge over the river
+  for (let i = Math.floor((xa - 60) / BRCELL), i1 = Math.floor((xb + 60) / BRCELL); i <= i1; i++) {
+    const b = riverBridge(W, i);
+    if (b && b.wx > xa - 60 && b.wx < xb + 60) sites.push({ kind: 'bridge', wx: b.wx - b.skew * (b.d1 - b.d0) / 2, far: b.wx + b.skew * (b.d1 - b.d0) / 2, d: b.d0, half: 12, b });
+    if (b && b.wx > xa - 60 && b.wx < xb + 60) sites.push({ kind: 'clear', wx: b.wx, d: b.d1, deep: b.d1, half: Math.abs(b.skew) * (b.d1 - b.d0) / 2 + 8 });
+  }
+  // the near bank of the river
+  for (let i = Math.floor(xa / 75), i1 = Math.floor(xb / 75); i <= i1; i++) {
+    const r = makeRng(hashInts(W.ws, 1531, i)), wx = (i + r()) * 75;
+    if (wx < xa || wx >= xb) continue;
+    const rn = riverN(W, wx);
+    if (rn < 37 || rn > 175 || r() > (rn < 60 ? 0.9 : 0.5) * busy(wx) || streamAt(W, wx, rn - 3) || sites.some((s) => s.kind === 'bridge' && Math.abs(wx - s.wx) < 20)) continue;
+    sites.push({ kind: 'bank', wx, d: rn - 1.7, y: W.H(wx, rn - 1.7), half: 6, seed: hashInts(W.ws, 1532, i) });
+  }
+  // the villages
+  for (let i = Math.floor(xa / VCELL) - 1, i1 = Math.floor(xb / VCELL) + 1; i <= i1; i++) {
+    const v = village(W, i);
+    if (!v || v.dc - v.Rd > 240) continue;
+    for (const s of villageSpots(W, v)) if (s.wx >= xa && s.wx < xb) sites.push(s);
+  }
+  return sites;
+}
+// Would a tree w wide at (wx, d) stand in front of somebody?
+function hides(sites, wx, d, w) {
+  for (const s of sites) if (Math.abs(wx - s.wx) < w + s.half && d > s.d - (s.deep || 26) && d < s.d + 4) return true;
+  return false;
+}
+function* life(ctx, out, W, sites) {
+  const night = isNight(ctx);
+  for (const s of sites) {
+    if (s.kind === 'bridge') { yield* bridge(ctx, out, W, s.b); continue; }
+    if (s.kind === 'clear') continue;
+    if (s.wx < ctx.x0 - s.half - 12 || s.wx > ctx.x0 + ctx.length + s.half + 12) continue;
+    const r = makeRng(s.seed);
+    if (s.kind === 'lane') yield* laneScene(ctx, out, s, r, night);
+    else if (s.kind === 'bank') yield* bankScene(ctx, out, s, r, night);
+    else if (night) continue;
+    else if (s.kind === 'paddy') yield* paddyScene(ctx, out, s, r);
+    else if (s.kind === 'bund') yield* bundScene(ctx, out, s, r);
+    else yield* villageScene(ctx, out, s, r);
+  }
+}
+// An `out` that keeps nothing: runs an emitter for its random draws only.
+function muteOut(out) {
+  const m = () => false;
+  m.n = 0; m.limit = Infinity; m.ctx = out.ctx; m.density = out.density; m.detailK = out.detailK; m.due = () => false; m.left = () => 0; m.q = () => false;
+  return m;
 }
 
 // A thin straight member from a to b with a motion class (kit.js strut() has none).
@@ -1288,26 +2338,25 @@ function strutM(out, ax, ay, az, bx, by, bz, r, c, n, kind, move) {
 // arched cane canopy flying a pennant (MOVE.FLAG). x is chunk-local, y the water level.
 function* boat(ctx, out, x, y, d, r, night) {
   const B = MOVE.BEAT, K = KIND.OTHER, dir = r() < 0.5 ? -1 : 1;
-  const len = 6 + 3 * r();
+  const len = 7 + 3 * r();
   // the wake and ripple, left still
   out(x, y + 0.03, -(d - 0.6), len * 0.75, 0.03, 0.5, 0.68, 0.71, 0.72, 0.55, 0, 0, 0, 1, KIND.GROUND);
   if (r() < 0.55) {
-    // raft: bamboo poles side by side
-    for (const dz of [-0.4, 0, 0.4]) {
-      const k = 0.9 + 0.2 * r();
-      out(x, y + 0.12, -(d + dz), len / 2, 0.1, 0.2, 0.52 * k, 0.46 * k, 0.3 * k, 1, 0, 0, 0, 1, K, B);
+    // raft: long bamboo poles side by side, the bow turned up; the fisherman standing with his
+    // pole, his cormorants perched along the bow (drawn larger than life, as all the people are)
+    const kk = farK(d), f = frame(x, y + 0.14, d, dir > 0 ? 0 : Math.PI, PK * kk), hl = (len / 2 + 1) / PK;
+    for (const v of [-0.42, -0.21, 0, 0.21, 0.42]) {
+      const c = mul3([0.56, 0.5, 0.32], 0.85 + 0.3 * r());
+      lim(out, f, f.P(-hl, 0.02, v), f.P(hl, 0.02, v), 0.07, c, 4);
+      lim(out, f, f.P(hl, 0.02, v), f.P(hl + 0.75, 0.42, v), 0.06, c, 1);
     }
-    const fx = x - dir * len * 0.22;
-    out(fx, y + 0.95, -d, 0.22, 0.5, 0.18, 0.12, 0.13, 0.17, 1, 0, 0, 0, 1, K, B);          // dark clothes
-    out(fx, y + 1.55, -d, 0.12, 0.13, 0.12, 0.42, 0.31, 0.24, 1, 0, 0, 0, 1, K, B);          // head
-    out(fx, y + 1.7, -d, 0.45, 0.07, 0.45, 0.74, 0.65, 0.45, 1, 0, 0, 0, 1, K, B);           // straw hat
-    strutM(out, fx - dir * 0.4, y + 2.9, -d, fx + dir * 1.6, y - 0.4, -(d - 0.3), 0.045, [0.4, 0.36, 0.24], 5, K, B);   // the pole
-    for (let k = 0; k < 1 + Math.floor(r() * 3); k++) {
-      const bx = x + dir * (len * 0.3 + k * 0.7);
-      out(bx, y + 0.5, -d, 0.16, 0.22, 0.14, 0.06, 0.06, 0.07, 1, 0, 0, 0, 1, K, B);        // cormorant
-      out(bx + dir * 0.08, y + 0.82, -d, 0.06, 0.12, 0.06, 0.06, 0.06, 0.07, 1, 0, 0, 0, 1, K, B);
-    }
-    if (night) yield* lamp(ctx, out, x + dir * len * 0.45, y + 1.4, d, [1, 0.62, 0.3], { size: 0.12, halo: 1 });
+    const fp = sub(f, -hl * 0.45, 0, f.k, 0, 0.08);
+    person(out, fp, r, { arms: 'fwd', shirt: pick([[0.14, 0.16, 0.24], [0.2, 0.3, 0.5], [0.4, 0.36, 0.3]], r) });
+    lim(out, fp, fp.P(0.1, 2.6, 0.3), fp.P(1.1, -0.5, 0.75), 0.02, [0.46, 0.42, 0.26], 5);       // the pole
+    ell(out, f, -hl * 0.05, 0.3, 0.1, 0.27, 0.22, 0.27, WICKER);                                     // the fish basket
+    const nc = 2 + Math.floor(r() * 3);
+    for (let k = 0; k < nc; k++) cormorant(out, sub(f, hl * (0.3 + 0.22 * k), (k % 2 ? 0.25 : -0.2), 1.7 * kk, r() < 0.3 ? Math.PI : 0, 0.08), k === nc - 1 && r() < 0.6);
+    if (night) yield* lamp(ctx, out, x + dir * len * 0.45, y + 1.6, d, [1, 0.62, 0.3], { size: 0.12, halo: 1 });
   } else {
     // long-tail boat: dark hull, an arched canopy of cane matting, a pennant at the stern
     const hc = [0.16, 0.14, 0.12];
@@ -1323,6 +2372,7 @@ function* boat(ctx, out, x, y, d, r, night) {
     const sx = x - dir * len * 0.46;
     strutM(out, sx, y + 0.5, -d, sx, y + 2.6, -d, 0.035, [0.3, 0.28, 0.24], 3, K, B);
     out(sx - dir * 0.4, y + 2.45, -d, 0.38, 0.14, 0.03, 0.74, 0.12, 0.09, 1, 0, 0, 0, 1, K, MOVE.FLAG);
+    person(out, frame(sx + dir * 0.9, y + 0.55, d, dir > 0 ? 0 : Math.PI, PK * farK(d)), r, { pose: 'sit', seat: 0.1, arms: 'fwd' });
     if (night) yield* lamp(ctx, out, x, y + 1.7, d - 0.8, [1, 0.8, 0.5], { size: 0.1, halo: 1 });
   }
   if (out.due()) yield;
@@ -1447,6 +2497,18 @@ function* villages(ctx, out, W, dLo, dHi, opts = {}) {
         if (!hs.concrete && u > 0.78) yield* smoke(ctx, out, hs.wx - ctx.x0 + hs.w * 0.25, y + hs.storeys * 2.9 + 0.6 + hs.dep * 0.27, hs.d, makeRng(hashInts(hs.seed, 35)));
       }
     }
+    if (opts.small) {
+      // rice-straw ricks on the dry ground in front of the village
+      const hr = makeRng(hashInts(v.seed, 61)), nh = 3 + Math.floor(hr() * 4);
+      for (let q = 0; q < nh; q++) {
+        const a = (hr() * 2 - 1) * 1.1 * v.R, wx = v.cx + a, d = v.dc - v.Rd * Math.sqrt(Math.max(0, 1 - (a / (1.15 * v.R)) ** 2)) - 4 - 9 * hr(), kk = 1.2 + 0.3 * hr();
+        if (d < 31 || d < dLo || d >= dHi || wx < ctx.x0 - 4 || wx > ctx.x0 + ctx.length + 4) continue;
+        const sf = surface(W, wx, d);
+        if (sf.t !== T.PADDY || sf.info.t === P.WATER || sf.info.t === P.YOUNG || sf.info.t === P.POND || sf.info.t === P.LOTUS) continue;
+        note(ctx, 'rick', wx, d);
+        hayrick(out, wx - ctx.x0, sf.y, d, kk);
+      }
+    }
     for (const t of v.trees) {
       if (t.d < dLo || t.d >= dHi) continue;
       if (t.wx < ctx.x0 - 30 || t.wx > ctx.x0 + ctx.length + 30) continue;
@@ -1473,7 +2535,7 @@ function* villages(ctx, out, W, dLo, dHi, opts = {}) {
 
 // The lane: a pale concrete strip raised a little between the paddies, with a darker bank on its
 // camera side, trees and utility poles along it.
-function* laneProps(ctx, out, W, dLo, dHi) {
+function* laneProps(ctx, out, W, dLo, dHi, sites = []) {
   const Pc = 30;
   for (const { i, wx0 } of cellsAround(ctx, Pc, 2)) {
     if (!laneOn(W, wx0 + Pc / 2)) continue;
@@ -1492,7 +2554,7 @@ function* laneProps(ctx, out, W, dLo, dHi) {
     // trees along the lane, and a utility pole now and then
     if (r() < 0.55) {
       const wx = wx0 + r() * Pc, ld = laneD(W, wx) + 3.5 + r() * 2;
-      if (!villageAt(W, wx, ld)) yield* broadCrown(ctx, out, wx - ctx.x0, ld, { rng: r, height: 9 + 6 * r(), crown: 9 + 6 * r(), y: W.H(wx, ld) - 0.2 });
+      if (!villageAt(W, wx, ld) && !hides(sites, wx, ld, 8)) yield* broadCrown(ctx, out, wx - ctx.x0, ld, { rng: r, height: 9 + 6 * r(), crown: 9 + 6 * r(), y: W.H(wx, ld) - 0.2 });
     }
     if ((i & 1) === 0) {
       const wx = wx0 + 3, ld = laneD(W, wx) + 2.8, y = W.H(wx, ld);
@@ -1551,7 +2613,7 @@ function* bunds(ctx, out, W, dLo, dHi) {
 }
 
 // River furniture: bamboo along the banks, rafts and small boats as thin dark strokes.
-function* riverProps(ctx, out, W, dLo, dHi) {
+function* riverProps(ctx, out, W, dLo, dHi, sites = []) {
   const Pc = 13;
   for (const { i, wx0 } of cellsAround(ctx, Pc, 6)) {
     const wx = wx0 + Pc / 2;
@@ -1564,12 +2626,29 @@ function* riverProps(ctx, out, W, dLo, dHi) {
       if (bd < dLo || bd >= dHi) { r(); r(); r(); continue; }
       if (r() > 0.25 + 0.7 * smooth(0.35, 0.7, grove) * (side ? 1 : 0.6)) { r(); r(); continue; }
       const bx = wx0 + r() * Pc;
-      yield* bamboo(ctx, out, bx - ctx.x0, bd + r() * 6, { rng: r, height: 9 + 6 * r(), width: 6 + 6 * r(), y: W.H(bx, bd) - 0.2 });
+      // a clump that would hide somebody on the bank is left out (drawn to nothing, so the draws stay the same)
+      // (and the near bank is kept clear in front of the whole of a bridge)
+      const o = sites.some((s) => (s.kind === 'bridge' ? (side === 0 ? bx > Math.min(s.wx, s.far) - 16 && bx < Math.max(s.wx, s.far) + 16 : Math.abs(bx - s.far) < 12) : s.what === 'market' ? s.d > bd && Math.abs(bx - s.wx) < 17 : side === 0 && s.kind === 'bank' && Math.abs(bx - s.wx) < 11)) ? muteOut(out) : out;
+      yield* bamboo(ctx, o, bx - ctx.x0, bd + r() * 6, { rng: r, height: 9 + 6 * r(), width: 6 + 6 * r(), y: W.H(bx, bd) - 0.2 });
+    }
+    // reeds along the water's edge, in stretches: tall pale stems with tan plumes
+    const reed = noise1(wx / 420, W.ws + 1621);
+    if (reed > 0.5 && rn - 1 >= dLo && rn + 3 < dHi && !sites.some((s) => (s.kind === 'bridge' ? wx > Math.min(s.wx, s.far) - 18 && wx < Math.max(s.wx, s.far) + 18 : s.kind === 'bank' && Math.abs(wx - s.wx) < 14))) {
+      const rr = worldRng(ctx, 1622, i), nr = 5 + Math.floor(5 * smooth(0.5, 0.8, reed));
+      for (let k = 0; k < nr; k++) {
+        const bx = wx0 + Pc * (0.5 + (rr() - 0.5) * rr() * 1.6), bd = riverN(W, bx) + (rr() - 0.45) * 3.6, hgt = 1.6 + 1.8 * rr(), y = W.H(bx, bd) - 0.6;
+        for (let m = 0; m < 3; m++) {
+          const lx = (rr() - 0.5) * 1.3, c = jitter(mix3([0.3, 0.42, 0.17], [0.44, 0.5, 0.22], rr()), rr, 0.12), q = quatXTo(lx * 0.5, 1, (rr() - 0.5) * 0.3);
+          out(bx - ctx.x0 + lx, y + hgt * 0.45, -bd, hgt * 0.45, 0.2, 0.2, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.HEDGE);
+        }
+        if (rr() < 0.45) out(bx - ctx.x0 + (rr() - 0.5) * 0.6, y + hgt * 0.95, -bd, 0.16, 0.3, 0.16, 0.6, 0.54, 0.36, 1, 0, 0, 0, 1, KIND.HEDGE);
+      }
     }
     // a raft or a boat (a separate world rng, so the bamboo above stays where it was)
     const rb = worldRng(ctx, 634, i);
-    if (rb() < 0.09) {
+    if (rb() < 0.1) {
       const bx = wx0 + rb() * Pc, bd = lerp(rn, rf, 0.15 + 0.7 * rb());
+      if (bd >= dLo && bd < dHi) note(ctx, 'boat', bx, bd);
       if (bd >= dLo && bd < dHi && bx >= ctx.x0 - 6 && bx < ctx.x0 + ctx.length + 6) yield* boat(ctx, out, bx - ctx.x0, W.H(bx, bd) - 0.7, bd, rb, isNight(ctx));
     }
     if (out.due()) yield;
@@ -1600,17 +2679,24 @@ function* streamProps(ctx, out, W, dLo, dHi) {
       yield* archBridge(ctx, out, bx - ctx.x0, ld, { rng: r, span: s.w + 2.5, y: W.H(bx, ld) - 0.6 });
     }
   }
-  // buffalo: wallowing in the flooded panels, grazing the bunds and the dry fields
-  for (const { i, wx0 } of cellsAround(ctx, 60, 6)) {
+  // buffalo scattered over the valley floor, out to the far side of the river: lying in the
+  // flooded panels, grazing the dry ones
+  for (const { i, wx0 } of cellsAround(ctx, 60, 14)) {
     const r = worldRng(ctx, 641, i);
     if (r() > 0.3) continue;
     const wx = wx0 + r() * 60, d = 40 + r() * 220;
     if (d < dLo || d >= dHi) continue;
     const s = surface(W, wx, d);
     if (s.t !== T.PADDY && s.t !== T.BANK) continue;
-    const wet = s.t === T.PADDY && (s.info.t === P.WATER || s.info.t === P.YOUNG || s.info.t === P.POND);
-    const n = 1 + Math.floor(r() * 3);
-    for (let k = 0; k < n; k++) yield* buffalo(ctx, out, wx - ctx.x0 + k * 4 * (r() - 0.3), s.y - (wet ? 0.25 : 0.05), d + (r() - 0.5) * 4, r, wet);
+    const wet = s.t === T.PADDY && (s.info.t === P.WATER || s.info.t === P.YOUNG || s.info.t === P.POND || s.info.t === P.LOTUS);
+    const n = 1 + Math.floor(r() * 3), bk = BK * farK(d), sy = s.y;
+    note(ctx, wet ? 'buffalo-wet' : 'buffalo-dry', wx, d);
+    for (let k = 0; k < n; k++) {
+      const bx = wx - ctx.x0 + k * 4.8 * farK(d), bd = d + (r() - 0.5) * 4, yaw = (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.6;
+      if (wet && r() < 0.6) { buffalo(out, frame(bx, sy - 0.02, bd, yaw, bk), r, { pose: 'wallow', egret: r() < 0.25 }); ripple(out, bx, sy, bd, 2.3 * bk, 0.55 * bk); }
+      else { const wade = wet ? 0.28 : 0; buffalo(out, frame(bx, sy - wade * bk, bd, yaw, bk), r, { wade, pose: wet || r() < 0.35 ? 'stand' : 'graze', egret: r() < 0.3 }); if (wet) ripple(out, bx, sy, bd, 1.9 * bk, 0.5 * bk); }
+    }
+    if (out.due()) yield;
   }
 }
 
@@ -1694,7 +2780,7 @@ function* terraces(ctx, out, W, dLo, dHi, K) {
     // drawn whole even when the band is short (a hill cut off part-way is a loose cloud of strips)
     const lim = out.limit;
     out.limit = Infinity;
-    yield* terraceHill(ctx, out, t.wx - ctx.x0, t.d, { radius: t.R, radiusD: t.Rd, height: t.Hh, rng: r, n, y: W.H(t.wx, t.d) - 0.4 });
+    yield* terraceHill(ctx, out, t.wx - ctx.x0, t.d, { radius: t.R, radiusD: t.Rd, height: t.Hh, rng: r, n, y: W.H(t.wx, t.d) - 0.4, tea: t.tea });
     out.limit = lim;
   }
 }
@@ -1711,14 +2797,14 @@ function* mounds(ctx, out, W, dLo, dHi) {
     out.limit = lim;
   }
 }
-function* moundWith(ctx, out, W, wx, d, R, Hm, r, what, wrong, kind) {
+function* moundWith(ctx, out, W, wx, d, R, Hm, r, what, wrong, kind, Hp = 0, body) {
   const y = W.H(wx, d) - 1;
   // enough splats that the wooded dome has a clean top edge, not a soft cloud
   const n = Math.max(60, Math.round(treeSplats(out, d, R * 1.4) * 2.2));
   yield* blob(ctx, out, wx - ctx.x0, y + Hm * 0.45, d, R, Hm * 0.6, R * 0.6, { n, color: C.camphor, rng: r, kind, inner: 0.3, amb: 0.55 });
   if (what === 'pagoda') {
     const tiers = 5 + Math.floor(r() * 3) + Math.round(wrong * 3);
-    yield* pagoda(ctx, out, wx - ctx.x0, d, { rng: r, height: (26 + 12 * r()) * (1 + wrong * 0.4), tiers, y: y + Hm * 0.95, lean: wrong * 0.06, color: wrong ? mix3([0.66, 0.63, 0.56], [0.6, 0.5, 0.52], wrong) : undefined, kind: kind === KIND.SURREAL ? KIND.SURREAL : KIND.BUILDING });
+    yield* pagoda(ctx, out, wx - ctx.x0, d, { rng: r, height: Hp || (26 + 12 * r()) * (1 + wrong * 0.4), s: Hp ? Math.max(0.3, detail(out, d, 0.5)) : undefined, tiers, y: y + Hm * 0.95, lean: wrong * 0.06, color: wrong ? mix3([0.66, 0.63, 0.56], [0.6, 0.5, 0.52], wrong) : body, kind: kind === KIND.SURREAL ? KIND.SURREAL : KIND.BUILDING });
   } else {
     yield* pavilion(ctx, out, wx - ctx.x0, d, { rng: r, size: 6 + 2 * r(), y: y + Hm * 0.95, kind: kind === KIND.SURREAL ? KIND.SURREAL : KIND.BUILDING });
   }
@@ -1934,15 +3020,21 @@ function* near(ctx, emit) {
   const W = world(ctx);
   const dz = ctx.dials || {};
   out.limit = ctx.count * 0.58;
+  // the people and the working animals first, so that no budget is too small for them
+  const sites = lifeSites(ctx, W);
+  yield* life(ctx, out, W, sites);
   yield* bunds(ctx, out, W, ctx.zNear, ctx.zFar);
-  yield* laneProps(ctx, out, W, ctx.zNear, ctx.zFar);
+  yield* laneProps(ctx, out, W, ctx.zNear, ctx.zFar, sites);
   yield* crossingLanes(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* streamProps(ctx, out, W, ctx.zNear, ctx.zFar);
   // the river's boats and bamboo and the terraced hills before the villages, so a big village
   // never leaves them out
-  yield* riverProps(ctx, out, W, ctx.zNear, ctx.zFar);
+  yield* riverProps(ctx, out, W, ctx.zNear, ctx.zFar, sites);
   yield* terraces(ctx, out, W, ctx.zNear, ctx.zFar, 40000);
   yield* villages(ctx, out, W, ctx.zNear, ctx.zFar, { small: true });
+  // the orchards, woods and lotus after the villages, each panel whole or not at all, so that
+  // they never take a village's houses
+  yield* zoneProps(ctx, out, W, 26, ctx.zFar, sites);
   // scattered field trees and bamboo clumps by the paddies
   for (const { i, wx0 } of cellsAround(ctx, 45, 12)) {
     const r = worldRng(ctx, 1101, i);
@@ -1950,6 +3042,7 @@ function* near(ctx, emit) {
     const wx = wx0 + r() * 45, d = 40 + r() * 250;
     const s = surface(W, wx, d);
     if (s.t !== T.PADDY && s.t !== T.BANK) continue;
+    if (hides(sites, wx, d, 9)) continue;                                // not in front of somebody
     if (out.n + treeSplats(out, d, 14) * 1.3 > out.limit) continue;      // whole or not at all
     if (r() < 0.45) yield* bamboo(ctx, out, wx - ctx.x0, d, { rng: r, height: 8 + 5 * r(), width: 5 + 5 * r(), y: s.y - 0.2 });
     else yield* broadCrown(ctx, out, wx - ctx.x0, d, { rng: r, height: 9 + 7 * r(), crown: 10 + 8 * r(), y: s.y - 0.2 });
@@ -1970,6 +3063,8 @@ function* mid(ctx, emit) {
   out.limit = Infinity;
   if ((dz.topology || 0) > 0) yield* floatingTowers(ctx, out, W, 1700, 800, 2600, dz.topology, 1);
   if ((dz.scale || 0) > 0) yield* needles(ctx, out, W, 2100, 900, 2800, dz.scale, 1);
+  // the landmarks: whole, and the towers below fit themselves to what is left
+  yield* landmarks(ctx, out, W, ctx.zNear, ctx.zFar);
   out.limit = ctx.count * 0.9;
   // the towers take most of the band: the valley floor from 300 m out is a thin strip on screen.
   // (the same K in the far band, so towers keep their grain across 3000 m)
@@ -1977,6 +3072,7 @@ function* mid(ctx, emit) {
   yield* mounds(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* terraces(ctx, out, W, ctx.zNear, ctx.zFar, 30000);
   yield* villages(ctx, out, W, ctx.zNear, ctx.zFar, { coarse: 1.3 });
+  yield* zoneProps(ctx, out, W, ctx.zNear, ctx.zFar, []);
   // groves of dark trees and bamboo standing on the valley floor between the towers
   for (const { i, wx0 } of cellsAround(ctx, 90, 30)) {
     const r = worldRng(ctx, 1201, i);
@@ -2120,8 +3216,9 @@ export const karstBiome = {
   shares: { trackside: 0.15, near: 0.39, mid: 0.27, far: 0.19 },
   // The towers and hills are the scenery, so they stay still on the beat. What answers it: houses,
   // pagodas and pavilions (BUILDING), trees and bamboo clumps (TREE; hill crowns, groves and mounds
-  // are HEDGE), and, tagged MOVE.BEAT by hand, boats and fishermen on the river, buffalo in the
-  // paddies and the lanterns strung in the villages. Lights always do.
+  // are HEDGE), and, tagged MOVE.BEAT by hand, the people and animals (in the fields, on the
+  // bunds, the lane, the river bank and the rafts, in the villages), market awnings, lotus flowers
+  // and the lanterns strung in the villages. Lights always do.
   beatKinds: [KIND.BUILDING, KIND.TREE],
 
 
@@ -2129,4 +3226,4 @@ export const karstBiome = {
 };
 
 // for scripts that inspect the layout
-export const _debug = { world, surface, towersIn, riverN, riverW, village, terraceSite, moundSite, stream, streamX, laneD, laneOn };
+export const _debug = { world, surface, towersIn, riverN, riverW, village, terraceSite, moundSite, stream, streamX, laneD, laneOn, landUse: (W, wx) => ({ ...landUse(W, wx) }), landmark, riverBridge };
