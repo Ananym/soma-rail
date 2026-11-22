@@ -16,6 +16,10 @@
 //
 // Light: every window, lamp and string of lights is a real light (a channel >= 0.97, KIND.LIGHT) and
 // is lit at every hour (the clock runs on after a chunk is built), with faint pools on the snow.
+// No light hangs by itself: by night the tint takes everything that is not a light down to a fifth,
+// so each lamp is fixed to something that still reads then, and lights it by hand (the wall under a
+// station lamp, the snow under a lantern, the wall round a far window). A lamp on a dark post over
+// the skyline is a light floating in the sky; so is a station the brow of its own hill hides.
 //
 // The beat: buildings and lights (beatKinds); skaters, skiers, sledgers, animals, the sleigh and
 // its bells and the decorated tree tag their own splats with MOVE.BEAT. Roof snow is not BUILDING
@@ -23,14 +27,14 @@
 // flutter (MOVE.FLAG), and the snow falls (MOVE.FALL).
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
-//   scale     firs as tall as towers; enormous snowflakes hanging still in the air like lanterns
+//   scale     firs as tall as towers; enormous glowing snowflakes hanging still in the air like lanterns
 //   topology  cabins floating above their own snow-holes; reindeer walking through the air
 //   logic     the village church's spire repeating along the line, each copy a little more wrong
 import { hashInts, hashString, makeRng, noise1, noise2, fbm2 } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, detail, shade, jitter, mul3, mix3, smooth,
-  clamp, lerp, norm3, quatYaw, quatPitch, quatRoll, quatMul, quatAxis, quatUpTo, quatXTo, rotY, SUN,
+  clamp, lerp, norm3, quatYaw, quatPitch, quatRoll, quatMul, quatAxis, quatUpTo, quatXTo, rotY, SUN, strut,
 } from './kit.js';
 
 const PAL = {
@@ -233,6 +237,15 @@ function skiHill(W, i) {
     s.ld0 = Math.max(s.ld0, rf + 45);
     if (s.ld0 > s.ld1 - 130) return null;
     s.px = (s.lx0 + s.lx1) / 2 + (r() < 0.5 ? -1 : 1) * (s.pisteW * 0.5 + 25);
+    // the valley station (bx, bd) stands at the foot of the hill, on the lift's own line carried on
+    // down: on the river's far bank where the hill rises from it, otherwise low on the face
+    let bd = Math.min(s.ld0, 150);
+    for (let k = 0; k < 3; k++) {
+      const bx = s.lx0 + (s.lx1 - s.lx0) * (bd - s.ld0) / (s.ld1 - s.ld0);
+      const rn = riverN(W, bx);
+      if (rn < s.dc) bd = Math.min(s.ld0, rn + riverW(W, bx) + 16);
+    }
+    s.bd = bd; s.bx = s.lx0 + (s.lx1 - s.lx0) * (bd - s.ld0) / (s.ld1 - s.ld0);
     return s;
   });
 }
@@ -247,16 +260,22 @@ function skiBump(s, wx, d) {
   return e < 2.6 ? s.Hh * Math.exp(-1.6 * e) : 0;
 }
 // the piste: a cleared strip from the top down the face toward the line
+function pisteC(s, d) { return lerp(s.px + (s.lx0 - s.lx1) * 0.3, s.px, clamp((d - s.ld0 + 20) / (s.dc - s.ld0), 0, 1)); }
 function pisteU(s, wx, d) {
   const t = clamp((d - s.ld0 + 20) / (s.dc - s.ld0), 0, 1);
-  const pc = lerp(s.px + (s.lx0 - s.lx1) * 0.3, s.px, t);
-  return Math.abs(wx - pc) / (s.pisteW * (0.7 + 0.5 * (1 - t)) * 0.5);
+  return Math.abs(wx - pisteC(s, d)) / (s.pisteW * (0.7 + 0.5 * (1 - t)) * 0.5);
 }
 function onPiste(s, wx, d) { return d > s.ld0 - 30 && d < s.dc + 10 && pisteU(s, wx, d) < 1; }
-function onLiftLine(s, wx, d) {
-  if (d < s.ld0 - 10 || d > s.ld1 + 10) return false;
-  const t = (d - s.ld0) / (s.ld1 - s.ld0);
-  return Math.abs(wx - lerp(s.lx0, s.lx1, t)) < 9;
+// The ground cleared for the lift: a swathe from the valley station to the top one (wider round the
+// two stations, where the huts stand), and the whole strip between the lift and the piste, so the
+// two share one open ski field. A lift in a swathe of its own was hidden by the trees in front of
+// it from everywhere but straight up the swathe.
+function onLiftLine(W, s, wx, d) {
+  const td = liftGeom(W, s).td;
+  if (d < s.bd - 16 || d > td + 16) return false;
+  const xl = lerp(s.lx0, s.lx1, (d - s.ld0) / (s.ld1 - s.ld0));
+  if (Math.abs(wx - xl) < (d < s.bd + 12 || d > td - 12 ? 24 : 9)) return true;
+  return d > s.ld0 - 30 && (wx - xl) * (wx - pisteC(s, d)) < 0;
 }
 
 // --- villages: a church, a square with a decorated tree, houses round it ---
@@ -600,7 +619,7 @@ function surface(W, wx, d) {
       if (b) { S.t = T.BROOK; return S; }
     }
     const sk = B.ski;
-    if (sk && d > 60 && d < 1100 && (onPiste(sk, wx, d) || onLiftLine(sk, wx, d))) { S.t = T.PISTE; return S; }
+    if (sk && d > 60 && d < 1100 && (onPiste(sk, wx, d) || onLiftLine(W, sk, wx, d))) { S.t = T.PISTE; return S; }
     if (d > 60 && d < 500 && B.villages.length && villageIn(B, wx, d)) { S.t = T.YARD; return S; }
     const sh = B.sled;
     if (sh && d > 30 && d < 300 && Math.abs(wx - sh.cx) < sh.rx * 0.9 && d < sh.dc + 10) { S.t = T.SNOW; S.f = -1; return S; }
@@ -846,12 +865,16 @@ export function* birchBare(ctx, out, x, d, opts = {}) {
   const lean = (rng() - 0.5) * 0.08;
   const tr = Math.max(thin(d, 0.9), H * 0.014);
   if (n <= 6) {
-    out(x + lean * H * 0.25, y0 + H * 0.3, -d, tr, H * 0.28, tr, C.birch[0] * 0.9, C.birch[1] * 0.9, C.birch[2] * 0.9, 1, 0, 0, 0, 1, kind);
-    for (let k = 1; k < n; k++) out(x + lean * H * 0.7 + (rng() - 0.5) * Wc * 0.3, y0 + H * (0.6 + 0.1 * (k % 3)), -d, Wc * 0.26, H * 0.2, Wc * 0.2, C.twig[0], C.twig[1], C.twig[2], 0.55, 0, 0, 0, 1, kind);
+    // far: the trunk from the snow up into the crown, grey enough to show against snow (a white one
+    // did not, and left the crown hanging in the air as a dark puff), and a few puffs of twigs on it
+    const fr = Math.max(tr, 0.0008 * d);
+    out(x + lean * H * 0.3, y0 + H * 0.36, -d, fr, H * 0.36, fr, 0.44, 0.42, 0.4, 1, 0, 0, 0, 1, kind);
+    for (let k = 1; k < n; k++) out(x + lean * H * 0.7 + (rng() - 0.5) * Wc * 0.3, y0 + H * (0.6 + 0.1 * (k % 3)), -d, Wc * 0.24, H * 0.22, Wc * 0.2, C.twig[0], C.twig[1], C.twig[2], 0.42, 0, 0, 0, 1, kind);
     return;
   }
   // trunk: white, black marks, the shaded right side greyer; struts so it stays a line
-  const segs = clamp(Math.round(H / 0.6), 4, 24);
+  // (a tree with few splats to its name spends fewer of them on the trunk, so some are left for twigs)
+  const segs = clamp(Math.round(H / 0.6), 4, Math.max(4, Math.min(24, Math.round(n * 0.3))));
   const th = H * 0.8;
   for (let i = 0; i < segs; i++) {
     const t0 = i / segs * th, t1 = (i + 1) / segs * th;
@@ -873,7 +896,9 @@ export function* birchBare(ctx, out, x, d, opts = {}) {
   // the twig haze: thin strokes in a vase over the limbs, drooping at the edges
   const tw = n - segs - limbs * 2;
   const cy = y0 + H * 0.68, rx = Wc * 0.5, ry = H * 0.3;
-  const ss = Math.max(thin(d, 0.8), Math.sqrt((rx * ry * 3) / Math.max(1, tw)) * 0.5);
+  // (a stroke is never wider than a spray of twigs could be: with only a handful of splats left for
+  // the crown each used to grow to metres across, and the tree was a grey smear standing in the snow)
+  const ss = Math.max(thin(d, 0.8), Math.min(Math.sqrt((rx * ry * 3) / Math.max(1, tw)) * 0.5, Wc * 0.045 + 0.0008 * d));
   for (let i = 0; i < tw; i++) {
     let ux = rng() * 2 - 1, uy = rng() * 2 - 1, uz = rng() * 2 - 1;
     const l = Math.hypot(ux, uy, uz) || 1; ux /= l; uy /= l; uz /= l;
@@ -884,7 +909,7 @@ export function* birchBare(ctx, out, x, d, opts = {}) {
     const c = frost ? snowTone(-0.2, 0.8, 0.3, 0.8) : jitter(mul3(C.twig, 0.8 + 0.4 * (uy * 0.5 + 0.5)), rng, 0.15);
     const droop = Math.abs(ux) > 0.6 && uy < 0.2;
     const q = quatXTo(ux * 0.3, droop ? -1 : 1, uz * 0.2);
-    const len = ss * (2.5 + 2 * rng());
+    const len = ss * (1.6 + 1.4 * rng());
     out(px, py, -pd, len, ss * 0.45, ss * 0.45, c[0], c[1], c[2], frost ? 0.8 : 0.6, q[0], q[1], q[2], q[3], kind);
     if (out.due()) yield;
   }
@@ -1206,7 +1231,10 @@ function* windowAt(ctx, out, c0, q, nx, nz, WW, WH, frame, d, dark, W) {
   } else out(px + ox, py, pz + oz, WW * 0.8, WH * 0.8, 0.04, lc[0], lc[1], lc[2], 1, q[0], q[1], q[2], q[3], KIND.LIGHT);
   const dk = dark != null ? dark : darkness(ctx);
   if (dk > 0.2) {
-    out(px + ox * 3, py, pz + oz * 3, WW * 2.6, WH * 2.4, 0.1, lc[0], lc[1], lc[2], 0.07 * dk, q[0], q[1], q[2], q[3], KIND.LIGHT);
+    // the wall round the window, lit by it: stronger and wider far off, where the lit wall is all
+    // that shows there is a house round the light
+    const fk = smooth(120, 240, d);
+    out(px + ox * 3, py, pz + oz * 3, WW * (2.6 + 1.2 * fk), WH * (2.4 + 0.4 * fk), 0.1, lc[0], lc[1], lc[2], (0.07 + 0.1 * fk) * dk, q[0], q[1], q[2], q[3], KIND.LIGHT);
     // its light on the snow below: a warm patch in front of the wall
     const gx = px + nx * 2.2, gz = pz + nz * 2.2;
     if (W) pool(out, gx, W.H(gx + ctx.x0, -gz), -gz, 1.6, 1.4, lc, 0.08 * dk);
@@ -1722,6 +1750,9 @@ function* sleigh(ctx, out0, W, wx, d, r, o = {}) {
   const [lx, ly, lz] = PP(1.0, 1.75, 0.5);
   seg([1.0, 0.8, 0.5], [1.0, 1.65, 0.5], rr * 0.8, [0.1, 0.1, 0.1]);
   glow(out0, lx, ly, -lz, LAMP, Math.max(0.09, 0.0012 * d), 0.18, 4, MOVE.BEAT);
+  // (in the dark the lantern lights the snow beside the sleigh: a lamp on something, not a spark over the lane)
+  const dk = darkness(ctx);
+  if (dk > 0.2) pool(out0, lx, y, -lz, 3.2, 2.2, LAMP, 0.13 * dk);
   if (out0.due()) yield;
 }
 
@@ -1825,91 +1856,216 @@ function* sledge(ctx, out0, W, wx, d, yaw, ci) {
   if (out0.due()) yield;
 }
 
-// The chair lift up the ski hill: stations at the foot and the top (small lit huts), steel pylons
-// with cross-arms up the face, two sagging cables, chairs hanging from them, some with skiers.
+// The chair lift up the ski hill, built the way pinewood.js builds its pylons: every member a
+// strut lying along the member and sized from distance, never a row of round blobs.
+//   the line   from the valley station at the foot (s.bx, s.bd) straight up the face toward
+//              (s.lx1, s.ld1), ending at the top station just short of the brow (liftGeom().td); a
+//              tower every 40 m or so, closer up the river bank where the hill rises from one, and
+//              a last one a few metres below the top station
+//   a tower    a steel column on a footing, a cross-arm with a sheave train under each cable, a king
+//              post and two stays over the arm, snow lying along it
+//   a station  a bull wheel (rim and spokes) on a mast with two back-stays, beside a hut with lit
+//              windows; the lamp hangs under the hut's eaves and lights its wall, the snow and the
+//              wheel, so in the dark the light has a hut round it
+//   the cables two, sagging between the tower heads, one strut for each step of the curve
+//   a chair    a hanger, a hoop, a seat and a back rest; riders going up (they answer the beat)
 // Each piece is drawn by the band its own distance falls in.
-function liftLine(s) {
-  const n = Math.max(3, Math.round((s.ld1 - s.ld0) / 42));
+const LIFT_G = 2.7;                 // each cable runs this far to the side of the centre line
+const STEEL = [0.36, 0.37, 0.4], STEEL_DARK = [0.15, 0.15, 0.17], CABLE = [0.1, 0.1, 0.11];
+const liftSag = (a, b) => 0.03 * Math.hypot(b.wx - a.wx, b.d - a.d);
+function liftGeom(W, s) {
+  if (s.geom) return s.geom;
+  const ux0 = s.lx1 - s.bx, ud0 = s.ld1 - s.bd, ul = Math.hypot(ux0, ud0);
+  // The top station stands just short of the brow: the last ground the train can see on the way up
+  // the line. Past it the hill hides the snow a hut stands on, and all that showed of a station up
+  // there was its lamp, hanging over the skyline.
+  let td = s.ld1, best = -1;
+  const sight = (d) => (W.H(s.bx + ux0 * (d - s.bd) / ud0, d) - 2.6) / d;
+  for (let d = s.ld0 + 60; d <= s.ld1; d += 4) best = Math.max(best, sight(d));
+  for (let d = s.ld0 + 60; d <= s.ld1; d += 4) if (sight(d) >= best - 0.0025) { td = d; break; }
+  // towers: closer together up the river bank (to its brow, where the old line began), then every
+  // 40 m or so, and a last one a few metres short of the top station
+  const bank = s.ld0 - s.bd > 26, stops = [s.bd];
+  if (bank) stops.push(s.ld0);
+  stops.push(td - 17, td);
   const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    pts.push({ wx: lerp(s.lx0, s.lx1, t), d: lerp(s.ld0, s.ld1, t) });
+  for (let k = 0; k + 1 < stops.length; k++) {
+    const a = stops[k], b = stops[k + 1], n = k + 2 === stops.length ? 1 : Math.max(1, Math.round((b - a) / (bank && k === 0 ? 24 : 40)));
+    for (let j = k === 0 ? 0 : 1; j <= n; j++) {
+      const d = lerp(a, b, j / n), wx = s.bx + ux0 * (d - s.bd) / ud0;
+      pts.push({ wx, d, y: W.H(wx, d), station: false, H: 0, s: 0 });
+    }
   }
-  return pts;
+  pts[0].station = pts[pts.length - 1].station = true;
+  pts.forEach((p, i) => { p.H = p.station ? 5.4 : 12.5 + 1.5 * Math.sin(i * 1.7); });
+  // towers grow until a chair clears the snow all along each span (less is asked close to a station)
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i], b = pts[i + 1], sag = liftSag(a, b);
+      let lack = 0;
+      for (let j = 1; j < 8; j++) {
+        const t = j / 8, need = Math.min(7.5, a.station ? 4.6 + 14 * t : 9, b.station ? 4.6 + 14 * (1 - t) : 9);
+        lack = Math.max(lack, W.H(lerp(a.wx, b.wx, t), lerp(a.d, b.d, t)) + need - (lerp(a.y + a.H, b.y + b.H, t) - sag * 4 * t * (1 - t)));
+      }
+      if (lack > 0) {
+        if (!a.station) a.H = Math.min(26, a.H + lack * (b.station ? 1.6 : 1));
+        if (!b.station) b.H = Math.min(26, b.H + lack * (a.station ? 1.6 : 1));
+      }
+    }
+  }
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) { len += Math.hypot(pts[i].wx - pts[i - 1].wx, pts[i].d - pts[i - 1].d, pts[i].y + pts[i].H - pts[i - 1].y - pts[i - 1].H); pts[i].s = len; }
+  // (ux, ud) along the line, uphill; (ax, ad) across it, in x and distance
+  return (s.geom = { pts, td, ux: ux0 / ul, ud: ud0 / ul, ax: -ud0 / ul, ad: ux0 / ul, len });
+}
+// The point of the cable on side sg (+1 the way up, -1 the way down) a share t along span i: world x, y, distance.
+function cableAt(G, i, t, sg) {
+  const a = G.pts[i], b = G.pts[i + 1];
+  return [lerp(a.wx, b.wx, t) + sg * G.ax * LIFT_G, lerp(a.y + a.H, b.y + b.H, t) - liftSag(a, b) * 4 * t * (1 - t), lerp(a.d, b.d, t) + sg * G.ad * LIFT_G];
+}
+function liftTower(ctx, out, G, p, slope) {
+  const x = p.wx - ctx.x0, d = p.d, top = p.y + p.H;
+  const r = Math.max(0.17, 0.0011 * d), A = LIFT_G + 0.45;
+  // q across the line, w along it (rising with the cable), h above the cross-arm
+  const pt = (q, h, w) => [x + G.ax * q + G.ux * w, top + h + slope * w, -(d + G.ad * q + G.ud * w)];
+  const S = (a, b, rr, c, n, kind = KIND.MAST) => strut(out, a[0], a[1], a[2], b[0], b[1], b[2], rr, c, n, 1, kind);
+  out(x, p.y + 0.1, -d, r * 2.4, 0.4, r * 2.4, 0.46, 0.46, 0.45, 1, 0, 0, 0, 1, KIND.MAST);
+  S([x, p.y - 0.5, -d], [x, top, -d], r, STEEL, Math.max(3, Math.round(p.H / 2.4)));
+  S(pt(-A, 0, 0), pt(A, 0, 0), r * 0.8, STEEL, 4);
+  S(pt(0, 0, 0), pt(0, 2.0, 0), r * 0.6, STEEL, 1);
+  for (const sg of [-1, 1]) {
+    S(pt(0, 2.0, 0), pt(sg * A, 0.1, 0), r * 0.5, mul3(STEEL, sg < 0 ? 1.1 : 0.9), 2);
+    S(pt(sg * LIFT_G, -0.32, -1.9), pt(sg * LIFT_G, -0.32, 1.9), r * 0.7, STEEL_DARK, 2);
+  }
+  const sc = snowTone(0, 1, 0.3);
+  S(pt(-A, r * 0.8 + 0.06, 0), pt(A, r * 0.8 + 0.06, 0), r * 0.5, sc, 3, KIND.OTHER);
+}
+// The base height building() gives a house (its lowest corner), so things fixed to its walls match.
+function houseBase(W, hs, w, dep) {
+  let base = Infinity;
+  for (const [cx, cd] of [[-w / 2, -dep / 2], [w / 2, -dep / 2], [-w / 2, dep / 2], [w / 2, dep / 2], [0, 0]]) {
+    const [rx, rz] = rotY(cx, cd, hs.yaw);
+    base = Math.min(base, W.H(hs.wx + rx, hs.d - rz));
+  }
+  return base - 0.3;
+}
+function* liftStation(ctx, out, W, s, G, p, top) {
+  const x = p.wx - ctx.x0, d = p.d, hy = p.y + p.H;
+  const r = Math.max(0.17, 0.0011 * d), rw = Math.max(0.08, 0.0007 * d);
+  const dk = darkness(ctx), back = top ? 1 : -1;
+  const wheel = [0.62, 0.25, 0.1];
+  const pt = (q, w, y) => [x + G.ax * q + G.ux * w, y, -(d + G.ad * q + G.ud * w)];
+  const S = (a, b, rr, c, n, o = 1, kind = KIND.MAST) => strut(out, a[0], a[1], a[2], b[0], b[1], b[2], rr, c, n, o, kind);
+  // the bull wheel the cable turns round: a level rim and two spokes
+  const N = 12, rim = [];
+  for (let j = 0; j <= N; j++) { const a = (j / N) * Math.PI * 2; rim.push(pt(Math.cos(a) * LIFT_G, Math.sin(a) * LIFT_G, hy)); }
+  for (let j = 0; j < N; j++) S(rim[j], rim[j + 1], rw, wheel, 1);
+  S(pt(-LIFT_G, 0, hy), pt(LIFT_G, 0, hy), rw * 0.8, wheel, 2);
+  S(pt(0, -LIFT_G, hy), pt(0, LIFT_G, hy), rw * 0.8, wheel, 2);
+  // its mast, and two back-stays down to the snow behind it
+  const mTop = pt(0, 0, hy + 1.1);
+  S(pt(0, 0, p.y - 0.5), mTop, r * 1.1, STEEL, 3);
+  for (const q of [-1.7, 1.7]) {
+    const wb = back * 5.5;
+    S(mTop, pt(q, wb, W.H(p.wx + G.ax * q + G.ux * wb, d + G.ad * q + G.ud * wb) - 0.3), r * 0.65, STEEL, 3);
+  }
+  const sc = snowTone(0, 1, 0.3);
+  S(pt(-0.9, 0, hy + 1.1 + r), pt(0.9, 0, hy + 1.1 + r), r * 0.7, sc, 1, 1, KIND.OTHER);
+  // the hut: level with the wheel on the piste's side of it, where the ground is open. It stands on
+  // a stone footing, its floor at the height of the ground under its middle: on a face this steep a
+  // hut standing on its lowest corner has the snow in front of it up to its eaves
+  const side = pisteC(s, d) > p.wx ? -1 : 1, kb = top ? 1.35 : 1.15;     // (the wheel is on the hut's `side` end)
+  const hs = { wx: p.wx - side * 12, d: d + back, w: 8.5, dep: 5.5, h: 3.3, pitch: 0.55, yaw: 0.08 * side, wall: top ? 'log' : 'red', smoke: top, seed: hashInts(s.seed, 61, top ? 1 : 0) };
+  const w = hs.w * kb, dep = hs.dep * kb, h = hs.h * kb, low = houseBase(W, hs, w, dep);
+  const up = clamp(W.H(hs.wx, hs.d) - 0.3 - low, 0, 3.2), base = low + up;
+  const sB = Math.max(0.12, Math.min(detail(out, hs.d, 1.05), 0.0022 * hs.d));
+  yield* building(ctx, out, W, hs, { k: kb, s: sB, lift: up });
+  const [ex, ez] = rotY(1, 0, hs.yaw), [fx, fz] = rotY(0, 1, hs.yaw), q = quatYaw(hs.yaw), qs = quatMul(q, quatYaw(Math.PI / 2));
+  const P = (lx, ly, lz) => [hs.wx - ctx.x0 + ex * lx + fx * lz, base + ly, -hs.d + ez * lx + fz * lz];
+  if (up > 0.3) {
+    const fr = makeRng(hashInts(hs.seed, 63)), stone = mul3(C.stone, 0.85), fh = up + 0.8;
+    yield* panel(out, P(-w / 2, -fh, dep / 2), [ex, 0, ez], [0, 1, 0], w, fh, sB, () => jitter(faceTone(stone, fx, fz), fr, 0.06), q, KIND.BUILDING, fr);
+    for (const sg of [-1, 1]) yield* panel(out, P(sg * w / 2, -fh, dep / 2), [-fx, 0, -fz], [0, 1, 0], dep, fh, sB, () => jitter(faceTone(stone, sg * ex, sg * ez), fr, 0.06), qs, KIND.BUILDING, fr);
+  }
+  // the station lamp: under the eaves at the corner next to the wheel, lighting the wall below it,
+  // the snow in front and (faintly) the wheel and its mast
+  const lxL = side * (w / 2 - 1.0 * kb);
+  const lp = P(lxL, h + 0.05, dep / 2 + 0.4);
+  glow(out, lp[0], lp[1], -lp[2], LAMP, Math.max(0.11, 0.0013 * d), 0.15, 3.2);
+  if (dk > 0.15) {
+    const wp = P(lxL * 0.8, h * 0.5, dep / 2 + 0.1);
+    out(wp[0], wp[1], wp[2], 2.8 * kb, h * 0.52, 0.05, LAMP[0], LAMP[1], LAMP[2], 0.34 * dk, q[0], q[1], q[2], q[3], KIND.LIGHT);
+    const gp = P(lxL, -up, dep / 2 + 3 * kb);
+    pool(out, gp[0], W.H(gp[0] + ctx.x0, -gp[2]), -gp[2], 4 * kb, 2.6 * kb, LAMP, 0.13 * dk);
+    S(pt(0, 0, p.y + 0.5), mTop, r * 1.15, LAMP, 2, 0.2 * dk, KIND.LIGHT);
+    for (let j = 0; j < N; j += 1) S(rim[j], rim[j + 1], rw * 1.1, LAMP, 1, 0.22 * dk, KIND.LIGHT);
+  }
+  if (out.due()) yield;
+}
+// One chair hanging from the cable at (x, y, distance d): sg +1 on the way up (with riders), -1 coming down.
+function liftChair(out, x, y, d, G, sg, hr) {
+  const k = 1.3 + 0.4 * smooth(250, 480, d);
+  const r = Math.max(0.045, 0.0006 * d), fc = [0.16, 0.17, 0.2], seat = [0.2, 0.23, 0.32];
+  const hw = 1.05 * k, dir = sg;                 // riders face the way the chair travels
+  // q across the line, h below the cable, w along the line (uphill)
+  const pt = (q, h, w) => [x + G.ax * q + G.ux * w, y - h, -(d + G.ad * q + G.ud * w)];
+  const S = (a, b, rr, c, n) => strut(out, a[0], a[1], a[2], b[0], b[1], b[2], rr, c, n, 1, KIND.OTHER);
+  S(pt(0, 0, 0), pt(0, 1.25 * k, 0), r, fc, 1);
+  S(pt(-hw, 1.25 * k, 0), pt(hw, 1.25 * k, 0), r, fc, 2);
+  for (const q of [-hw, hw]) S(pt(q, 1.25 * k, 0), pt(q, 2.85 * k, 0), r, fc, 2);
+  S(pt(-hw, 2.85 * k, 0), pt(hw, 2.85 * k, 0), r * 1.7, seat, 2);
+  S(pt(-hw, 2.3 * k, -dir * 0.15 * k), pt(hw, 2.3 * k, -dir * 0.15 * k), r * 1.3, seat, 2);
+  if (sg < 0 || hr % 100 >= 65) return;
+  const n = 1 + (hr % 3);
+  const B = (a, b, rr, c) => bar(out, a[0], a[1], a[2], b[0], b[1], b[2], rr, c, 1, KIND.OTHER, MOVE.BEAT);
+  for (let j = 0; j < n; j++) {
+    const q = (j - (n - 1) / 2) * 0.66 * k, ci = (hr + j * 3) % 7, coat = C.coat[ci], hat = C.coat[(ci + 2) % 7];
+    B(pt(q, 2.8 * k, 0), pt(q, 2.05 * k, 0), Math.max(0.2 * k, thin(d, 1.2)), coat);
+    const hp = pt(q, 1.86 * k, 0), hrad = Math.max(0.12 * k, thin(d, 0.9));
+    out(hp[0], hp[1], hp[2], hrad, hrad, hrad, hat[0], hat[1], hat[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);
+    B(pt(q, 2.8 * k, dir * 0.1 * k), pt(q, 3.35 * k, dir * 0.45 * k), Math.max(0.09 * k, thin(d)), [0.1, 0.1, 0.13]);
+    B(pt(q, 3.45 * k, -dir * 0.35 * k), pt(q, 3.35 * k, dir * 1.2 * k), Math.max(0.04 * k, thin(d, 0.7)), C.coat[(ci + 3) % 7]);
+  }
 }
 function* skiProps(ctx, out, W, s, dLo, dHi, plan) {
   const r = makeRng(s.seed);
-  const pts = liftLine(s);
-  const steel = [0.34, 0.35, 0.38];
-  const ux = s.lx1 - s.lx0, ud = s.ld1 - s.ld0, ul = Math.hypot(ux, ud);
-  const px_ = -ud / ul, pd_ = ux / ul;            // across the line, in (x, d)
-  const heads = [];
+  const G = liftGeom(W, s), pts = G.pts;
   for (let i = 0; i < pts.length; i++) {
-    const p = pts[i], y = W.H(p.wx, p.d);
-    const station = i === 0 || i === pts.length - 1;
-    const Hp = station ? 6 : 11 + 2 * Math.sin(i * 1.7);
-    heads.push([p.wx, y + Hp - 0.3, p.d]);
-    if (!inD(p.d, dLo, dHi) || !inX(ctx, p.wx, 6)) continue;
-    const x = p.wx - ctx.x0;
-    const pr = Math.max(0.14, thin(p.d, 2.2));
-    if (station) {
-      // a little lit hut with the bull-wheel frame beside it
-      const hs = { wx: p.wx - px_ * 6, d: p.d - pd_ * 6, w: 5, dep: 4, h: 2.8, pitch: 0.5, yaw: Math.atan2(pd_, px_) * 0 + 0.1, wall: 'log', smoke: false, seed: hashInts(s.seed, 61, i) };
-      yield* building(ctx, out, W, hs, {});
-      bar(out, x, y, -p.d, x, y + Hp, -p.d, pr * 1.3, steel, 4, KIND.MAST);
-      bar(out, x - px_ * 2.4, y + Hp, -(p.d - pd_ * 2.4), x + px_ * 2.4, y + Hp, -(p.d + pd_ * 2.4), pr, steel, 3, KIND.MAST);
-      glow(out, x, y + Hp + 0.6, p.d, LAMP, Math.max(0.12, 0.0014 * p.d), 0.15, 4);
-    } else {
-      bar(out, x, y - 0.3, -p.d, x, y + Hp, -p.d, pr, steel, Math.max(3, Math.round(Hp / 2)), KIND.MAST);
-      // the cross-arm with the sheave trains at each end
-      bar(out, x - px_ * 2.6, y + Hp, -(p.d - pd_ * 2.6), x + px_ * 2.6, y + Hp, -(p.d + pd_ * 2.6), pr * 0.9, steel, 3, KIND.MAST);
-      for (const sg of [-1, 1]) out(x + sg * px_ * 2.4, y + Hp - 0.25, -(p.d + sg * pd_ * 2.4), 0.5, 0.14, 0.14, 0.2, 0.2, 0.22, 1, 0, 0, 0, 1, KIND.MAST);
-      const sc = snowTone(0, 1, 0.3);
-      out(x, y + Hp + 0.12, -p.d, 2.6 * Math.abs(px_) + 0.3, 0.07, 2.6 * Math.abs(pd_) + 0.3, sc[0], sc[1], sc[2], 1, 0, 0, 0, 1, KIND.OTHER);
+    const p = pts[i];
+    if (!inD(p.d, dLo, dHi) || !inX(ctx, p.wx, 30)) continue;
+    if (p.station) yield* liftStation(ctx, out, W, s, G, p, i > 0);
+    else {
+      const a = pts[i - 1], b = pts[i + 1];
+      liftTower(ctx, out, G, p, (b.y + b.H - a.y - a.H) / Math.hypot(b.wx - a.wx, b.d - a.d));
     }
     if (out.due()) yield;
   }
-  // the two cables, sagging between the heads; chairs hang from them every 14 m
+  // the two cables: each piece runs from one point of the sagging curve to the next and takes its
+  // thickness from its own distance
   for (const sg of [-1, 1]) {
-    let along = 0;
-    for (let i = 0; i + 1 < heads.length; i++) {
-      const a = heads[i], b = heads[i + 1];
-      const span = Math.hypot(b[0] - a[0], b[2] - a[2]);
-      const segs = Math.max(4, Math.round(span / 6));
-      for (let j = 0; j < segs; j++) {
-        const t0 = j / segs, t1 = (j + 1) / segs;
-        const P0 = [lerp(a[0], b[0], t0) + sg * px_ * 2.4, lerp(a[1], b[1], t0) - 1.6 * 4 * t0 * (1 - t0), lerp(a[2], b[2], t0) + sg * pd_ * 2.4];
-        const P1 = [lerp(a[0], b[0], t1) + sg * px_ * 2.4, lerp(a[1], b[1], t1) - 1.6 * 4 * t1 * (1 - t1), lerp(a[2], b[2], t1) + sg * pd_ * 2.4];
-        const dm = (P0[2] + P1[2]) / 2;
-        if (!inD(dm, dLo, dHi) || !inX(ctx, (P0[0] + P1[0]) / 2, 3)) continue;
-        bar(out, P0[0] - ctx.x0, P0[1], -P0[2], P1[0] - ctx.x0, P1[1], -P1[2], Math.max(0.035, thin(dm, 0.9)), [0.12, 0.12, 0.13], 2, KIND.WIRE);
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i], b = pts[i + 1];
+      if (Math.max(a.d, b.d) < dLo - 4 || Math.min(a.d, b.d) >= dHi + 4 || !inX(ctx, (a.wx + b.wx) / 2, 50)) continue;
+      const steps = Math.ceil((b.s - a.s) / Math.max(1.4, 0.007 * Math.min(a.d, b.d)));
+      let P0 = cableAt(G, i, 0, sg);
+      for (let j = 1; j <= steps; j++) {
+        const P1 = cableAt(G, i, j / steps, sg), dm = (P0[2] + P1[2]) / 2;
+        if (inD(dm, dLo, dHi)) strut(out, P0[0] - ctx.x0, P0[1], -P0[2], P1[0] - ctx.x0, P1[1], -P1[2], Math.max(0.04, 0.0007 * dm), CABLE, 1, 1, KIND.WIRE);
+        P0 = P1;
       }
-      // chairs
-      for (let c = 0; c < span; c += 14) {
-        const t = (c + (sg > 0 ? 0 : 7)) / span;
-        if (t >= 1 || (i === 0 && t < 0.15) || (i + 2 === heads.length && t > 0.85)) continue;
-        const cx = lerp(a[0], b[0], t) + sg * px_ * 2.4, cy = lerp(a[1], b[1], t) - 1.6 * 4 * t * (1 - t), cd = lerp(a[2], b[2], t) + sg * pd_ * 2.4;
-        if (!inD(cd, dLo, dHi) || !inX(ctx, cx, 2)) continue;
-        const x = cx - ctx.x0;
-        const cr = Math.max(0.035, thin(cd, 0.8));
-        bar(out, x, cy, -cd, x, cy - 2.2, -cd, cr, [0.15, 0.15, 0.16], 2, KIND.OTHER);
-        const chairYaw = Math.atan2(-(b[2] - a[2]), b[0] - a[0]) * sg;
-        const q = quatYaw(chairYaw);
-        out(x, cy - 2.3, -cd, 0.55, 0.06, 0.32, 0.2, 0.22, 0.28, 1, q[0], q[1], q[2], q[3], KIND.OTHER);
-        out(x, cy - 1.95, -(cd + 0.25), 0.55, 0.3, 0.05, 0.2, 0.22, 0.28, 1, q[0], q[1], q[2], q[3], KIND.OTHER);
-        // a rider going up (on the up cable), feet and skis dangling
-        const hr = hashInts(s.seed, 71, i, Math.round(c), sg) & 1023;
-        if (sg > 0 && hr < 650) {
-          const ci = hr % 7;
-          const out2 = moveOut(out, MOVE.BEAT), k = FIG;
-          out2(x, cy - 1.75, -cd, 0.19 * k, 0.28 * k, 0.18 * k, C.coat[ci][0], C.coat[ci][1], C.coat[ci][2], 1, 0, 0, 0, 1, KIND.OTHER);
-          out2(x, cy - 1.2, -cd, 0.11 * k, 0.12 * k, 0.11 * k, C.coat[(ci + 2) % 7][0], C.coat[(ci + 2) % 7][1], C.coat[(ci + 2) % 7][2], 1, 0, 0, 0, 1, KIND.OTHER);
-          bar(out2, x, cy - 2.35, -(cd - 0.2), x, cy - 2.9, -(cd - 0.35), Math.max(0.06, thin(cd)), [0.1, 0.1, 0.13], 1, KIND.OTHER, MOVE.BEAT);
-          bar(out2, x - 0.5, cy - 3.0, -(cd - 0.3), x + 0.6, cy - 2.95, -(cd - 0.5), Math.max(0.035, thin(cd, 0.7)), [0.7, 0.14, 0.1], 1, KIND.OTHER, MOVE.BEAT);
-        }
-      }
+      if (out.due()) yield;
     }
-    if (out.due()) yield;
+    // chairs every 19 m of cable, those coming down half a step out of phase
+    const SP = 19;
+    let i = 0;
+    for (let c = sg > 0 ? 8 : 8 + SP / 2; c < G.len - 6; c += SP) {
+      while (i + 2 < pts.length && pts[i + 1].s <= c) i++;
+      if (Math.min(c - pts[i].s, pts[i + 1].s - c) < 2.4) continue;   // not on a tower's sheaves
+      const C0 = cableAt(G, i, (c - pts[i].s) / (pts[i + 1].s - pts[i].s), sg);
+      if (!inD(C0[2], dLo, dHi) || !inX(ctx, C0[0], 4)) continue;
+      liftChair(out, C0[0] - ctx.x0, C0[1], C0[2], G, sg, hashInts(s.seed, 71, Math.round(c * 2), sg + 1) & 1023);
+      if (out.due()) yield;
+    }
   }
   // skiers on the piste: swinging down in arcs, some standing at the edge
   const ns = 10 + Math.floor(r() * 8);
@@ -1930,7 +2086,7 @@ function* skiProps(ctx, out, W, s, dLo, dHi, plan) {
       for (const sg of [-1, 1]) {
         const tr = makeRng(hashInts(s.seed, 81, Math.round(d), sg));
         const wx = pc + sg * (hw + 3 + 4 * tr()), dd = d + (tr() - 0.5) * 6;
-        if (!inD(dd, dLo, dHi) || !inX(ctx, wx, 8) || onLiftLine(s, wx, dd)) continue;
+        if (!inD(dd, dLo, dHi) || !inX(ctx, wx, 8) || onLiftLine(W, s, wx, dd)) continue;
         plan.push(planTree(ctx, out, wx, dd, tr, { H: 13, birch: 0.1, y: W.H(wx, dd) - 0.15 }));
       }
     }
@@ -2396,8 +2552,10 @@ function* giantFirs(ctx, out, W, dLo, dHi, cell, amount) {
     yield* fir(ctx, out, wx - ctx.x0, d, { rng: r, height: H, width: H * 0.3, y: s.y - 1, n: Math.round(clamp(700 * Math.sqrt(out.density) * (200 / d), 60, 1400)), kind: KIND.SURREAL });
   }
 }
-// Scale: enormous snowflakes hanging still in the air like lanterns: six arms of ice, each with
-// two pairs of side branches, a glowing heart.
+// Scale: enormous snowflakes hanging still in the air like lanterns: six arms, each with two pairs
+// of side branches, a glowing heart. The whole flake is the lantern: its arms are lights too (ice
+// that glows), because arms of plain ice went black at dusk and left the heart hanging in the sky
+// as a light with nothing round it.
 function* bigFlakes(ctx, out, W, dLo, dHi, cell, amount) {
   for (const { i, wx0 } of cellsAround(ctx, cell, 12)) {
     const r = worldRng(ctx, 1311, i);
@@ -2407,22 +2565,22 @@ function* bigFlakes(ctx, out, W, dLo, dHi, cell, amount) {
     const tilt = (r() - 0.5) * 0.6, spin = r() * Math.PI;
     if (!inX(ctx, wx, R)) continue;
     const x = wx - ctx.x0;
-    const ar = Math.max(R * 0.035, thin(d, 1.2));
-    const ice = [0.66, 0.74, 0.8];
+    const ar = Math.max(R * 0.04, thin(d, 1.4));
+    const ice = [0.74, 0.88, 1.0];
     const basis = (a, rr) => [Math.cos(a) * rr, Math.sin(a) * rr * Math.cos(tilt), Math.sin(a) * rr * Math.sin(tilt)];
     for (let k = 0; k < 6; k++) {
       const a = spin + k * Math.PI / 3;
       const [ex, ey, ez] = basis(a, R);
-      bar(out, x, y, -d, x + ex, y + ey, -(d + ez), ar, ice, 4, KIND.SURREAL);
+      bar(out, x, y, -d, x + ex, y + ey, -(d + ez), ar, ice, 5, KIND.LIGHT, 0, 0.9);
       for (const f of [0.45, 0.72]) {
         const [bx, by, bz] = basis(a, R * f);
         for (const sg of [-1, 1]) {
           const [cx, cy, cz] = basis(a + sg * 0.55, R * f + R * 0.28 * (1.15 - f));
-          bar(out, x + bx, y + by, -(d + bz), x + cx, y + cy, -(d + cz), ar * 0.8, ice, 2, KIND.SURREAL);
+          bar(out, x + bx, y + by, -(d + bz), x + cx, y + cy, -(d + cz), ar * 0.8, ice, 2, KIND.LIGHT, 0, 0.9);
         }
       }
     }
-    glow(out, x, y, d, [0.86, 0.94, 1.0], R * 0.09, 0.12, 5);
+    glow(out, x, y, d, [0.86, 0.94, 1.0], R * 0.09, 0.1, 4);
     if (out.due()) yield;
   }
 }
@@ -2603,7 +2761,7 @@ function layout(seedStr, x0, x1) {
     ponds: list(PCELL, pond, (p) => ({ wx: R(p.cx), d: R(p.dc) })),
     lakes: list(LCELL, lake, (l) => ({ wx: R(l.cx), d: R(l.dc), rx: R(l.rx), rd: R(l.rd) })),
     sledHills: list(SHCELL, sledHill, (s) => ({ wx: R(s.cx), d: R(s.dc) })),
-    skiHills: list(KCELL, skiHill, (s) => ({ wx: R(s.cx), d: R(s.dc), liftBase: { wx: R(s.lx0), d: R(s.ld0) }, liftTop: { wx: R(s.lx1), d: R(s.ld1) } })),
+    skiHills: list(KCELL, skiHill, (s) => ({ wx: R(s.cx), d: R(s.dc), liftBase: { wx: R(s.bx), d: R(s.bd) }, liftTop: { wx: R(liftGeom(W, s).pts.at(-1).wx), d: R(liftGeom(W, s).pts.at(-1).d) }, towers: liftGeom(W, s).pts.length - 2 })),
     brooks: list(BCELL, brook, (b) => ({ wx: R(b.x0), d: R(laneD(W, b.x0)), lane: laneOn(W, b.x0) })),
     halts: list(HCELL, halt, (h) => ({ wx: R(h.x0 + h.len / 2), d: 6 })),
     deer: list(DCELL, deerGroup, (g) => ({ wx: R(g.wx), d: R(g.d), type: g.type, n: g.n })),
@@ -2616,4 +2774,4 @@ function layout(seedStr, x0, x1) {
     }, (o) => ({ wx: R(o.wx), d: R(o.d) })),
   };
 }
-export const _debug = { world, at, layout, surface, riverN, riverW, village, farm, pond, lake, sledHill, skiHill, brook, halt };
+export const _debug = { world, at, layout, surface, riverN, riverW, village, farm, pond, lake, sledHill, skiHill, brook, halt, liftGeom };
