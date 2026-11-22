@@ -1389,8 +1389,12 @@ function* hammock(out, a, b, d, r) {
 }
 // A frigatebird soaring (black, long angled wings, forked tail) or a pelican flying low (heavy body,
 // broad wings, long pale bill). Tagged MOVE.BEAT.
+// Birds on the wing all fly the way the train is going (+x). Nothing in the world moves on its own,
+// so every bird slides back through the window at the same rate: the only reading of that which
+// makes sense is that the train is overtaking them all, and it only works if none faces backwards.
 function* seabird(out, x, y, d, r, type) {
-  const K = KIND.OTHER, dir = r() < 0.5 ? -1 : 1, z = -d, S = 1.3;
+  const K = KIND.OTHER, dir = 1, z = -d, S = 1.3;
+  r();   // (keeps the random sequence, and so every other bird's place, as it was)
   if (type === 'frigate') {
     const c = [0.08, 0.08, 0.09];
     ell(out, x, y, z, 0.45 * S, 0.1 * S, 0.1 * S, dir, 0, 0, c, K, B);
@@ -1448,7 +1452,8 @@ function monkey(out, x, y0, d, r) {
 }
 // A parrot (macaw) in flight: bright body, long tail, wings up or down.
 function parrot(out, x, y, d, r) {
-  const K = KIND.OTHER, S = 1.3, dir = r() < 0.5 ? -1 : 1, z = -d;
+  const K = KIND.OTHER, S = 1.3, dir = 1, z = -d;
+  r();   // (as for seabirds: all fly the train's way)
   const pal = [[[0.75, 0.1, 0.06], [0.15, 0.3, 0.7]], [[0.2, 0.55, 0.12], [0.75, 0.55, 0.06]], [[0.15, 0.35, 0.72], [0.8, 0.62, 0.1]]][Math.floor(r() * 3)];
   ell(out, x, y, z, 0.25 * S, 0.08 * S, 0.08 * S, dir, 0, 0, pal[0], K, B);
   strutM(out, x - dir * 0.2 * S, y, z, x - dir * 0.75 * S, y - 0.12, z, limb(0.04, d), pal[0], 2, K, B);
