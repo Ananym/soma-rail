@@ -18,7 +18,7 @@ import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, blob, stick, wires, rock,
   house, monolith, lamp, detail, jitter, mul3, mix3, shade, smooth, clamp, lerp, quatYaw, quatRoll, quatUpTo, norm3,
-  strut, quatXTo,
+  strut, quatXTo, blade,
 } from './kit.js';
 
 
@@ -601,16 +601,16 @@ function* windmill(ctx, out, x, d, rng) {
     }
   }
   if (out.due()) yield;
-  // The wheel faces the wind, which here blows from ahead and a little towards the window: axis n.
+  // The wheel faces the window and turns (MOVE.SPIN_FAST): sixteen sails between a hub and two rims.
   const R = 2.1, hy = y0 + H + 0.35;
-  const n = [0.78, 0, 0.62], u = [0.62, 0, -0.78];          // axis, and the level direction in the wheel's plane
-  const cx = x + n[0] * 0.55, cz = -d + n[2] * 0.55;
-  const P = (th, rho) => [cx + u[0] * rho * Math.cos(th), hy + rho * Math.sin(th), cz + u[2] * rho * Math.cos(th)];
+  const n = [0.78, 0, 0.62];                                  // the way the tail boom trails
+  const cx = x, cz = -d + 0.7;
+  const P = (th, rho) => [cx + rho * Math.cos(th), hy + rho * Math.sin(th), cz];
   const blades = 16;
   for (let b = 0; b < blades; b++) {
     const th = (b / blades) * Math.PI * 2 + 0.2;
     const c = jitter([0.6, 0.58, 0.54], rng, 0.1);
-    strut(out, ...P(th, 0.42), ...P(th, R * 0.97), Math.max(r * 1.5, 0.11), c, 2, 1, KIND.BUILDING);   // a sail: wider than a rod
+    blade(out, cx, hy, cz, R * 0.97, th, Math.max(r * 1.1, 0.09), Math.max(r * 1.8, 0.13), c, 2, KIND.OTHER, MOVE.SPIN_FAST);   // a sail: wider at the tip
   }
   for (const [rho, k] of [[R, 0.6], [R * 0.45, 0.5]]) {
     const seg = rho > 1 ? 24 : 14;
@@ -1985,8 +1985,8 @@ function turbine(out, x, y0, d, H, rot) {
   for (let k = 0; k < 3; k++) {
     const a = rot + k * 2.094, ca = Math.cos(a), sa = Math.sin(a);
     const hx = x + 3.8, hy = y0 + H + 1.5, hz = -d + 1.5;
-    strut(out, hx, hy, hz, hx + ca * Lb * 0.45, hy + sa * Lb * 0.45, hz, r0 * 0.95, w, 2, 1, kind);
-    strut(out, hx + ca * Lb * 0.45, hy + sa * Lb * 0.45, hz, hx + ca * Lb, hy + sa * Lb, hz, r0 * 0.6, w, 2, 1, kind);
+    void ca; void sa;
+    blade(out, hx, hy, hz, Lb, a, r0 * 0.95, r0 * 0.55, w, 4, KIND.OTHER, MOVE.SPIN);      // they turn
   }
 }
 

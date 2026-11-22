@@ -188,7 +188,7 @@ function world(ctx) {
   const ws = worldSeed(ctx);
   const terr = ctx.terrain;
   W = {
-    ws, terr, H: (wx, d) => terr.height(wx, d), F: downsLayout.layout(ctx),
+    ws, terr, H: (wx, d) => terr.height(wx, d) + hengeRise(W, wx, d), F: downsLayout.layout(ctx), henges: new Map(),
     j: new Map(), s: new Map(), ls: new Map(), ob: new Map(), farms: new Map(), ponds: new Map(), vil: new Map(), lm: new Map(), hs: new Map(),
   };
   worlds.set(ctx.terrain, W);
@@ -425,6 +425,118 @@ function clearOfRoad(W, R, wx, d, m = 34) {
   return true;
 }
 
+// Stonehenge (near band, rare): the stones on a swell of open downland beyond the road, as they
+// stand above the A303 on the way west. Unlit: dark shapes against the night sky, their tops and
+// one edge catching the moon. About one in three or four visits to this country passes it.
+const HGCELL = 18000, HG_D = 162, HG_RISE = 10.5, HG_K = 1.7;   // HG_K: drawn half as large again, as figures are
+function henge(W, i) {
+  return cache(W.henges, i, () => {
+    const r = makeRng(hashInts(W.ws, 71, i));
+    if (r() > 0.75) return null;
+    // somewhere in the cell where the road passes in front of it, clear of junctions and services
+    for (let k = 0; k < 14; k++) {
+      const hx = (i + 0.1 + 0.8 * r()) * HGCELL;
+      roadDe(W, hx);
+      if (RD > 80 || junctionNear(W, hx, 1300) || serviceNear(W, hx, 1500)) continue;
+      return { hx, hd: HG_D, turn: r() * Math.PI * 2, seed: hashInts(W.ws, 72, i) };
+    }
+    return null;
+  });
+}
+function hengeNear(W, wx) {
+  const i0 = Math.floor(wx / HGCELL);
+  for (let i = i0 - 1; i <= i0 + 1; i++) { const h = henge(W, i); if (h && Math.abs(h.hx - wx) < 420) return h; }
+  return null;
+}
+// The swell it stands on, added to the land (so fields, fill and everything else follow it).
+function hengeRise(W, wx, d) {
+  if (d < 86 || d > 300) return 0;
+  const h = hengeNear(W, wx);
+  if (!h) return 0;
+  const u = (wx - h.hx) / 150, v = (d - h.hd) / (d < h.hd ? 36 : 70);
+  const q = u * u + v * v;
+  return q > 6 ? 0 : HG_RISE * Math.exp(-q);
+}
+// One stone: a slab w wide (along `yaw`), h tall, t thick, leaning a little; a dark body with a
+// thin pale rim along its top and its moonward edge (the moon hangs in the sky beyond).
+function hengeStone(out, x, y, d, yaw, w, h, t, r, lean = 0) {
+  const n = Math.max(2, Math.round(h / (w * 0.75)));
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), q = [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)];
+  const body = jitter([0.4, 0.4, 0.38], r, 0.12);
+  for (let k = 0; k < n; k++) {
+    const f = (k + 0.5) / n, wob = (r() - 0.5) * 0.12 * w, ww = w * (0.94 + 0.12 * r() - 0.1 * f);
+    out(x + (wob + lean * f * h) * cy, y + f * h, -(d + (wob + lean * f * h) * sy), ww / 3.1, (h / n) * 0.62, t / 3.1, body[0], body[1], body[2], 1, q[0], q[1], q[2], q[3], KIND.ROCK);
+  }
+  // the rim: a little light on the top, and down the edge nearer the moon (to the left, beyond)
+  // (a colour just short of a light's: the shader lets it keep about two fifths of its brightness at night)
+  const rim = [0.86, 0.88, 0.905], rr = Math.max(0.09, 0.0006 * d);
+  out(x + lean * h * cy, y + h + 0.02, -(d + lean * h * sy + 0.1), w / 3.4, rr, t / 3.6, rim[0], rim[1], rim[2], 0.7, q[0], q[1], q[2], q[3], KIND.LIGHT);
+  const ex = -Math.sign(cy || 1) * (w / 2 - 0.1);
+  out(x + ex * cy + lean * 0.75 * h * cy, y + 0.72 * h, -(d + ex * sy + 0.12), rr, h * 0.16, rr, rim[0], rim[1], rim[2], 0.45, 0, 0, 0, 1, KIND.LIGHT);
+}
+// A lintel lying across two uprights, from a to b (each [x, d]) at height y.
+function hengeLintel(out, a, b, y, w, th, r) {
+  const dx = b[0] - a[0], dd = b[1] - a[1], len = Math.hypot(dx, dd), yaw = Math.atan2(-(-dd), dx);
+  const q = [0, Math.sin(-Math.atan2(dd, dx) / 2), 0, Math.cos(-Math.atan2(dd, dx) / 2)];
+  const body = jitter([0.38, 0.38, 0.36], r, 0.1), mx = (a[0] + b[0]) / 2, md = (a[1] + b[1]) / 2;
+  for (const f of [-0.25, 0.25]) out(mx + dx * f, y + th / 2, -(md + dd * f), (len + w * 0.5) / 4.6, th / 2.6, w / 3.0, body[0], body[1], body[2], 1, q[0], q[1], q[2], q[3], KIND.ROCK);
+  out(mx, y + th + 0.02, -(md + 0.1), (len + w * 0.4) / 3.2, Math.max(0.09, 0.0006 * md), w / 4, 0.86, 0.88, 0.905, 0.7, q[0], q[1], q[2], q[3], KIND.LIGHT);
+  void yaw;
+}
+function* stonehenge(ctx, out, W) {
+  const i0 = Math.floor((ctx.x0 - 200) / HGCELL), i1 = Math.floor((ctx.x0 + ctx.length + 200) / HGCELL);
+  for (let i = i0; i <= i1; i++) {
+    const g = henge(W, i);
+    if (!g || g.hx < ctx.x0 - 120 || g.hx > ctx.x0 + ctx.length + 120) continue;
+    const r = makeRng(g.seed), K = HG_K, cx = g.hx - ctx.x0, cd = g.hd, t0 = g.turn;
+    const at = (rad, a) => [cx + rad * K * Math.cos(a + t0), cd + rad * K * Math.sin(a + t0)];
+    const yAt = (p) => W.H(ctx.x0 + p[0], p[1]) - 0.15;
+    const tang = (a) => -(a + t0) + Math.PI / 2;        // yaw that lays a slab's width along the circle
+    // the sarsen circle: thirty places 16.4 m out; a run of seven still carries its lintels, ten
+    // more stand alone, the rest are gaps or lie fallen
+    const STAND = [0, 1, 2, 3, 4, 5, 6, 9, 10, 13, 16, 19, 21, 22, 26, 27, 28];
+    const A = (k) => (k / 30) * Math.PI * 2;
+    for (const k of STAND) {
+      const p = at(16.4, A(k));
+      hengeStone(out, p[0], yAt(p), p[1], tang(A(k)), 2.1 * K, (4.1 + (k > 6 ? (r() - 0.5) * 0.9 : 0)) * K, 1.1 * K, r, k > 6 ? (r() - 0.5) * 0.06 : 0);
+    }
+    for (let k = 0; k < 6; k++) { const a = at(16.4, A(k)), b = at(16.4, A(k + 1)); hengeLintel(out, a, b, Math.max(yAt(a), yAt(b)) + 4.1 * K, 1.0 * K, 0.8 * K, r); }
+    for (const k of [7, 12, 17, 24]) {        // fallen sarsens
+      const p = at(15 + 3 * r(), A(k) + 0.1);
+      out(p[0], yAt(p) + 0.5 * K, -p[1], 1.9 * K, 0.4 * K, 0.8 * K, 0.36, 0.36, 0.34, 1, 0, Math.sin(r() * 1.5), 0, Math.cos(r() * 1.5), KIND.ROCK);
+    }
+    // the horseshoe of five great trilithons inside, open the way the axis runs: three stand whole,
+    // one has fallen, and of the tallest a single upright is left
+    const TRI = [[0.96, 6.1, true], [2.18, 6.6, true], [-0.96, 6.1, true], [-2.18, 6.6, false], [Math.PI, 7.3, null]];
+    for (const [a, h, whole] of TRI) {
+      const ya = tang(a), da = 0.2;
+      const p1 = at(7.6, a - da), p2 = at(7.6, a + da);
+      if (whole === true) {
+        hengeStone(out, p1[0], yAt(p1), p1[1], ya, 2.3 * K, h * K, 1.3 * K, r);
+        hengeStone(out, p2[0], yAt(p2), p2[1], ya, 2.3 * K, h * K, 1.3 * K, r);
+        hengeLintel(out, p1, p2, Math.max(yAt(p1), yAt(p2)) + h * K, 1.2 * K, 1.0 * K, r);
+      } else if (whole === null) {
+        hengeStone(out, p1[0], yAt(p1), p1[1], ya, 2.4 * K, h * K, 1.3 * K, r, 0.03);
+        out(p2[0], yAt(p2) + 0.6 * K, -p2[1], 2.6 * K, 0.5 * K, 1.0 * K, 0.36, 0.36, 0.34, 1, 0, 0.3, 0, 0.95, KIND.ROCK);
+      } else {
+        for (const p of [p1, p2]) out(p[0], yAt(p) + 0.5 * K, -p[1], 2.4 * K, 0.45 * K, 0.9 * K, 0.36, 0.36, 0.34, 1, 0, Math.sin(r()), 0, Math.cos(r()), KIND.ROCK);
+      }
+    }
+    // the low bluestones, a broken ring between the two
+    for (let k = 0; k < 16; k++) {
+      if (r() < 0.35) continue;
+      const a = (k / 16) * Math.PI * 2 + 0.1, p = at(11.7, a);
+      hengeStone(out, p[0], yAt(p), p[1], tang(a), 0.9 * K, (1.3 + 0.7 * r()) * K, 0.6 * K, r, (r() - 0.5) * 0.12);
+    }
+    // the Heel Stone, alone and leaning, out along the axis
+    // (kept on the crown of the down, to one side: never out on the slope towards the road)
+    let hp = at(27, 0);
+    if (hp[1] < cd - 8 * K) hp = [hp[0] + (hp[0] < cx ? -14 : 14) * K, cd + 4 * K];
+    hengeStone(out, hp[0], yAt(hp), hp[1], tang(0) + 0.6, 2.4 * K, 4.7 * K, 1.6 * K, r, 0.1);
+    if (out.due()) yield;
+  }
+}
+
 // Farms (near band): a house with lit windows, a barn with a yard light, a car at the gate.
 const FMCELL = 620;
 function farm(W, i) {
@@ -436,6 +548,7 @@ function farm(W, i) {
     if (Math.abs(fd - RD) < 60) return null;
     const j = junctionNear(W, fx, 700);
     if (j && fd < j.D + 140) return null;
+    if (hengeNear(W, fx)) return null;       // the stones stand on open downland
     const s = serviceNear(W, fx, 800);
     if (s && fd > s.D - 20) return null;
     return { fx, fd, seed: hashInts(W.ws, 62, i), car: r() < 0.35, yard: r() < 0.7, windows: 1 + Math.floor(r() * 3) };
@@ -1450,6 +1563,7 @@ function* near(ctx, emit) {
   yield* junctionSigns(ctx, out, R, Ls);
   yield* overbridges(ctx, out, W, R, Ls);
   yield* shoulderStops(ctx, out, W, R, Ls);
+  yield* stonehenge(ctx, out, W);
   out.limit = ctx.count * 0.62;
   yield* farms(ctx, out, W, Ls);
   yield* ponds(ctx, out, W);
@@ -2020,6 +2134,7 @@ export const _debug = {
         return res;
       },
       overbridges: (a, b) => range(OCELL, overbridge, a, b).map((o) => ({ x: o.bx, lamps: o.lamps })),
+      henges: (a, b) => range(HGCELL, henge, a, b).map((h) => ({ x: Math.round(h.hx), d: h.hd })),
       farms: (a, b) => range(FMCELL, farm, a, b).map((f) => ({ x: f.fx, d: f.fd, car: f.car, yard: f.yard })),
       shoulder: (a, b) => range(HCELL, shoulderStop, a, b).map((h) => ({ x: h.hx, kind: h.kind })),
       villages: (a, b) => range(VCELL, village, a, b).map((v) => ({ x: v.cx, d: v.dc, church: v.church, flood: v.flood, spire: v.spire })),

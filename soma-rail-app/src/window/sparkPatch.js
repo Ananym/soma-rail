@@ -73,6 +73,17 @@ uniform vec2 uFall;`,
             center.x += amp * 1.1 * sin(ph);
             center.y += amp * 0.3 * sin(1.7 * ph + 1.3);
             scales.x *= 1.0 + 0.35 * min(uMove, 1.0) * gust * sin(1.3 * ph + 2.0);
+        } else if (mv <= 4 && max(rgba.r, max(rgba.g, rgba.b)) < 0.86) {
+            // Spin (classes 2 to 4 on a splat that is not a light: see kit.js blade()). The splat is a
+            // piece of a blade on a rotor that faces the track. Its long axis points away from the
+            // hub, and its thin axis carries the distance to the hub (a hundredth of it), so the hub
+            // can be found again here; the piece is carried round it and turned with it.
+            vec3 ax = quatVec(quaternion, vec3(1.0, 0.0, 0.0));
+            vec3 off = ax * scales.z * 100.0;
+            float ang = min(uMove, 1.0) * uMoveT * (mv == 2 ? 1.4 : (mv == 3 ? 2.6 : 0.9));
+            float cs = cos(ang), sn = sin(ang);
+            center += vec3(cs * off.x - sn * off.y, sn * off.x + cs * off.y, off.z) - off;
+            quaternion = quatQuat(vec4(0.0, 0.0, sin(0.5 * ang), cos(0.5 * ang)), quaternion);
         } else if (mv <= 4) {
             // Traffic. Each lane is a continuous line of small light splats, and the shader lights
             // only those that fall on a vehicle's lamps: white headlamps and a short pool of beam

@@ -42,6 +42,7 @@
 //   lamp(ctx, out, x, y, d, color, opts)     a light source (ignores the time-of-day tint)
 //   rock(ctx, out, x, d, r, opts)
 //   strut(out, ax, ay, az, bx, by, bz, r, c, n)   a thin straight member; quatXTo(vx, vy, vz)
+//   blade(out, hx, hy, z, len, angle, r0, r1, c, n)  one blade of a rotor that turns (MOVE.SPIN)
 //   floatingIsland(ctx, out, x, y, d, r, opts); monolith(ctx, out, x, d, opts)   surreal pieces
 import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
 
@@ -56,6 +57,9 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             The shader lights only the splats under a vehicle's lamps, and the vehicles run
 //             along the line. A red line runs the train's way, any other colour against it.
 //             Must be KIND.LIGHT, about 1.2 m apart, with no gaps (a gap swallows vehicles).
+//   SPIN_n    (the same numbers as TRAFFIC_n, on a splat that is NOT a light) a piece of a blade on
+//             a rotor facing the track: it turns about the rotor's hub. Only through blade() below.
+//             SPIN: a big wind turbine (13 turns a minute); SPIN_FAST: a wind pump; SPIN_SLOW.
 //   VAPOUR    billows slowly (plumes, mist, cloud streamers, smoke)
 //   BEAT      does not move, but swells and brightens on each beat of the music. By default
 //             everything above eye level answers the beat; a biome that sets beatKinds (a list
@@ -66,7 +70,7 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
 //             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, VAPOUR: 5, BEAT: 6, FALL: 7 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, SPIN_SLOW: 4, VAPOUR: 5, BEAT: 6, FALL: 7 };
 
 // Direction toward the sun for baked shading: high, to the left (-x) and on the camera's side
 // (+z), so the faces the window sees are lit and tops are brightest.
@@ -124,6 +128,18 @@ export function strut(out, ax, ay, az, bx, by, bz, r, c, n = 2, alpha = 1, kind 
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n;
     out(ax + dx * t, ay + dy * t, az + dz * t, sl, r, r, c[0], c[1], c[2], alpha, q[0], q[1], q[2], q[3], kind);
+  }
+}
+// One blade of a rotor that faces the track and turns (MOVE.SPIN*): from the hub (hx, hy, z) out to
+// `len` at `angle` (radians, anticlockwise from +x as the window sees it), r0 thick at the root and
+// r1 at the tip, in n pieces. Colours must stay natural (every channel below 0.86): a light with
+// these classes is traffic. The pieces' thin axis is spoken for (see sparkPatch.js), so a blade has
+// no depth of its own: draw the hub and anything behind it separately.
+export function blade(out, hx, hy, z, len, angle, r0, r1, c, n = 3, kind = KIND.OTHER, move = MOVE.SPIN) {
+  const ca = Math.cos(angle), sa = Math.sin(angle), qz = Math.sin(angle / 2), qw = Math.cos(angle / 2);
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, rho = len * t;
+    out(hx + ca * rho, hy + sa * rho, z, (len / n) * 0.62, r0 + (r1 - r0) * t, rho / 100, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, 0, 0, qz, qw, kind, move);
   }
 }
 export function rotY(x, z, a) { const c = Math.cos(a), s = Math.sin(a); return [c * x + s * z, -s * x + c * z]; }
