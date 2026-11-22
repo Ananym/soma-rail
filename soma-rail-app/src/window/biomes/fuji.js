@@ -30,7 +30,20 @@
 // the stretches between, where they and the cloud hide it.
 //
 // The beat: the mountain stays still. Houses, the pagoda, the torii, lanterns and the viaduct
-// (BUILDING) and lights answer it; farmers and egrets tag their own splats MOVE.BEAT.
+// (BUILDING) and lights answer it; people and birds tag their own splats MOVE.BEAT.
+//
+// People (see "People and animals" and the ...Life functions): the country is lived in. Planting
+// teams bent double in rows across the flooded paddies, farmers hoeing the vegetable plots; two farm
+// lanes between the paddies (raised tracks along two of the row boundaries) with cyclists,
+// schoolchildren under umbrellas, handcarts, kei trucks, dog walkers; picnics on coloured sheets,
+// strollers and anglers along the river's near levee under the cherries; at a shrine a maiden
+// sweeping, somebody bowing, banners and a festival procession carrying a portable shrine; monks
+// before a pagoda; tea pickers on the tea hills; passengers on a platform; a level crossing with
+// somebody waiting at its barriers; egrets, herons and cranes in the paddies. All are placed from
+// world hashes where the line can see them (openTo), drawn 1.7 to 2.5 times life size (figK; monks and
+// tea pickers, who stand furthest out, up to 2.9 times, and the birds 2 to 3 times) because
+// a life-size figure 80 m out is a speck, and emitted before each band's limit on props, so they
+// appear at every budget. By night some carry paper lanterns or lamps.
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     a torii vast enough to frame Fuji's summit; the temple pagoda grown to fifty storeys
@@ -73,6 +86,7 @@ const C = {
   riverDeep: [0.4, 0.5, 0.54],
   revet: [0.6, 0.6, 0.57],            // concrete facing of the levees
   path: [0.55, 0.52, 0.46],
+  lane: [0.62, 0.59, 0.52],            // the farm tracks between the paddies
   lake: [0.52, 0.62, 0.7],
   lakeDeep: [0.4, 0.52, 0.62],
   sand: [0.55, 0.52, 0.44],
@@ -202,6 +216,19 @@ function world(ctx) {
     D += gap;
   }
   W.rows = rows; W.Ds = new Float64Array(rows.map((q) => q.D));
+  // Farm lanes: two of the row boundaries, one 36-62 m out and one 70-112 m, carry a raised track
+  // between the paddies (picked by their own hashes: the row rng above keeps its draws).
+  const pick = (want, not) => {
+    let b = -1;
+    for (let k = 1; k < rows.length; k++) {
+      if (rows[k].D < 34 || rows[k].D > 125 || Math.abs(k - not) < 2) continue;
+      if (b < 0 || Math.abs(rows[k].D - want) < Math.abs(rows[b].D - want)) b = k;
+    }
+    return b;
+  };
+  const la = pick(40 + 20 * h01(ws, 531, 1), -9), lb = pick(80 + 28 * h01(ws, 531, 2), la);
+  if (la >= 0) rows[la].lane = true;
+  if (lb >= 0) rows[lb].lane = true;
   worlds.set(ws, W);
   if (worlds.size > 6) worlds.delete(worlds.keys().next().value);
   return W;
@@ -441,6 +468,9 @@ function rowAt(W, d) {
   return lo;
 }
 const P = { WATER: 0, YOUNG: 1, RICE: 2, DRY: 3, HOUSE: 4 };
+// A farm lane (a row boundary flagged `lane` in world()): how wide it is and how far its top stands
+// above the paddies, both growing a little with distance so it stays a line in the window.
+const laneW = (D) => 2.6 + 0.012 * D, laneTop = (D) => 0.34 + 0.0026 * D;
 function panelInfo(W, k, j) {
   return cget(W.panels, k * 1048576 + (j & 1048575), () => {
     const r = makeRng(hashInts(W.ws, 521, k, j));
@@ -591,6 +621,8 @@ function surfColor(W, S, wx, d, rng) {
 function paddyColor(W, S, wx, d, rng) {
   const f = S.info;
   const bw = 0.3 + 0.0025 * d;
+  const q = W.rows[S.k];
+  if (q.lane && d - q.D < laneW(q.D)) return jitter(C.lane, rng, 0.06);
   if (S.edge < bw) return jitter(rng() < 0.5 ? C.bund : C.bundLit, rng, 0.1);
   let c;
   switch (f.t) {
@@ -1434,50 +1466,334 @@ function* vending(ctx, out, x, y0, d, seed) {
   if (out.due()) yield;
 }
 
-// People and animals: a handful of shaped, oriented splats each, drawn 1.3 times life size so they
-// read at 50-100 m. They answer the beat by hand (MOVE.BEAT).
-const SHIRTS = [[0.18, 0.26, 0.46], [0.72, 0.72, 0.68], [0.4, 0.4, 0.42], [0.62, 0.32, 0.36], [0.5, 0.42, 0.28]];
-function* farmer(ctx, out, wx, y, d, o) {
-  const B = beatOut(out), k = 1.3, kind = KIND.OTHER;
-  const ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
+// ---------------------------------------------------------------------------------------------
+// People and animals. Each is a dozen or so shaped, oriented splats: ellipsoids for trunk, head, hat
+// and load, overlapping beams for limbs (never thinner than the GPU can draw at that distance). They
+// are drawn well over life size, the more so the further out they stand (figK: 1.7x at 40 m, 2.2x at
+// 100 m, 2.5x from 145 m), because a life-size person 80 m from the window is twenty pixels tall and
+// reads as a speck. All of them answer the beat by hand (MOVE.BEAT, through beatOut).
+//   A figure's own frame: u along its heading, h up, v across. yaw 0 faces along the line (+x),
+//   pi/2 faces away from it, -pi/2 faces the train.
+// ---------------------------------------------------------------------------------------------
+const SHIRTS = [[0.18, 0.26, 0.5], [0.76, 0.75, 0.7], [0.66, 0.24, 0.22], [0.7, 0.4, 0.46], [0.2, 0.42, 0.5], [0.62, 0.5, 0.26]];
+const SKIN = [0.68, 0.51, 0.4], HAIR = [0.07, 0.06, 0.06], STRAW = [0.74, 0.64, 0.4], TROUS = [0.13, 0.14, 0.2];
+const WOODC = [0.42, 0.33, 0.22], WHITE = [0.78, 0.78, 0.75], INDIGO = [0.14, 0.18, 0.42];
+const UMBRELLAS = [[0.78, 0.16, 0.14], [0.8, 0.66, 0.1], [0.2, 0.42, 0.74], [0.78, 0.45, 0.58], [0.76, 0.76, 0.74]];
+const KIMONO = [[0.7, 0.36, 0.5], [0.42, 0.3, 0.6], [0.2, 0.45, 0.5], [0.72, 0.5, 0.2], [0.24, 0.3, 0.56]];
+const LANTERN = [1, 0.74, 0.4];
+function figK(d) { return clamp(1.4 + d / 130, 1.7, 2.5); }
+// For scripts that look for the figures: globalThis.__fujiLog(what, worldX, distance), if set.
+function logFig(ctx, what, wx, d) { const f = globalThis.__fujiLog; if (f && wx >= ctx.x0 && wx < ctx.x0 + ctx.length) f(what, wx, d); }
+
+function fig(ctx, out, wx, y, d, yaw, k) {
+  const B = beatOut(out), ca = Math.cos(yaw), sa = Math.sin(yaw), x0 = wx - ctx.x0, kind = KIND.OTHER;
+  const rmin = 0.00065 * d, qy = quatYaw(yaw);
   const P = (u, h, v) => [x0 + (u * ca - v * sa) * k, y + h * k, -(d + (u * sa + v * ca) * k)];
-  const E = (p, rx, ry, rz, c, q = null) => B(p[0], p[1], p[2], rx * k, ry * k, rz * k, c[0], c[1], c[2], 1, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, kind);
-  const S = (a, b, r, c) => strut(B, a[0], a[1], a[2], b[0], b[1], b[2], r * k, c, 2, 1, kind);
-  const trous = [0.14, 0.14, 0.17], skin = [0.62, 0.45, 0.35], hatC = [0.76, 0.66, 0.44];
-  for (const v of [-0.1, 0.1]) S(P(0, 0.85, v), P(0.02, -0.1, v * 1.3), 0.075, trous);
-  if (o.bent) {
-    // bent double, planting: back along the heading, head low, arms down to the water
-    const hip = P(0, 0.85, 0), sh = P(0.48, 1.08, 0);
-    const q = quatDir(sh[0] - hip[0], sh[1] - hip[1], sh[2] - hip[2]);
-    E([(hip[0] + sh[0]) / 2, (hip[1] + sh[1]) / 2, (hip[2] + sh[2]) / 2], 0.32, 0.17, 0.16, o.shirt, q);
-    E(P(0.64, 1.02, 0), 0.11, 0.11, 0.11, skin);
-    E(P(0.7, 1.12, 0), 0.3, 0.07, 0.3, hatC, q);
-    for (const v of [-0.15, 0.15]) S(P(0.45, 1.05, v), P(0.58, 0.2, v * 0.8), 0.05, o.shirt);
+  const V = (u, h, v) => [u * ca - v * sa, h, -(u * sa + v * ca)];
+  // an ellipsoid with radii along the heading, up and across
+  const E = (p, ru, rh, rv, c, q = qy) => B(p[0], p[1], p[2], ru * k, rh * k, rv * k, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind);
+  // an ellipsoid whose first axis lies along (du, dh) in the figure's own upright plane: radii along
+  // that axis, square to it in the plane, and across
+  const T = (p, du, dh, ra, rn, rv, c) => { const a = V(du, dh, 0), n = V(-dh, du, 0); E(p, ra, rn, rv, c, quatUV(a[0], a[1], a[2], n[0], n[1], n[2])); };
+  // a limb, pole or rod
+  const L = (a, b, r, c, n = 2, alpha = 1) => beam(B, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(r * k, rmin), c, n, alpha, kind);
+  return { B, P, V, E, T, L, k, rmin };
+}
+
+// A person.
+//   o: { yaw, k (scale; default figK(d)), size (a child: 0.7), what (name for the log),
+//        pose: 'stand' | 'walk' | 'bent' (planting) | 'stoop' | 'bow' | 'sit' | 'crouch' | 'ride',
+//        top, legs (colours), robe (a colour: a long skirt in place of legs), sash,
+//        hat: 'kasa' (wide straw hat) | 'cap' (close-fitting: hatC) | 'bald' | none (hair), hatC, longHair,
+//        arms: 'down' | 'reach' | 'lap' | 'bar' | 'fwd' | 'up' | 'pray',
+//        basket (true, or the colour of what is in it), pack (colour), umbrella (colour),
+//        tool: 'hoe' | 'staff' | 'broom' | 'rod' | 'tray', lamp (a paper lantern in the hand, by night) }
+function* person(ctx, out, wx, y, d, o = {}) {
+  if (!inX(ctx, wx, 6)) return;
+  const k = (o.k || figK(d)) * (o.size || 1);
+  const { P, E, T, L } = fig(ctx, out, wx, y, d, o.yaw || 0, k);
+  logFig(ctx, o.what || 'person', wx, d);
+  const top = o.top || SHIRTS[0], leg = o.legs || TROUS, pose = o.pose || 'stand';
+  let hu = 0, hh = 0.9, su = 0.02, sh = 1.47, eu = 0.03, eh = 1.67;      // hip, shoulders, head: along the heading, up
+  if (pose === 'sit') { hh = 0.2; su = 0.03; sh = 0.72; eu = 0.05; eh = 0.93; E(P(0.24, 0.15, 0), 0.34, 0.15, 0.28, o.robe || leg); }
+  else if (pose === 'crouch') { hh = 0.34; su = 0.22; sh = 0.8; eu = 0.33; eh = 0.98; E(P(0.14, 0.24, 0), 0.25, 0.24, 0.25, o.robe || leg); }
+  else if (pose === 'ride') {
+    hu = -0.14; hh = 0.98; su = 0.14; sh = 1.5; eu = 0.21; eh = 1.7;
+    L(P(hu, hh, -0.1), P(0.2, 0.7, -0.12), 0.08, leg, 1); L(P(0.2, 0.7, -0.12), P(0.14, 0.26, -0.12), 0.07, leg, 1);
+    L(P(hu, hh, 0.1), P(0.1, 0.62, 0.12), 0.08, leg, 1); L(P(0.1, 0.62, 0.12), P(-0.04, 0.2, 0.12), 0.07, leg, 1);
   } else {
-    E(P(0, 1.22, 0), 0.19, 0.33, 0.15, o.shirt);
-    E(P(0, 1.63, 0), 0.11, 0.12, 0.11, skin);
-    E(P(0, 1.74, 0), 0.3, 0.07, 0.3, hatC);
-    for (const v of [-0.22, 0.22]) S(P(0, 1.48, v), P(0.08, 0.95, v * 1.1), 0.05, o.shirt);
-    if (o.tool) S(P(0.15, 0.95, 0.25), P(0.6, 0.0, 0.3), 0.03, [0.4, 0.32, 0.22]);
+    if (pose === 'bent') { su = 0.5; sh = 1.13; eu = 0.68; eh = 1.08; }
+    else if (pose === 'bow') { su = 0.34; sh = 1.36; eu = 0.5; eh = 1.5; }
+    else if (pose === 'stoop') { su = 0.2; sh = 1.4; eu = 0.32; eh = 1.57; }
+    const st = pose === 'walk' ? 0.24 : 0.03;
+    if (o.robe) T(P(0, 0.46, 0), 0, 1, 0.5, 0.2 + st * 0.3, 0.24, o.robe);
+    else {
+      // (the legs stop short of the ground and end in shoes: a splat shows well beyond its radius,
+      // and legs drawn to the ground reach visibly below it)
+      for (const sg of [-1, 1]) {
+        L(P(0, hh, sg * 0.1), P(-sg * st * 0.85, 0.14, sg * 0.11), 0.085, leg, 3);
+        E(P(-sg * st + 0.04, 0.05, sg * 0.11), 0.12, 0.05, 0.07, o.shoes || HAIR);
+      }
+    }
+  }
+  // the trunk, from hips to shoulders
+  T(P((hu + su) / 2, (hh + sh) / 2 + 0.02, 0), su - hu, sh - hh, Math.hypot(su - hu, sh - hh) / 2 + 0.1, 0.17, 0.23, top);
+  if (o.sash) T(P(hu + (su - hu) * 0.22, hh + (sh - hh) * 0.22, 0), su - hu, sh - hh, 0.07, 0.185, 0.245, o.sash);
+  const arms = o.arms || (pose === 'bent' ? 'reach' : pose === 'sit' || pose === 'crouch' ? 'lap' : pose === 'ride' ? 'bar' : 'down');
+  for (const sg of [-1, 1]) {
+    const a = P(su - 0.02, sh - 0.05, sg * 0.25);
+    const b = arms === 'reach' ? P(su + 0.12, Math.max(0.12, sh - 0.95), sg * 0.17)
+      : arms === 'lap' ? P(su + 0.3, sh - 0.4, sg * 0.16)
+      : arms === 'bar' ? P(0.44, 1.06, sg * 0.2)
+      : arms === 'fwd' ? P(su + 0.44, sh - 0.3, sg * 0.2)
+      : arms === 'up' ? P(su + 0.16, sh + 0.2, sg * 0.24)
+      : arms === 'pray' ? P(su + 0.3, sh - 0.12, sg * 0.05)
+      : P(su + 0.07, sh - 0.6, sg * 0.27);
+    L(a, b, 0.06, top);
+  }
+  E(P(eu, eh, 0), 0.13, 0.135, 0.125, SKIN);
+  // what is on the head tips forward with it
+  const tilt = pose === 'bent' ? 0.6 : pose === 'bow' ? 0.5 : pose === 'stoop' ? 0.2 : 0;
+  const hx = Math.sin(tilt), hy = Math.cos(tilt);
+  if (o.hat === 'kasa') {
+    const hc = o.hatC || STRAW;
+    T(P(eu + hx * 0.1, eh + hy * 0.1, 0), hy, -hx, 0.38, 0.055, 0.38, hc);
+    T(P(eu + hx * 0.17, eh + hy * 0.17, 0), hy, -hx, 0.18, 0.075, 0.18, mul3(hc, 0.9));
+  } else if (o.hat === 'cap') T(P(eu + hx * 0.07, eh + hy * 0.07, 0), hy, -hx, 0.15, 0.085, 0.145, o.hatC || WHITE);
+  else if (o.hat !== 'bald') {
+    E(P(eu - 0.025, eh + 0.045, 0), 0.13, 0.11, 0.135, HAIR);
+    if (o.longHair) E(P(eu - 0.13, eh - 0.22, 0), 0.06, 0.22, 0.11, HAIR);
+  }
+  if (o.basket) {
+    E(P(su - 0.31, sh - 0.3, 0), 0.17, 0.21, 0.2, [0.56, 0.44, 0.24]);
+    if (o.basket !== true) E(P(su - 0.31, sh - 0.08, 0), 0.14, 0.06, 0.17, o.basket);
+  }
+  if (o.pack) E(P(su - 0.23, sh - 0.22, 0), 0.1, 0.2, 0.17, o.pack);
+  if (o.umbrella) {
+    L(P(su + 0.2, sh - 0.3, 0.2), P(su + 0.12, sh + 0.62, 0.08), 0.022, [0.2, 0.2, 0.2], 2);
+    T(P(su + 0.1, sh + 0.68, 0.05), 1, 0.1, 0.58, 0.14, 0.58, o.umbrella);
+    T(P(su + 0.1, sh + 0.8, 0.05), 1, 0.1, 0.26, 0.08, 0.26, mul3(o.umbrella, 0.88));
+  }
+  if (o.tool === 'hoe') { L(P(su + 0.3, sh - 0.45, 0.2), P(su + 0.95, 0.05, 0.26), 0.028, WOODC, 3); E(P(su + 0.98, 0.07, 0.26), 0.1, 0.05, 0.13, [0.3, 0.3, 0.33]); }
+  else if (o.tool === 'staff') L(P(su + 0.3, 0, 0.27), P(su + 0.24, sh + 0.1, 0.27), 0.025, WOODC, 3);
+  else if (o.tool === 'broom') { L(P(su + 0.2, sh - 0.25, 0.2), P(su + 0.66, 0.24, 0.24), 0.025, [0.5, 0.42, 0.2], 3); E(P(su + 0.72, 0.14, 0.24), 0.12, 0.15, 0.17, [0.58, 0.48, 0.26]); }
+  else if (o.tool === 'tray') E(P(su + 0.36, sh - 0.42, 0), 0.25, 0.06, 0.2, C.youngRice);
+  else if (o.tool === 'rod') {
+    // a long rod up and out over the water, and the line dropping from its tip
+    const tip = P(su + 2.3, sh + 1.45, 0.5);
+    L(P(su + 0.25, sh - 0.4, 0.15), tip, 0.018, [0.22, 0.18, 0.12], 6);
+    L(tip, P(su + 2.9, 0.1, 0.6), 0.008, [0.7, 0.7, 0.7], 3, 0.7);
+  }
+  if (o.lamp) {
+    const p = P(su + 0.36, sh - 0.62, 0.24), s = 0.13 * k;
+    out(p[0], p[1], p[2], s, s * 1.25, s, LANTERN[0], LANTERN[1], LANTERN[2], 1, 0, 0, 0, 1, KIND.LIGHT);
+    out(p[0], p[1], p[2] + 0.05, s * 6, s * 6, s * 2, LANTERN[0], LANTERN[1], LANTERN[2], 0.14, 0, 0, 0, 1, KIND.LIGHT);
   }
   if (out.due()) yield;
 }
+// The paddy worker of old: a wide straw hat, bent double to plant or standing with a hoe.
+function* farmer(ctx, out, wx, y, d, o) {
+  yield* person(ctx, out, wx, y, d, { what: 'farmer', yaw: o.yaw, pose: o.bent ? 'bent' : 'stand', top: o.shirt, hat: 'kasa', tool: !o.bent && o.tool ? 'hoe' : null, k: o.k });
+}
+
+// A dog on a lead (a shiba: tan, with a curled tail).
+function* dog(ctx, out, wx, y, d, yaw, k) {
+  if (!inX(ctx, wx, 4)) return;
+  const { P, E, L } = fig(ctx, out, wx, y, d, yaw, k), tan = [0.68, 0.44, 0.2], cream = [0.76, 0.7, 0.58];
+  E(P(0, 0.44, 0), 0.3, 0.15, 0.14, tan);
+  E(P(0.36, 0.6, 0), 0.13, 0.12, 0.11, tan); E(P(0.48, 0.55, 0), 0.07, 0.06, 0.06, cream);
+  for (const v of [-0.06, 0.06]) E(P(0.33, 0.73, v), 0.04, 0.06, 0.035, tan);
+  E(P(-0.3, 0.64, 0), 0.08, 0.1, 0.07, cream);
+  for (const u of [-0.2, 0.2]) for (const v of [-0.07, 0.07]) L(P(u, 0.4, v), P(u + 0.02, 0, v), 0.04, tan, 1);
+  if (out.due()) yield;
+}
+
+// A bicycle and its rider, seen best from the side: two wheels as rings of struts, a frame, a front
+// basket; by night a lamp.
+function* cyclist(ctx, out, wx, y, d, o) {
+  if (!inX(ctx, wx, 6)) return;
+  const k = o.k || figK(d), { P, E, L } = fig(ctx, out, wx, y, d, o.yaw || 0, k);
+  const tyre = [0.09, 0.09, 0.1], fc = o.frame || [0.6, 0.62, 0.64];
+  for (const cu of [-0.54, 0.54]) for (let i = 0; i < 8; i++) {
+    const a0 = (i / 8) * 6.2832, a1 = ((i + 1) / 8) * 6.2832;
+    L(P(cu + 0.34 * Math.cos(a0), 0.36 + 0.34 * Math.sin(a0), 0), P(cu + 0.34 * Math.cos(a1), 0.36 + 0.34 * Math.sin(a1), 0), 0.045, tyre, 1);
+  }
+  L(P(-0.54, 0.36, 0), P(-0.16, 0.9, 0), 0.03, fc, 2); L(P(-0.16, 0.9, 0), P(0.06, 0.34, 0), 0.03, fc, 2);
+  L(P(0.06, 0.34, 0), P(0.42, 0.9, 0), 0.03, fc, 2); L(P(-0.54, 0.36, 0), P(0.06, 0.34, 0), 0.028, fc, 2);
+  L(P(0.54, 0.36, 0), P(0.4, 1.06, 0), 0.03, fc, 2); L(P(0.4, 1.06, -0.22), P(0.4, 1.06, 0.22), 0.028, tyre, 1);
+  E(P(-0.17, 0.95, 0), 0.12, 0.045, 0.08, tyre);
+  if (o.basket !== false) E(P(0.68, 0.88, 0), 0.13, 0.11, 0.16, [0.52, 0.52, 0.5]);
+  if (o.night) {
+    const p = P(0.72, 0.7, 0);
+    out(p[0], p[1], p[2], 0.1 * k, 0.1 * k, 0.1 * k, 1, 0.97, 0.8, 1, 0, 0, 0, 1, KIND.LIGHT);
+    out(p[0], p[1], p[2] + 0.05, 0.6 * k, 0.6 * k, 0.25 * k, 1, 0.97, 0.8, 0.15, 0, 0, 0, 1, KIND.LIGHT);
+  }
+  yield* person(ctx, out, wx, y, d, { ...o, k, pose: 'ride', basket: false, what: o.what || 'cyclist' });
+}
+
+// A two-wheeled handcart (riyaka) and the farmer pulling it: a low bed with a load, rail sides, two
+// spoked wheels, the handles running forward to the puller.
+function* handcart(ctx, out, wx, y, d, o) {
+  if (!inX(ctx, wx, 8)) return;
+  const k = o.k || figK(d), yaw = o.yaw || 0, { P, E, L } = fig(ctx, out, wx, y, d, yaw, k);
+  const steel = [0.36, 0.38, 0.4], tyre = [0.09, 0.09, 0.1];
+  E(P(-0.3, 0.64, 0), 0.86, 0.13, 0.47, [0.42, 0.36, 0.28]);
+  E(P(-0.3, 1.0, 0), 0.66, 0.27, 0.4, o.load || C.youngRice);
+  for (const v of [-0.47, 0.47]) {
+    L(P(-1.12, 0.9, v), P(0.52, 0.9, v), 0.028, steel, 3);
+    for (const u of [-1.12, 0.52]) L(P(u, 0.6, v), P(u, 0.9, v), 0.028, steel, 1);
+    for (let i = 0; i < 8; i++) {
+      const a0 = (i / 8) * 6.2832, a1 = ((i + 1) / 8) * 6.2832;
+      L(P(-0.3 + 0.37 * Math.cos(a0), 0.38 + 0.37 * Math.sin(a0), v * 1.12), P(-0.3 + 0.37 * Math.cos(a1), 0.38 + 0.37 * Math.sin(a1), v * 1.12), 0.035, tyre, 1);
+    }
+    L(P(0.52, 0.7, v * 0.7), P(1.5, 0.96, v * 0.7), 0.028, steel, 3);
+  }
+  L(P(1.5, 0.96, -0.33), P(1.5, 0.96, 0.33), 0.028, steel, 1);
+  const ca = Math.cos(yaw), sa = Math.sin(yaw);
+  yield* person(ctx, out, wx + 1.22 * k * ca, y, d + 1.22 * k * sa, { what: 'handcart', yaw, k, pose: 'walk', top: o.top, hat: 'kasa', arms: 'down' });
+}
+
+// A kei truck: the small white pick-up of every Japanese farm. A cab with dark glass, a low bed with
+// drop sides and a load, four wheels; all five faces of each box, so it reads from either side.
+//   o: { k, yaw (0 = nose along +x), seed, body, load (colour), night }
+function* keiTruck(ctx, out, wx, y, d, o) {
+  if (!inX(ctx, wx, 9)) return;
+  const k = o.k, yaw = o.yaw || 0, rng = makeRng(o.seed), kind = KIND.OTHER;
+  const ca = Math.cos(yaw), sa = Math.sin(yaw), x0 = wx - ctx.x0;
+  const Pt = (a, h, b) => [x0 + (a * ca - b * sa) * k, y + h * k, -(d + (a * sa + b * ca) * k)];
+  const Vt = (a, b) => [a * ca - b * sa, 0, -(a * sa + b * ca)];
+  const s = Math.max(0.15 * k, detail(out, d, 0.9));
+  const body = o.body || WHITE, glass = [0.13, 0.16, 0.2], dark = [0.1, 0.1, 0.11], UP = [0, 1, 0];
+  const qy = quatYaw(yaw);
+  logFig(ctx, 'truck', wx, d);
+  // a box from a0 to a1 along the truck, h0 to h1 high, hw either side; col(face, a, b) -> colour
+  function* box(a0, a1, h0, h1, hw, col) {
+    const la = (a1 - a0) * k, lh = (h1 - h0) * k, lw = 2 * hw * k;
+    const faces = [[Pt(a0, h0, -hw), Vt(1, 0), la, 0, -1, 0], [Pt(a1, h0, hw), Vt(-1, 0), la, 0, 1, 1], [Pt(a1, h0, -hw), Vt(0, 1), lw, 1, 0, 2], [Pt(a0, h0, hw), Vt(0, -1), lw, -1, 0, 3]];
+    for (const [o0, u, lu, na, nb, id] of faces) {
+      const n = Vt(na, nb), tone = faceTone(body, n[0], n[2]);
+      yield* quad(out, o0, u, UP, lu, lh, s, (a, b) => col(id, a, b, tone), kind, rng);
+    }
+    const tt = mul3(body, 0.98);
+    yield* quad(out, Pt(a0, h1, -hw), Vt(1, 0), Vt(0, 1), la, lw, s, (a, b) => col(4, a, b, tt), kind, rng);
+  }
+  // wheels and the dark underside
+  for (const a of [-1.12, 1.12]) for (const b of [-0.68, 0.68]) { const p = Pt(a, 0.29, b); out(p[0], p[1], p[2], 0.29 * k, 0.29 * k, 0.11 * k, dark[0], dark[1], dark[2], 1, qy[0], qy[1], qy[2], qy[3], kind); }
+  { const p = Pt(0, 0.44, 0); out(p[0], p[1], p[2], 1.55 * k, 0.1 * k, 0.6 * k, dark[0], dark[1], dark[2], 1, qy[0], qy[1], qy[2], qy[3], kind); }
+  // the bed and its load
+  yield* box(-1.68, 0.58, 0.5, 0.95, 0.72, (id, a, b, tone) => (id === 4 ? mul3(body, 0.55) : tone));
+  if (o.load) {
+    const p = Pt(-0.55, 1.2, 0), c = shade(o.load, 0, 0.7, 0.5, 0.7, 0.4);
+    out(p[0], p[1], p[2], 0.95 * k, 0.3 * k, 0.56 * k, c[0], c[1], c[2], 1, qy[0], qy[1], qy[2], qy[3], kind);
+    for (const a of [-1.15, -0.55, 0.05]) { const q = Pt(a, 1.3, -0.2); const c2 = jitter(o.load, rng, 0.15); out(q[0], q[1], q[2], 0.3 * k, 0.24 * k, 0.4 * k, c2[0], c2[1], c2[2], 1, qy[0], qy[1], qy[2], qy[3], kind); }
+  }
+  // the cab: glass round the upper half
+  yield* box(0.58, 1.68, 0.5, 1.8, 0.72, (id, a, b, tone) => {
+    if (id === 4) return tone;
+    if (b > 0.52 && b < 0.9) {
+      if (id === 2) return a > 0.1 && a < 0.9 ? glass : tone;                    // windscreen
+      if (id === 3) return a > 0.2 && a < 0.8 ? glass : tone;                    // rear window
+      return (id === 0 ? a > 0.3 && a < 0.92 : a > 0.08 && a < 0.7) ? glass : tone; // door windows
+    }
+    if (id === 2 && b < 0.3 && b > 0.12 && Math.abs(a - 0.5) > 0.28) return o.night ? { c: [1, 0.97, 0.82], light: true } : [0.7, 0.7, 0.62];
+    return tone;
+  });
+  if (o.night) for (const b of [-0.6, 0.6]) { const p = Pt(-1.7, 0.7, b); out(p[0], p[1], p[2], 0.09 * k, 0.09 * k, 0.09 * k, 1, 0.1, 0.06, 1, 0, 0, 0, 1, KIND.LIGHT); }
+  if (out.due()) yield;
+}
+
+// A tall narrow banner on a pole (nobori), fluttering.
+function* nobori(ctx, out, wx, y, d, k, c) {
+  if (!inX(ctx, wx, 3)) return;
+  const x = wx - ctx.x0, z = -d, pr = Math.max(0.035 * k, 0.0006 * d);
+  strut(out, x, y - 0.1, z, x, y + 4.3 * k, z, pr, [0.5, 0.42, 0.28], 5, 1, KIND.OTHER);
+  strut(out, x, y + 4.2 * k, z, x + 0.62 * k, y + 4.2 * k, z, pr, [0.5, 0.42, 0.28], 1, 1, KIND.OTHER);
+  for (let i = 0; i < 6; i++) {
+    const cc = i === 1 || i === 4 ? WHITE : c;
+    out(x + 0.34 * k, y + (3.9 - i * 0.52) * k, z, 0.27 * k, 0.33 * k, Math.max(0.03, 0.0004 * d), cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.FLAG);
+  }
+  if (out.due()) yield;
+}
+
+// A portable shrine (mikoshi) on its two carrying poles, shouldered by six bearers in white coats
+// and headbands: black lacquer and gold under a wide roof with a gold bird on top.
+function* mikoshi(ctx, out, wx, y, d, yaw, k, night) {
+  if (!inX(ctx, wx, 12)) return;
+  const { P, E, T, L } = fig(ctx, out, wx, y, d, yaw, k);
+  const gold = [0.8, 0.62, 0.16], lac = [0.09, 0.07, 0.07], red = C.vermilion;
+  for (const v of [-0.42, 0.42]) L(P(-2.0, 1.5, v), P(2.0, 1.5, v), 0.05, red, 8);
+  E(P(0, 1.68, 0), 0.52, 0.13, 0.52, lac);
+  E(P(0, 2.02, 0), 0.36, 0.3, 0.36, gold);
+  E(P(0, 2.0, 0), 0.38, 0.08, 0.38, red);
+  T(P(0, 2.4, 0), 1, 0, 0.72, 0.12, 0.72, lac);
+  E(P(0, 2.52, 0), 0.34, 0.12, 0.34, lac);
+  for (const u of [-0.66, 0.66]) for (const v of [-0.66, 0.66]) E(P(u, 2.42, v), 0.1, 0.09, 0.1, gold);
+  E(P(0, 2.74, 0), 0.13, 0.15, 0.1, gold);
+  const ca = Math.cos(yaw), sa = Math.sin(yaw);
+  let n = 0;
+  for (const u of [-1.6, -0.95, 1.6]) for (const v of [-0.44, 0.44]) {
+    const band = (n++ % 2) ? WHITE : [0.2, 0.3, 0.62];
+    yield* person(ctx, out, wx + (u * ca - v * sa) * k, y, d + (u * sa + v * ca) * k, { what: 'shrine', yaw, k, pose: 'walk', top: WHITE, legs: SKIN, sash: [0.16, 0.22, 0.5], hat: 'cap', hatC: band, arms: 'up', lamp: night && u > 0 && v < 0 });
+  }
+}
+
+// A picnic under the blossom: a coloured sheet lying in the ground, people sitting round it, a box
+// or two of food, somebody standing; by night a paper lantern on a pole.
+const SHEETS = [[0.12, 0.32, 0.7], [0.12, 0.32, 0.7], [0.74, 0.18, 0.16], [0.78, 0.5, 0.58], [0.2, 0.5, 0.3]];
+function* picnic(ctx, out, W, wx, d, seed, night) {
+  if (!inX(ctx, wx, 12)) return;
+  const r = makeRng(seed), k = figK(d) * 1.12, up = 0.34;
+  const sw = 3.6 * k, sd = 2.0 * k, sc = SHEETS[Math.floor(r() * SHEETS.length)];
+  const yn = W.H(wx, d - sd / 2), yf = W.H(wx, d + sd / 2);
+  // the sheet, lying in the slope (and proud of it: the ground's own discs lie in the same plane and
+  // would otherwise sort in front of half of it)
+  const v = norm3(0, yf - yn, -sd), lv = Math.hypot(yf - yn, sd);
+  const tone = shade(sc, 0, v[2] < 0 ? -v[2] : v[2], Math.abs(v[1]), 0.7, 0.4);
+  yield* quad(out, [wx - sw / 2 - ctx.x0, yn + up, -(d - sd / 2)], [1, 0, 0], v, sw, lv, Math.max(0.3, detail(out, d, 0.9)), () => jitter(tone, r, 0.04), KIND.OTHER, r);
+  const n = 3 + Math.floor(r() * 3);
+  for (let i = 0; i < n; i++) {
+    // (they sit along the far half of the sheet, turned to one another and the line, so the near
+    // half shows as the sheet it is)
+    const px = wx + ((i + 0.2 + 0.6 * r()) / n - 0.5) * sw * 0.86, pd = d + sd * (0.08 + 0.3 * r()), a = -1.57 + (px < wx ? 0.6 : -0.6);
+    const stand = i === 0 && r() < 0.5, kid = !stand && r() < 0.2;
+    yield* person(ctx, out, px, W.H(px, pd) + up + 0.04, pd, { what: 'picnic', k, size: kid ? 0.7 : 1, yaw: a + (r() - 0.5) * 0.9, pose: stand ? 'stand' : 'sit', top: SHIRTS[Math.floor(r() * SHIRTS.length)], legs: r() < 0.5 ? TROUS : [0.3, 0.3, 0.36], hat: r() < 0.25 ? 'cap' : null, hatC: r() < 0.5 ? WHITE : [0.7, 0.5, 0.2], longHair: r() < 0.4 });
+  }
+  // boxes of food and a bottle in the middle
+  for (let i = 0; i < 3; i++) {
+    const px = wx + (r() - 0.5) * sw * 0.5, pd = d - sd * (0.08 + 0.2 * r()), c = [[0.66, 0.14, 0.12], [0.1, 0.1, 0.1], [0.78, 0.74, 0.5]][i];
+    out(px - ctx.x0, W.H(px, pd) + up + 0.14 * k, -pd, 0.2 * k, 0.1 * k, 0.16 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);
+  }
+  if (night) {
+    const px = wx + sw * 0.55 - ctx.x0, y = W.H(wx + sw * 0.55, d);
+    strut(out, px, y, -d, px, y + 2.3 * k, -d, Math.max(0.03 * k, 0.0006 * d), WOODC, 3, 1, KIND.OTHER);
+    out(px, y + 2.3 * k, -d, 0.2 * k, 0.26 * k, 0.2 * k, LANTERN[0], LANTERN[1], LANTERN[2], 1, 0, 0, 0, 1, KIND.LIGHT);
+    out(px, y + 2.3 * k, -d + 0.05, 1.4 * k, 1.4 * k, 0.5 * k, LANTERN[0], LANTERN[1], LANTERN[2], 0.14, 0, 0, 0, 1, KIND.LIGHT);
+  }
+  if (out.due()) yield;
+}
+
+// Wading birds: egrets (white), now and then a grey heron, and red-crowned cranes (white, with a
+// black neck and tail and a red cap). Twice life size and more: a bird is a small thing.
 function* egret(ctx, out, wx, y, d, o) {
-  const B = beatOut(out), k = 1.3 * (o.heron ? 1.45 : 1), kind = KIND.OTHER;
+  if (!inX(ctx, wx, 4)) return;
+  const B = beatOut(out), k = (o.crane ? 2.5 : o.heron ? 2.5 : 2.0) * clamp(0.75 + d / 240, 1, 1.25), kind = KIND.OTHER;
+  logFig(ctx, o.crane ? 'crane' : o.heron ? 'heron' : 'bird', wx, d);
   const ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
   const P = (u, h, v) => [x0 + (u * ca - v * sa) * k, y + h * k, -(d + (u * sa + v * ca) * k)];
-  const body = o.heron ? [0.5, 0.52, 0.55] : [0.8, 0.8, 0.78];
-  const S = (a, b, r, c) => strut(B, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(r * k, 0.00035 * d), c, 1, 1, kind);
-  const tail = P(-0.2, 0.55, 0), chest = P(0.14, 0.7, 0);
+  const body = o.heron ? [0.5, 0.52, 0.56] : [0.8, 0.8, 0.78], neck = o.crane ? [0.1, 0.1, 0.11] : body;
+  const S = (a, b, r, c, n = 1) => beam(B, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(r * k, 0.00065 * d), c, n, 1, kind);
+  const tail = P(-0.22, 0.56, 0), chest = P(0.15, 0.72, 0);
   const q = quatDir(chest[0] - tail[0], chest[1] - tail[1], chest[2] - tail[2]);
   const bc = shade(body, 0, 0.6, 0.6, 0.75, 0.35);
-  B((tail[0] + chest[0]) / 2, (tail[1] + chest[1]) / 2, (tail[2] + chest[2]) / 2, 0.2 * k, 0.095 * k, 0.1 * k, bc[0], bc[1], bc[2], 1, q[0], q[1], q[2], q[3], kind);
-  const n1 = P(0.17, 0.72, 0), n2 = o.hunch ? P(0.12, 0.86, 0) : P(0.22, 0.98, 0), hd = o.hunch ? P(0.2, 0.9, 0) : P(0.18, 1.1, 0);
-  S(n1, n2, 0.035, body); S(n2, hd, 0.03, body);
-  B(hd[0], hd[1], hd[2], 0.05 * k, 0.04 * k, 0.04 * k, body[0], body[1], body[2], 1, 0, 0, 0, 1, kind);
-  const bill = P(o.hunch ? 0.36 : 0.33, o.hunch ? 0.88 : 1.08, 0);
-  S(hd, bill, 0.014, [0.8, 0.6, 0.15]);
-  for (const v of [-0.04, 0.04]) S(P(0, 0.5, v), P(0.02, -0.05, v), 0.014, [0.12, 0.12, 0.1]);
+  B((tail[0] + chest[0]) / 2, (tail[1] + chest[1]) / 2, (tail[2] + chest[2]) / 2, 0.24 * k, 0.12 * k, 0.12 * k, bc[0], bc[1], bc[2], 1, q[0], q[1], q[2], q[3], kind);
+  if (o.crane) B(tail[0], tail[1] - 0.02 * k, tail[2], 0.13 * k, 0.09 * k, 0.09 * k, 0.1, 0.1, 0.11, 1, q[0], q[1], q[2], q[3], kind);
+  const n1 = P(0.17, 0.74, 0), n2 = o.hunch ? P(0.12, 0.9, 0) : P(0.24, 1.02, 0), hd = o.hunch ? P(0.2, 0.95, 0) : P(0.2, 1.17, 0);
+  S(n1, n2, 0.04, neck, 2); S(n2, hd, 0.035, neck, 1);
+  B(hd[0], hd[1], hd[2], 0.065 * k, 0.05 * k, 0.05 * k, body[0], body[1], body[2], 1, 0, 0, 0, 1, kind);
+  if (o.crane) { const c = P(0.19, 1.22, 0); B(c[0], c[1], c[2], 0.04 * k, 0.025 * k, 0.04 * k, 0.74, 0.12, 0.1, 1, 0, 0, 0, 1, kind); }
+  const bill = P(o.hunch ? 0.4 : 0.38, o.hunch ? 0.92 : 1.14, 0);
+  S(hd, bill, 0.018, [0.8, 0.6, 0.15]);
+  for (const v of [-0.045, 0.045]) S(P(0, 0.5, v), P(0.02, -0.05, v), 0.02, [0.14, 0.14, 0.12], 2);
   if (out.due()) yield;
 }
 
@@ -1880,21 +2196,44 @@ function* viaduct(ctx, out, W, dLo, dHi) {
   }
 }
 
-// Life in the paddies: farmers at work in groups, egrets and now and then a grey heron.
+// Can a figure standing at (wx, d) be seen from the line: nothing tall between it and the track
+// (a village, a wooded or tea hill, greenhouses), and not down behind the river's levee?
+function openTo(W, wx, d) {
+  if (riverAmt(W, wx) > 0.2 && d > riverN(W, wx) - 1) return false;
+  // (nor may it stand on a shrine's forecourt, which has its own visitors)
+  for (let i = Math.floor(wx / HILLCELL) - 1; i <= Math.floor(wx / HILLCELL) + 1; i++) {
+    const h = hillSite(W, i);
+    if (!h || !h.shrine) continue;
+    const sx = h.wx + (makeRng(hashInts(h.seed, 3))() - 0.5) * h.rx * 0.3, dT = h.dc - h.rd * 0.93 - 6;
+    if (Math.abs(wx - sx) < 62 && d > dT - 26 && d < dT + 8) return false;
+  }
+  for (let dd = 24; dd < d - 4; dd += 8) {
+    const S = surface(W, wx, dd);
+    if (S.t === T.VILLAGE || ((S.t === T.WOOD || S.t === T.TEA) && S.hh > 2) || (S.t === T.PADDY && S.info.t === P.HOUSE)) return false;
+  }
+  return true;
+}
+// The kind of paddy panel at a point (a P value), or -1 where the ground is not paddy.
+function paddyAt(W, wx, d) { const S = surface(W, wx, d); return S.t === T.PADDY ? S.info.t : -1; }
+// Is distance d on or beside a farm lane (whose own traffic the field workers must keep clear of)?
+function onLane(W, d) { for (const q of W.rows) { if (q.D > d + 4) break; if (q.lane && d > q.D - 2 && d < q.D + laneW(q.D) + 1.5) return true; } return false; }
+
+// Life in the paddies: farmers at work, planting teams bent double in a row across a flooded field,
+// somebody hoeing a vegetable plot; egrets, now and then a grey heron or a pair of cranes.
 function* paddyLife(ctx, out, W, dLo, dHi) {
-  for (const { i, wx0 } of cellsAround(ctx, 90, 8)) {
+  for (const { i, wx0 } of cellsAround(ctx, 90, 40)) {
     const r = makeRng(hashInts(W.ws, 2001, i));
     if (r() < 0.3) {
       const wx = wx0 + 90 * r(), d = 45 + 65 * r();
       if (inD(d, dLo, dHi)) {
-        const S = surface(W, wx, d);
-        if (S.t === T.PADDY && S.info.t !== P.HOUSE && S.info.t !== P.DRY) {
-          const y = S.y - 0.1, bentAll = r() < 0.7;
-          const n = 1 + Math.floor(r() * 3);
-          for (let k = 0; k < n; k++) {
-            const px = wx + k * (2.2 + r() * 1.5), pd = d + (r() - 0.5) * 3;
-            const yaw = (r() - 0.5) * 2.4 + (r() < 0.5 ? Math.PI : 0), bent = r() < 0.85 && bentAll, shirt = SHIRTS[Math.floor(r() * SHIRTS.length)], tool = r() < 0.4;
-            if (inX(ctx, px, 1)) yield* farmer(ctx, out, px, y, pd, { yaw, bent, shirt, tool });
+        const S = surface(W, wx, d), pt = S.t === T.PADDY ? S.info.t : -1, y = S.y - 0.1;
+        if (pt >= 0 && pt !== P.HOUSE && pt !== P.DRY && !onLane(W, d) && openTo(W, wx, d)) {
+          const bentAll = r() < 0.7;
+          const n = 1 + Math.floor(r() * 3), k = figK(d);
+          for (let j = 0; j < n; j++) {
+            const px = wx + j * (2.2 + r() * 1.5) * k / 1.3, pd = d + (r() - 0.5) * 3;
+            const yaw = (r() - 0.5) * 2.4 + (r() < 0.5 ? Math.PI : 0), bent = r() < 0.85 && bentAll, shirt = SHIRTS[Math.floor(r() * 5)], tool = r() < 0.4;
+            yield* farmer(ctx, out, px, y, pd, { yaw, bent, shirt, tool, k });
           }
         }
       }
@@ -1904,14 +2243,333 @@ function* paddyLife(ctx, out, W, dLo, dHi) {
       const wx = wx0 + 90 * r2(), d = 42 + 75 * r2();
       if (!inD(d, dLo - 10, dHi + 10)) continue;
       const S = surface(W, wx, d);
-      if (S.t !== T.PADDY || (S.info.t !== P.WATER && S.info.t !== P.YOUNG)) continue;
+      if (S.t !== T.PADDY || (S.info.t !== P.WATER && S.info.t !== P.YOUNG) || onLane(W, d)) continue;
       const y = S.y - 0.05, heron = r2() < 0.2;
-      const n = heron ? 1 : 2 + Math.floor(r2() * 6);
-      for (let k = 0; k < n; k++) {
+      const crane = !heron && h01(W.ws, 2006, i) < 0.22;
+      const n = heron ? 1 : crane ? 2 : 2 + Math.floor(r2() * 6);
+      for (let j = 0; j < n; j++) {
         const px = wx + (r2() - 0.5) * 18, pd = d + (r2() - 0.5) * 8;
         const yaw = r2() * 6.28, hunch = r2() < 0.3;
-        if (inD(pd, dLo, dHi) && inX(ctx, px, 1)) yield* egret(ctx, out, px, y, pd, { yaw, heron, hunch });
+        if (inD(pd, dLo, dHi)) yield* egret(ctx, out, px, y, pd, { yaw: crane ? (yaw < 3.14 ? 0.3 : 2.84) : yaw, heron, crane, hunch: hunch && !crane });
       }
+    }
+  }
+  // planting teams: four to seven in a line along the field, all bent to the water, one standing on
+  // the bund with a tray of seedlings
+  for (const { i, wx0 } of cellsAround(ctx, 180, 40)) {
+    const r = makeRng(hashInts(W.ws, 2003, i));
+    if (r() > 0.55) continue;
+    let wx = 0, d = 0, ok = false;
+    for (let tr = 0; tr < 5 && !ok; tr++) {
+      wx = wx0 + 20 + 140 * r(); d = 36 + 50 * r();
+      const pt = paddyAt(W, wx, d);
+      ok = (pt === P.WATER || pt === P.YOUNG) && paddyAt(W, wx + 6, d) === pt && paddyAt(W, wx - 6, d) === pt && !onLane(W, d) && openTo(W, wx, d);
+    }
+    if (!ok || !inD(d, dLo, dHi)) continue;
+    const k = figK(d), n = 4 + Math.floor(r() * 4), gap = 1.45 * k, face = r() < 0.5 ? 0 : Math.PI;
+    const y = W.H(wx, d) - 0.05;
+    for (let j = 0; j < n; j++) {
+      const px = wx + (j - (n - 1) / 2) * gap + (r() - 0.5) * 0.5, pd = d + (r() - 0.5) * 1.6;
+      const up = r() < 0.12;
+      yield* person(ctx, out, px, y, pd, { what: 'planting', k, yaw: face + (r() - 0.5) * 0.7, pose: up ? 'stand' : 'bent', top: SHIRTS[Math.floor(r() * SHIRTS.length)], hat: 'kasa', tool: up ? 'tray' : null, arms: up ? 'fwd' : null });
+    }
+  }
+  // vegetable plots and standing rice: somebody hoeing, somebody crouched over a basket
+  for (const { i, wx0 } of cellsAround(ctx, 220, 20)) {
+    const r = makeRng(hashInts(W.ws, 2004, i));
+    if (r() > 0.5) continue;
+    let wx = 0, d = 0, ok = false;
+    for (let tr = 0; tr < 5 && !ok; tr++) {
+      wx = wx0 + 200 * r(); d = 36 + 54 * r();
+      const pt = paddyAt(W, wx, d);
+      ok = (pt === P.DRY || pt === P.RICE) && !onLane(W, d) && openTo(W, wx, d);
+    }
+    if (!ok || !inD(d, dLo, dHi)) continue;
+    const k = figK(d), y = W.H(wx, d) + 0.1, yaw = r() < 0.5 ? 0.3 : 2.84;
+    yield* person(ctx, out, wx, y, d, { what: 'field', k, yaw, pose: 'stoop', top: SHIRTS[Math.floor(r() * SHIRTS.length)], hat: 'kasa', tool: 'hoe', arms: 'fwd' });
+    if (r() < 0.6) yield* person(ctx, out, wx + (yaw < 1 ? -1 : 1) * 2.2 * k, y, d + 1, { what: 'field', k, yaw: Math.PI - yaw, pose: 'crouch', top: SHIRTS[Math.floor(r() * SHIRTS.length)], hat: 'cap', hatC: [0.76, 0.6, 0.66], basket: C.veg });
+  }
+}
+
+// The farm lanes: cyclists, schoolchildren walking home in file under umbrellas, a farmer pulling a
+// handcart, a kei truck drawn up with its driver beside it, somebody out with the dog, an old woman
+// with a stick, somebody sitting on the bank.
+function* laneLife(ctx, out, W, dLo, dHi) {
+  const night = isNight(ctx);
+  for (let kq = 1; kq < W.rows.length; kq++) {
+    const q = W.rows[kq];
+    if (q.D > Math.min(dHi, 130)) break;
+    if (!q.lane || q.D < dLo + 2) continue;
+    const d = q.D + laneW(q.D) * 0.45, top = laneTop(q.D), k = figK(d);
+    for (const { i, wx0 } of cellsAround(ctx, 90, 30)) {
+      const r = makeRng(hashInts(W.ws, 2401, kq, i));
+      const u = r(), wx = wx0 + 8 + 74 * r();
+      if (u > 0.36) continue;
+      if (paddyAt(W, wx, d) < 0 || paddyAt(W, wx - 7, d) < 0 || paddyAt(W, wx + 7, d) < 0 || !openTo(W, wx, d)) continue;
+      const y = W.H(wx, d) + top + 0.05, dir = r() < 0.5 ? 1 : -1, yaw = dir > 0 ? 0 : Math.PI;
+      const shirt = () => SHIRTS[Math.floor(r() * SHIRTS.length)];
+      if (u < 0.08) {
+        // a cyclist: a pupil in a white helmet, or somebody in a straw hat with the shopping
+        const pupil = r() < 0.5;
+        yield* cyclist(ctx, out, wx, y, d, { k, yaw, night, top: pupil ? WHITE : shirt(), legs: TROUS, hat: pupil ? 'cap' : 'kasa', hatC: WHITE, frame: pupil ? [0.6, 0.62, 0.64] : [0.6, 0.2, 0.18], pack: pupil ? [0.14, 0.14, 0.2] : null });
+        if (r() < 0.3) yield* cyclist(ctx, out, wx - dir * 2.6 * k, y, d + 0.5, { k, yaw, night, top: WHITE, hat: 'cap', hatC: WHITE, pack: [0.14, 0.14, 0.2] });
+      } else if (u < 0.15) {
+        // schoolchildren in file: yellow hats, satchels, umbrellas
+        const n = 2 + Math.floor(r() * 3);
+        for (let j = 0; j < n; j++) {
+          const girl = r() < 0.5, um = r() < 0.7;
+          yield* person(ctx, out, wx + (j - (n - 1) / 2) * 1.25 * k, y, d + (r() - 0.5) * 0.8, { what: 'school', k, size: 0.72 + 0.1 * r(), yaw: yaw + (r() - 0.5) * 0.3, pose: 'walk', top: r() < 0.5 ? WHITE : [0.16, 0.18, 0.34], legs: [0.14, 0.15, 0.26], hat: 'cap', hatC: [0.8, 0.7, 0.1], pack: girl ? [0.72, 0.14, 0.14] : [0.1, 0.1, 0.12], umbrella: um ? UMBRELLAS[Math.floor(r() * UMBRELLAS.length)] : null, lamp: night && j === 0 });
+        }
+      } else if (u < 0.21) {
+        yield* handcart(ctx, out, wx, y, d, { k, yaw, top: shirt(), load: [C.youngRice, [0.7, 0.62, 0.36], C.veg][Math.floor(r() * 3)] });
+      } else if (u < 0.26) {
+        // a kei truck drawn up on the lane, its driver beside it
+        const kt = k * 0.82;
+        yield* keiTruck(ctx, out, wx, y, d, { k: kt, yaw, seed: hashInts(W.ws, 2402, kq, i), body: r() < 0.75 ? WHITE : [0.5, 0.6, 0.66], load: [C.veg, [0.72, 0.6, 0.2], [0.7, 0.62, 0.36], null][Math.floor(r() * 4)], night: false });
+        yield* person(ctx, out, wx + dir * 2.6 * kt + dir * 0.8 * k, y, d - 0.3, { what: 'driver', k, yaw: yaw + Math.PI * 0.85, pose: 'stand', top: shirt(), hat: 'kasa', arms: 'fwd', tool: 'tray' });
+      } else if (u < 0.31) {
+        // out with the dog, or an old woman bent over her stick
+        if (r() < 0.55) {
+          yield* person(ctx, out, wx, y, d, { what: 'walker', k, yaw, pose: 'walk', top: shirt(), legs: [0.3, 0.3, 0.36], hat: r() < 0.5 ? 'cap' : null, hatC: WHITE, lamp: night });
+          yield* dog(ctx, out, wx + dir * 1.5 * k, y, d - 0.2, yaw, k);
+        } else yield* person(ctx, out, wx, y, d, { what: 'walker', k, yaw, pose: 'stoop', robe: [0.3, 0.26, 0.4], top: [0.42, 0.36, 0.5], hat: 'cap', hatC: WHITE, tool: 'staff', arms: 'fwd' });
+      } else {
+        // resting on the bank, facing the train, with somebody standing by
+        yield* person(ctx, out, wx, y - top * 0.3, d - laneW(q.D) * 0.4, { what: 'walker', k, yaw: -1.57 + (r() - 0.5), pose: 'sit', top: shirt(), hat: 'kasa' });
+        if (r() < 0.6) yield* person(ctx, out, wx + 1.6 * k, y, d, { what: 'walker', k, yaw: Math.PI + 0.4, pose: 'stand', top: shirt(), hat: 'kasa', tool: 'hoe' });
+      }
+    }
+  }
+}
+
+// The road: now and then a kei truck on its way, or a cyclist. (A band draws what stands wholly
+// inside it: the caller passes the distances.)
+function* roadLife(ctx, out, W, dLo, dHi, scale) {
+  const night = isNight(ctx);
+  for (const { i, wx0 } of cellsAround(ctx, 170, 12)) {
+    const r = makeRng(hashInts(W.ws, 2411, i));
+    if (r() > 0.5) continue;
+    const wx = wx0 + 15 + 140 * r();
+    if (!roadOn(W, wx) || !roadOn(W, wx - 12) || !roadOn(W, wx + 12)) continue;
+    const rd = roadD(W, wx);
+    if (!inD(rd, dLo, dHi)) continue;
+    const dir = r() < 0.5 ? 1 : -1, yaw = dir > 0 ? 0 : Math.PI, y = W.H(wx, rd) + 0.24, k = figK(rd) * scale;
+    if (r() < 0.65) yield* keiTruck(ctx, out, wx, y, rd - dir * 1.1, { k: k * 0.85, yaw, seed: hashInts(W.ws, 2412, i), body: r() < 0.7 ? WHITE : [0.5, 0.6, 0.66], load: [C.veg, [0.72, 0.6, 0.2], [0.7, 0.62, 0.36], null][Math.floor(r() * 4)], night });
+    else yield* cyclist(ctx, out, wx, y, rd - dir * 1.5, { k, yaw, night, top: SHIRTS[Math.floor(r() * SHIRTS.length)], hat: 'kasa', frame: [0.6, 0.2, 0.18] });
+  }
+}
+
+// The river under the cherries: picnics on the grass slope of the near levee, people strolling the
+// path along its top (a couple, a parent and child, a woman in a kimono with a parasol, somebody
+// with a dog, a cyclist), anglers at the water's edge with long rods.
+function* riverLife(ctx, out, W, dLo, dHi) {
+  const night = isNight(ctx);
+  for (const { i, wx0 } of cellsAround(ctx, 44, 16)) {
+    const r = makeRng(hashInts(W.ws, 2421, i));
+    const wx = wx0 + 6 + 32 * r(), u = r();
+    if (riverAmt(W, wx) < 0.98 || riverAmt(W, wx - 8) < 0.98 || riverAmt(W, wx + 8) < 0.98) continue;
+    const rn = riverN(W, wx), sakura = noise1(wx / 2600, W.ws + 1903) > 0.3;
+    if (!inD(rn - 10, dLo, dHi) || !openTo(W, wx, rn - 12)) continue;
+    const shirt = () => SHIRTS[Math.floor(r() * SHIRTS.length)];
+    if (sakura && u < 0.3) yield* picnic(ctx, out, W, wx, rn - 10, hashInts(W.ws, 2422, i), night);
+    else if (u < (sakura ? 0.58 : 0.14)) {
+      const d = rn - 6.6, k = figK(d), dir = r() < 0.5 ? 1 : -1, yaw = dir > 0 ? 0 : Math.PI, v = r();
+      const y = (px) => W.H(px, d) + 0.05;
+      if (v < 0.3) {
+        // a couple
+        yield* person(ctx, out, wx, y(wx), d, { what: 'stroller', k, yaw, pose: 'walk', top: shirt(), legs: TROUS, lamp: night });
+        yield* person(ctx, out, wx + dir * 0.4 * k, y(wx), d + 1.1, { what: 'stroller', k, yaw, pose: 'walk', top: shirt(), robe: [0.3, 0.3, 0.4], longHair: true, umbrella: r() < 0.4 ? UMBRELLAS[Math.floor(r() * UMBRELLAS.length)] : null });
+      } else if (v < 0.5) {
+        // a parent and a child
+        yield* person(ctx, out, wx, y(wx), d, { what: 'stroller', k, yaw, pose: 'walk', top: shirt(), legs: [0.3, 0.3, 0.36], longHair: r() < 0.6 });
+        yield* person(ctx, out, wx + dir * 1.1 * k, y(wx), d - 0.4, { what: 'stroller', k, size: 0.62, yaw, pose: 'walk', top: [0.8, 0.7, 0.1], legs: TROUS, hat: 'cap', hatC: [0.72, 0.2, 0.2] });
+      } else if (v < 0.68) {
+        // in a kimono, under a paper parasol
+        yield* person(ctx, out, wx, y(wx), d, { what: 'stroller', k, yaw, pose: 'walk', top: KIMONO[Math.floor(r() * KIMONO.length)], robe: KIMONO[Math.floor(r() * KIMONO.length)], sash: [0.76, 0.66, 0.3], longHair: true, umbrella: r() < 0.5 ? [0.78, 0.2, 0.16] : [0.76, 0.7, 0.56] });
+      } else if (v < 0.84) {
+        yield* person(ctx, out, wx, y(wx), d, { what: 'stroller', k, yaw, pose: 'walk', top: shirt(), legs: [0.3, 0.3, 0.36], hat: 'cap', hatC: WHITE, lamp: night });
+        yield* dog(ctx, out, wx + dir * 1.5 * k, y(wx), d - 0.3, yaw, k);
+      } else yield* cyclist(ctx, out, wx, y(wx), d, { what: 'stroller', k, yaw, night, top: shirt(), hat: r() < 0.5 ? 'cap' : null, hatC: WHITE });
+    } else if (u > (sakura ? 0.92 : 0.84)) {
+      // an angler on the lip of the levee, the rod out over the river
+      const d = rn - 2.8, k = figK(d), side = r() < 0.5 ? 1 : -1;
+      yield* person(ctx, out, wx, W.H(wx, d) + 0.05, d, { what: 'angler', k, yaw: side > 0 ? 0.5 : Math.PI - 0.5, pose: r() < 0.3 ? 'sit' : 'stand', top: r() < 0.5 ? [0.72, 0.34, 0.12] : [0.2, 0.36, 0.62], legs: [0.2, 0.2, 0.24], hat: r() < 0.6 ? 'kasa' : 'cap', hatC: r() < 0.5 ? STRAW : WHITE, arms: 'fwd', tool: 'rod' });
+      out(wx - side * 0.9 * k - ctx.x0, W.H(wx, d) + 0.28 * k, -d, 0.2 * k, 0.2 * k, 0.2 * k, 0.16, 0.36, 0.66, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);
+    }
+  }
+}
+
+// A shrine's visitors: a paved approach and forecourt before the torii, banners either side, a
+// shrine maiden in white and scarlet sweeping, somebody bowing to the gate, and either a festival
+// procession (a banner, the portable shrine on its bearers' shoulders, followers) or a family in
+// their best coming to pray.
+function* shrineLife(ctx, out, W, dLo, dHi) {
+  const night = isNight(ctx);
+  const i0 = Math.floor((ctx.x0 - 300) / HILLCELL), i1 = Math.floor((ctx.x0 + ctx.length + 300) / HILLCELL);
+  for (let i = i0; i <= i1; i++) {
+    const h = hillSite(W, i);
+    if (!h || !h.shrine) continue;
+    const wx = h.wx + (makeRng(hashInts(h.seed, 3))() - 0.5) * h.rx * 0.3;       // as shrines() places the torii
+    const dT = h.dc - h.rd * 0.93 - 6, dP = dT - 9;
+    if (!inX(ctx, wx, 60) || !inD(dP, dLo, dHi) || dT > 270) continue;
+    const r = makeRng(hashInts(h.seed, 21)), k = figK(dP), x = wx - ctx.x0;
+    const yAt = (px, pd) => Math.max(W.H(px, pd), W.H(px, pd + 2)) + 0.16;
+    // the approach (along d) and the forecourt path (along the line), pale gravel just proud of the fields
+    const gs = Math.max(0.7, detail(out, dP, 2.4));
+    for (let dd = dT - 15; dd < dT + 3; dd += gs) {
+      for (const u of [-1.3, 1.3]) { const c = jitter(C.gravel, ctx.rng, 0.06); out(x + u, yAt(wx + u, dd) - 0.04, -dd, 1.5, 0.06, gs * 0.75, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND); }
+    }
+    for (let u = -34; u <= 16; u += gs) {
+      const c = jitter(C.gravel, ctx.rng, 0.06);
+      out(x + u, yAt(wx + u, dP) - 0.04, -dP, gs * 0.75, 0.06, 1.7, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+    }
+    if (out.due()) yield;
+    for (const sg of [-1, 1]) for (const dd of [dT - 13, dT - 6]) yield* nobori(ctx, out, wx + sg * 5.6, yAt(wx + sg * 5.6, dd), dd, k * 0.9, sg * (dd - dT + 9) > 0 ? C.vermilion : [0.3, 0.2, 0.5]);
+    // the maiden, sweeping; somebody bowing to the gate
+    yield* person(ctx, out, wx + 3.2 * k, yAt(wx + 3.2 * k, dT - 2.5), dT - 2.5, { what: 'shrine', k, yaw: Math.PI - 0.3, pose: 'stand', top: WHITE, robe: C.vermilion, longHair: true, tool: 'broom', arms: 'fwd' });
+    yield* person(ctx, out, wx - 1.2 * k, yAt(wx - 1.2 * k, dT - 5), dT - 5, { what: 'shrine', k, yaw: 0.7, pose: 'bow', top: SHIRTS[Math.floor(r() * SHIRTS.length)], legs: TROUS, arms: 'pray' });
+    const yP = (px) => yAt(px, dP);
+    if (r() < 0.55) {
+      // the procession, coming along the forecourt toward the gate
+      const lead = wx - 5 * k;
+      yield* person(ctx, out, lead, yP(lead), dP, { what: 'shrine', k, yaw: 0, pose: 'walk', top: WHITE, robe: [0.24, 0.3, 0.56], hat: 'cap', hatC: lacquer, arms: 'fwd', lamp: night });
+      yield* nobori(ctx, out, lead + 0.5 * k, yP(lead), dP + 0.2, k * 0.8, [0.42, 0.2, 0.5]);
+      const mx = lead - 3.6 * k;
+      yield* mikoshi(ctx, out, mx, yP(mx), dP, 0, k, night);
+      for (let j = 0; j < 3; j++) {
+        const px = mx - (3.3 + j * 1.3) * k, kid = j === 2;
+        yield* person(ctx, out, px, yP(px), dP + (j % 2 ? 0.7 : -0.5), { what: 'shrine', k, size: kid ? 0.66 : 1, yaw: 0, pose: 'walk', top: kid ? [0.2, 0.3, 0.62] : WHITE, robe: kid ? null : KIMONO[Math.floor(r() * KIMONO.length)], legs: SKIN, sash: kid ? WHITE : [0.76, 0.66, 0.3], hat: kid ? 'cap' : null, hatC: WHITE, longHair: !kid, lamp: night && j === 0 });
+      }
+    } else {
+      // a family coming to pray, the women in kimono
+      for (let j = 0; j < 3; j++) {
+        const px = wx - (4 + j * 1.5) * k, kid = j === 1;
+        yield* person(ctx, out, px, yP(px), dP + (j % 2 ? 0.6 : -0.4), { what: 'shrine', k, size: kid ? 0.62 : 1, yaw: 0, pose: 'walk', top: j === 2 ? [0.2, 0.2, 0.26] : KIMONO[Math.floor(r() * KIMONO.length)], robe: j === 2 ? null : KIMONO[Math.floor(r() * KIMONO.length)], legs: TROUS, sash: j === 2 ? null : [0.76, 0.66, 0.3], longHair: j !== 2, umbrella: j === 0 ? [0.78, 0.2, 0.16] : null, lamp: night && j === 2 });
+      }
+    }
+  }
+}
+const lacquer = [0.09, 0.07, 0.07];
+
+// A temple's monks: three in file in black robes and ochre stoles crossing before the pagoda, the
+// first under a wide hat with a staff, and one sweeping by the hall.
+function* templeLife(ctx, out, W, dLo, dHi) {
+  const i0 = Math.floor((ctx.x0 - 200) / TCELL), i1 = Math.floor((ctx.x0 + ctx.length + 200) / TCELL);
+  for (let i = i0; i <= i1; i++) {
+    const t = templeSite(W, i);
+    if (!t || t.d > 320) continue;
+    const d = t.d - 17;
+    if (!inD(d, dLo, dHi) || !inX(ctx, t.wx, 60)) continue;
+    const k = figK(d) * 1.15, robe = [0.1, 0.1, 0.12], stole = [0.76, 0.56, 0.14], yaw = t.side > 0 ? 0 : Math.PI;
+    for (let j = 0; j < 3; j++) {
+      const px = t.wx + t.side * (2 - j * 1.5 * k);
+      yield* person(ctx, out, px, W.H(px, d) + 0.05, d, { what: 'monk', k, yaw, pose: 'walk', top: robe, robe, sash: stole, hat: j === 0 ? 'kasa' : 'bald', tool: j === 0 ? 'staff' : null, arms: j === 0 ? 'fwd' : 'pray' });
+    }
+    const sx = t.wx + t.side * 20;
+    yield* person(ctx, out, sx, W.H(sx, d + 4) + 0.05, d + 4, { what: 'monk', k, yaw: t.side > 0 ? Math.PI - 0.4 : 0.4, pose: 'stoop', top: [0.76, 0.5, 0.12], robe: [0.76, 0.5, 0.12], hat: 'bald', tool: 'broom', arms: 'fwd' });
+  }
+}
+
+// Tea pickers on the tea hills: in twos to fives along a row on the slope facing the line, in indigo
+// with red sashes and white headcloths or straw hats, a basket on the back, stooped to the bushes.
+// They stand between the rows, so the row in front hides them to the knee.
+function* teaLife(ctx, out, W, dLo, dHi) {
+  const i0 = Math.floor((ctx.x0 - 260) / HILLCELL), i1 = Math.floor((ctx.x0 + ctx.length + 260) / HILLCELL);
+  for (let i = i0; i <= i1; i++) {
+    const h = hillSite(W, i);
+    if (!h || !h.tea || h.dc - h.rd > Math.min(dHi, 300)) continue;
+    if (h.wx + h.rx < ctx.x0 - 20 || h.wx - h.rx > ctx.x0 + ctx.length + 20) continue;
+    // the bamboo at the foot (as hills() places it): keep clear of those bearings
+    const clumps = [], nb = Math.round(h.rx / 50);
+    for (let b = 0; b < nb; b++) { const br = makeRng(hashInts(h.seed, 10, b)); const a = (br() - 0.5) * 2.2; br(); if (br() >= 0.35) clumps.push(a); }
+    const qTop = hillContour(0.8), qBot = hillContour(0.04);
+    const nRows = Math.max(2, Math.floor(((qBot - qTop) * h.rd) / 2.4));
+    const r = makeRng(hashInts(h.seed, 31));
+    const groups = 2 + Math.floor(r() * 3);
+    for (let g = 0; g < groups; g++) {
+      const row = 1 + Math.floor(r() * Math.min(nRows - 1, 12)), a0 = (r() - 0.5) * 1.5, n = 2 + Math.floor(r() * 4);
+      const q = qBot - (row / nRows) * (qBot - qTop);
+      if (row < 5 && clumps.some((c) => Math.abs(c - a0) < 0.3)) continue;
+      const dd = h.dc - Math.cos(a0) * h.rd * q, k = figK(dd) * 1.15, da = (1.5 * k) / (((h.rx + h.rd) / 2) * q);
+      for (let j = 0; j < n; j++) {
+        const a = a0 + (j - (n - 1) / 2) * da, sa = Math.sin(a), ca = Math.cos(a);
+        const px = h.wx + sa * h.rx * q, pd = h.dc - ca * h.rd * q;
+        const u1 = r(), u2 = r(), u3 = r();
+        if (!inD(pd, dLo, dHi) || !inX(ctx, px, 6)) continue;
+        const S = surface(W, px, pd);
+        if (S.t !== T.TEA) continue;
+        // facing along the row, a little uphill
+        const yaw = Math.atan2(sa * h.rd, ca * h.rx) + (u1 < 0.5 ? 0 : Math.PI) + 0.5;
+        yield* person(ctx, out, px, S.y, pd, { what: 'tea', k, yaw, pose: u2 < 0.75 ? 'stoop' : 'stand', top: INDIGO, robe: [0.12, 0.14, 0.3], sash: [0.72, 0.16, 0.14], hat: u3 < 0.55 ? 'cap' : 'kasa', hatC: u3 < 0.55 ? WHITE : STRAW, basket: C.teaLit, arms: 'fwd' });
+      }
+    }
+  }
+}
+
+// A small station's passengers: a handful waiting on the platform under and beside the shelter, life
+// size (they are seven metres from the window).
+function* platformLife(ctx, out, pf) {
+  const r = makeRng(hashInts(pf.seed, 61)), sx = pf.x0 + pf.len * 0.45;
+  const n = 4 + Math.floor(r() * 4);
+  for (let j = 0; j < n; j++) {
+    const wx = sx + (r() - 0.5) * (j < 3 ? 16 : pf.len * 0.7), d = 6.9 + 0.9 * r(), v = r(), yaw = -1.57 + (r() - 0.5) * 1.6;
+    const top = SHIRTS[Math.floor(r() * SHIRTS.length)], um = r() < 0.25;
+    if (v < 0.25) yield* person(ctx, out, wx, 1.04, d, { what: 'platform', k: 1, size: 0.74, yaw, top: WHITE, legs: [0.14, 0.15, 0.26], hat: 'cap', hatC: [0.8, 0.7, 0.1], pack: r() < 0.5 ? [0.72, 0.14, 0.14] : [0.1, 0.1, 0.12] });
+    else if (v < 0.5) yield* person(ctx, out, wx, 1.04, d, { what: 'platform', k: 1, yaw, top: [0.16, 0.17, 0.22], legs: [0.14, 0.15, 0.2] });
+    else if (v < 0.75) yield* person(ctx, out, wx, 1.04, d, { what: 'platform', k: 1, yaw, top, robe: [0.3, 0.3, 0.4], longHair: true, umbrella: um && d > 7.2 ? UMBRELLAS[Math.floor(r() * UMBRELLAS.length)] : null });
+    else yield* person(ctx, out, wx, 1.04, d, { what: 'platform', k: 1, yaw, pose: 'stoop', top, robe: [0.36, 0.3, 0.3], hat: 'cap', hatC: WHITE, tool: 'staff', arms: 'fwd' });
+  }
+}
+
+// A level crossing: a lane over the line between striped posts with their saltires and red lamps
+// (lit: the train is passing), the striped barriers down, and somebody waiting behind them.
+const CXCELL = 2300;
+function crossingSite(W, i) {
+  return cget(W.misc, 'x' + i, () => {
+    const r = makeRng(hashInts(W.ws, 1751, i));
+    if (r() > 0.7) return null;
+    const wx = (i + 0.15 + 0.7 * r()) * CXCELL;
+    for (let j = Math.floor(wx / PFCELL) - 1; j <= Math.floor(wx / PFCELL); j++) { const pf = platformSite(W, j); if (pf && wx > pf.x0 - 30 && wx < pf.x0 + pf.len + 30) return null; }
+    return { wx, seed: hashInts(W.ws, 1752, i) };
+  });
+}
+function crossingNear(W, wx, m) {
+  const i = Math.floor(wx / CXCELL), c = crossingSite(W, i);
+  return c && Math.abs(c.wx - wx) < m ? c : null;
+}
+function* crossing(ctx, out, W) {
+  for (let i = Math.floor((ctx.x0 - 20) / CXCELL); i <= Math.floor((ctx.x0 + ctx.length + 20) / CXCELL); i++) {
+    const c = crossingSite(W, i);
+    if (!c || !inX(ctx, c.wx, 14)) continue;
+    const x = c.wx - ctx.x0, r = makeRng(c.seed), yel = [0.8, 0.66, 0.08], blk = [0.08, 0.08, 0.08];
+    const yL = (d) => Math.max(W.H(c.wx, d), d < 9 ? lerp(0.05, -1.1, (d - 4) / 5) : -9) + 0.34;
+    // the lane, from the rails out to the fields
+    for (let d = 6.2; d < 29.5; d += 0.8) for (const u of [-1.2, 1.2]) { const cc = jitter(C.road, ctx.rng, 0.05); out(x + u, yL(d) - 0.06, -d, 1.3, 0.1, 0.6, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, KIND.GROUND); }
+    if (out.due()) yield;
+    for (const sg of [-1, 1]) {
+      const px = x + sg * 3.1, pd = 7.2, y0 = yL(pd) - 0.1, z = -pd;
+      // the post, striped; the saltire; the two red lamps
+      for (let s = 0; s < 8; s++) beam(out, px, y0 + s * 0.47, z, px, y0 + (s + 1) * 0.47, z, 0.07, s % 2 ? blk : yel, 1, 1, KIND.OTHER);
+      for (const sl of [-1, 1]) for (let s = 0; s < 4; s++) {
+        const t0 = s / 4 - 0.5, t1 = (s + 1) / 4 - 0.5;
+        beam(out, px + t0 * 1.5, y0 + 3.45 + sl * t0 * 1.0, z + 0.1, px + t1 * 1.5, y0 + 3.45 + sl * t1 * 1.0, z + 0.1, 0.06, s % 2 ? blk : yel, 1, 1, KIND.OTHER);
+      }
+      for (const u of [-0.32, 0.32]) {
+        out(px + u, y0 + 2.6, z + 0.12, 0.13, 0.13, 0.06, 1, 0.12, 0.06, 1, 0, 0, 0, 1, KIND.LIGHT);
+        out(px + u, y0 + 2.6, z + 0.16, 0.5, 0.5, 0.2, 1, 0.12, 0.06, 0.16, 0, 0, 0, 1, KIND.LIGHT);
+        out(px + u, y0 + 2.6, z + 0.04, 0.2, 0.2, 0.05, 0.08, 0.08, 0.08, 1, 0, 0, 0, 1, KIND.OTHER);
+      }
+      // the barrier, down across its half of the lane
+      for (let s = 0; s < 6; s++) beam(out, px - sg * s * 0.5, y0 + 1.05, z - 0.5, px - sg * (s + 1) * 0.5, y0 + 1.05, z - 0.5, 0.05, s % 2 ? blk : yel, 1, 1, KIND.OTHER);
+    }
+    // waiting behind the barrier
+    const k = 1.15, v = r();
+    if (v < 0.4) yield* keiTruck(ctx, out, c.wx - 0.9, yL(14) + 0.05, 14.5, { k: 1.1, yaw: -1.57, seed: hashInts(c.seed, 3), body: WHITE, load: C.veg, night: isNight(ctx) });
+    else if (v < 0.7) yield* cyclist(ctx, out, c.wx - 0.8, yL(10.5), 10.8, { what: 'crossing', k, yaw: -1.2, night: isNight(ctx), top: WHITE, hat: 'cap', hatC: WHITE, pack: [0.14, 0.14, 0.2] });
+    else { yield* person(ctx, out, c.wx - 1.2, yL(10), 10.2, { what: 'crossing', k, yaw: -1.3, top: SHIRTS[Math.floor(r() * SHIRTS.length)], legs: [0.3, 0.3, 0.36], hat: 'kasa' }); yield* dog(ctx, out, c.wx - 2.3, yL(10), 10.0, -0.6, k); }
+    for (let j = 0; j < 2; j++) {
+      if (r() < 0.3) continue;
+      yield* person(ctx, out, c.wx + 0.6 + j * 0.9, yL(9.6), 9.7 + j * 0.5, { what: 'crossing', k, size: 0.74, yaw: -1.57 + (r() - 0.5) * 0.6, top: WHITE, legs: [0.14, 0.15, 0.26], hat: 'cap', hatC: [0.8, 0.7, 0.1], pack: j ? [0.72, 0.14, 0.14] : [0.1, 0.1, 0.12], umbrella: r() < 0.6 ? UMBRELLAS[Math.floor(r() * UMBRELLAS.length)] : null });
     }
   }
 }
@@ -1981,6 +2639,13 @@ function* bunds(ctx, out, W, dLo, dHi) {
       for (let wx = wx0 + st / 2; wx < wx0 + Pc; wx += st) {
         const S = surface(W, wx, d + 0.6);
         if (S.t !== T.PADDY) continue;
+        if (q.lane) {
+          // a farm lane: a grass bank with the pale track along its top
+          const top = laneTop(d), lw = laneW(d), g = jitter(C.bundLit, ctx.rng, 0.12), c = jitter(C.lane, ctx.rng, 0.05);
+          out(wx - ctx.x0, S.y + top * 0.45, -(d + lw * 0.5), st * 0.75, top * 0.5, lw * 0.5, g[0], g[1], g[2], 1, 0, 0, 0, 1, KIND.GROUND);
+          out(wx - ctx.x0, S.y + top + 0.03, -(d + lw * 0.42), st * 0.75, 0.05, lw * 0.4, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+          continue;
+        }
         const bh = 0.2 + 0.0012 * d;
         const c = jitter(S.info.t === P.DRY ? C.soil : C.bundLit, ctx.rng, 0.12);
         out(wx - ctx.x0, S.y + bh, -d, st * 0.75, bh, Math.max(0.3, st * 0.25), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
@@ -2007,6 +2672,7 @@ function* lineside(ctx, out, W) {
     const a = Math.max(0, pf.x0 - ctx.x0), b = Math.min(ctx.length, pf.x0 + pf.len - ctx.x0);
     if (b <= a) continue;
     onPf = pf;
+    yield* platformLife(ctx, out, pf);
     const st = 0.4;
     for (let x = a + st / 2; x < b; x += st) {
       out(x, 0.5, -2.75, st * 0.7, 0.5, 0.1, 0.52, 0.51, 0.48, 1, 0, 0, 0, 1, KIND.OTHER);
@@ -2044,13 +2710,14 @@ function* lineside(ctx, out, W) {
   if (!onPf) {
     const FD = 7.6;
     for (const { x } of cellsAround(ctx, 2.6, 0)) {
-      if (x < 0 || x >= ctx.length) continue;
+      if (x < 0 || x >= ctx.length || crossingNear(W, ctx.x0 + x, 4.4)) continue;
       const y0 = W.H(ctx.x0 + x, FD);
       strut(out, x, y0 - 0.1, -FD, x, y0 + 1.25, -FD, 0.05, [0.5, 0.5, 0.48], 2, 1, KIND.FENCE);
       if (out.due()) yield;
     }
     const mStep = 0.35 / Math.min(1, Math.sqrt(out.density));
     for (let x = mStep / 2; x < ctx.length; x += mStep) {
+      if (crossingNear(W, ctx.x0 + x, 4.2)) continue;
       const y0 = W.H(ctx.x0 + x, FD);
       for (const t of [0.5, 1.1]) out(x, y0 + t, -FD, mStep * 0.66, 0.012, 0.012, 0.3, 0.3, 0.28, 0.9, 0, 0, 0, 1, KIND.FENCE);
       if (out.due()) yield;
@@ -2121,6 +2788,9 @@ function* trackside(ctx0, emit) {
   const out = makeOut(ctx, emit, { zMargin: 1, detailK: 1.2 });
   out.limit = ctx.count * 0.5;
   yield* overheadLine(ctx, out, ctx.beatMetres || 56, { d: 3.7 });
+  // the people first (a few hundred splats at most): nothing later may crowd them out
+  yield* crossing(ctx, out, W);
+  yield* roadLife(ctx, out, W, ctx.zNear, 28.4, 0.75);
   yield* lineside(ctx, out, W);
   yield* bunds(ctx, out, W, 9, ctx.zFar);
   yield* roadside(ctx, out, W, ctx.zNear, ctx.zFar);
@@ -2139,6 +2809,14 @@ function* near(ctx0, emit) {
   const lo = ctx.zNear, hi = ctx.zFar;
   // the hills first: their skins must never be cut short
   yield* hills(ctx, out, W, lo, hi);
+  // the people next, before the limit on props: a few hundred splats, never crowded out
+  yield* paddyLife(ctx, out, W, lo, hi);
+  yield* laneLife(ctx, out, W, lo, hi);
+  yield* roadLife(ctx, out, W, 33, 60, 1);
+  yield* riverLife(ctx, out, W, lo, hi);
+  yield* shrineLife(ctx, out, W, lo, hi);
+  yield* templeLife(ctx, out, W, lo, hi);
+  yield* teaLife(ctx, out, W, lo, hi);
   out.limit = Math.min(ctx.count * 0.88, out.n + ctx.count * 0.55);
   yield* bunds(ctx, out, W, lo, 140);
   yield* roadside(ctx, out, W, lo, hi);
@@ -2148,7 +2826,6 @@ function* near(ctx0, emit) {
   yield* riverside(ctx, out, W, lo, hi, dz.matter || 0);
   yield* greenhouses(ctx, out, W, lo, hi);
   yield* golfNets(ctx, out, W, lo, hi);
-  yield* paddyLife(ctx, out, W, lo, hi);
   yield* fieldTrees(ctx, out, W, lo, hi);
   yield* lakeShores(ctx, out, W, lo, hi);
   yield* fillSurface(ctx, out, W, { power: 1.5, cover: 3.2 });
@@ -2269,6 +2946,8 @@ function layout(seedStr, x0, x1) {
     temples: list(TCELL, templeSite, (t) => ({ wx: r(t.wx), d: r(t.d), hallWx: r(t.wx + t.side * 26) })),
     golf: list(GCELL, golfSite, (g) => ({ wx: r(g.wx), d: r(g.d), len: r(g.len) })),
     platforms: list(PFCELL, platformSite, (p) => ({ wx: r(p.x0), len: r(p.len) })),
+    crossings: list(CXCELL, crossingSite, (c) => ({ wx: r(c.wx) })),
+    lanes: W.rows.filter((q) => q.lane).map((q) => r(q.D)),
     hamlets: list(HMCELL, hamlet, (h) => ({ wx: r(h.cx), d: r(h.dc), houses: h.houses.length })),
     river: (() => { const res = []; let on = false, a = 0; for (let x = x0; x <= x1; x += 50) { const v = riverAmt(W, x) > 0.6; if (v && !on) a = x; if (!v && on) res.push({ wx0: a, wx1: x, d: r(riverN(W, a)) }); on = v; } return res; })(),
     viaduct: (() => { const res = []; let on = false, a = 0; for (let x = x0; x <= x1; x += 100) { const v = viaOn(W, x); if (v && !on) a = x; if (!v && on) res.push({ wx0: a, wx1: x, d: r(viaD(W, a)) }); on = v; } return res; })(),
