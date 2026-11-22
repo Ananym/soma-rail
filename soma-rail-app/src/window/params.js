@@ -38,7 +38,7 @@ export function readParams(search = (typeof location !== 'undefined' ? location.
   }
   for (const k of Object.keys(STR)) if (q.has(k)) p[k] = q.get(k);
   p.levelFixed = q.has('level');   // an explicit level in the URL overrides the channel's
-  p.budgetGiven = q.has('budget'); // otherwise a touch screen gets a smaller one (see TrainWindow.vue)
+  p.budgetGiven = q.has('budget'); // otherwise the overlay's setting decides (300k on a touch screen, 600k elsewhere)
   p.level = Math.max(0, Math.min(1, Math.round(p.level)));
   p.budget = Math.max(20000, Math.min(4000000, Math.round(p.budget)));
   return p;

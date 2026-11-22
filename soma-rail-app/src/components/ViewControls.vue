@@ -1,5 +1,10 @@
 <template>
   <div class="view-controls" :class="{ 'fade-out': shouldFade, touch }">
+    <div v-if="touch" class="row">
+      <span class="label">Channel</span>
+      <span class="value">{{ channelName }}</span>
+      <button type="button" @click="$emit('channels')">Change</button>
+    </div>
     <div class="row">
       <span class="label">Scenery</span>
       <span class="value">{{ sceneryText }}</span>
@@ -32,6 +37,13 @@
         <button v-for="n in [30, 60, 120]" :key="n" type="button" :class="{ on: fps === n }" :aria-pressed="fps === n" @click="$emit('update:fps', n)">{{ n }}</button>
       </span>
     </div>
+    <div v-if="!(view && view.budgetFixed)" class="row">
+      <span class="label">Splats</span>
+      <span class="value">{{ view && view.budgetQueued ? 'Queued' : '' }}</span>
+      <span class="group tight">
+        <button v-for="n in [300000, 600000, 900000]" :key="n" type="button" :class="{ on: budget === n }" :aria-pressed="budget === n" :disabled="!view" @click="$emit('update:budget', n)">{{ n / 1000 }}k</button>
+      </span>
+    </div>
     <div class="row">
       <span class="label">About</span>
       <span class="value"></span>
@@ -50,14 +62,16 @@ const props = defineProps({
   view: { type: Object, default: null },
   cheat: { type: Boolean, default: false },
   fps: { type: Number, default: 60 },
+  budget: { type: Number, default: 600000 },      // splats in all; a change arrives through a tunnel
   // a touch screen: no distraction to ignore, and a switch to keep the screen awake where the browser can
   touch: { type: Boolean, default: false },
   keepAwake: { type: Boolean, default: false },
   wakeSupported: { type: Boolean, default: false },
   wakeNote: { type: String, default: '' },
+  channelName: { type: String, default: '' },     // touch: the channels live in a dialog, opened from a row here
   lastMouseMoveTime: { type: Number, default: Date.now() },
 });
-defineEmits(['next-biome', 'toggle-dreamlike', 'update:cheat', 'update:fps', 'update:keep-awake', 'credits']);
+defineEmits(['next-biome', 'toggle-dreamlike', 'update:cheat', 'update:fps', 'update:budget', 'update:keep-awake', 'channels', 'credits']);
 
 const NAMES = {
   downs: 'Farmland', pinewood: 'Pine forest', saltflat: 'Salt flat', nightcity: 'City at night',
@@ -108,6 +122,7 @@ const shouldFade = computed(() => currentTime.value - props.lastMouseMoveTime > 
 .label { flex: 0 0 auto; color: rgba(255, 255, 255, 0.85); }
 .value { flex: 1 1 auto; text-align: right; color: rgba(255, 255, 255, 0.55); font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
 .group { flex: 1 1 auto; display: flex; justify-content: flex-end; gap: 4px; }
+.group.tight { flex: 0 0 auto; }
 button {
   flex: 0 0 auto;
   background: rgba(255, 255, 255, 0.1);
@@ -132,4 +147,10 @@ button.on { background: rgba(102, 217, 239, 0.28); border-color: #66d9ef; }
 .view-controls.touch { padding: 8px 14px; }
 .view-controls.touch .row { min-height: 44px; }
 .view-controls.touch button { min-width: 56px; min-height: 34px; padding: 6px 12px; font-size: 14px; }
+/* on its side a phone has little height: closer rows, so the sheet still fits above the Hide bar */
+@media (orientation: landscape) and (max-height: 480px) {
+  .view-controls.touch { padding: 4px 14px; }
+  .view-controls.touch .row { min-height: 38px; }
+  .view-controls.touch button { min-height: 30px; padding: 4px 12px; }
+}
 </style>

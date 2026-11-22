@@ -26,13 +26,12 @@ const props = defineProps({
   channel: { type: Object, default: null },
   song: { type: Object, default: null },
   fpsCap: { type: Number, default: 60 },          // frames a second at most (the overlay's setting)
-  touch: { type: Boolean, default: false },       // a touch screen: a phone or tablet, with less to draw with
+  budget: { type: Number, default: 600000 },      // splats in all (the overlay's setting); budget= in the URL overrides it
 });
 // 'state' carries { biome, level, next } for the overlay whenever it changes
 const emit = defineEmits(['failed', 'state']);
 
 const params = readParams();
-const TOUCH_BUDGET = 300000;
 const canvasEl = ref(null);
 const ready = ref(false);
 const statsText = ref('');
@@ -149,9 +148,7 @@ async function play() {
     const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const { createEngine } = await import('../window/engine.js');
     startChannelId = props.channel ? props.channel.id : null;
-    // Phones and tablets get half the splats unless the URL says otherwise. The figure is a guess:
-    // it has not been measured on a real phone. The engine still lowers the resolution if it must.
-    if (props.touch && !params.budgetGiven) params.budget = TOUCH_BUDGET;
+    if (!params.budgetGiven) params.budget = props.budget;
     engine = createEngine({ canvas: canvasEl.value, params, reducedMotion, profile: getProfile(startChannelId) });
     engine.setRate(props.rate);
     await engine.ready;
@@ -175,6 +172,17 @@ async function play() {
 
 watch(() => props.rate, (r) => { if (engine) engine.setRate(r); });
 watch(() => props.fpsCap, (n) => { if (engine && !(params.fps > 0)) engine.setFpsCap(n); });
+// A new splat budget means building the world again, so it arrives the way a change of scenery
+// does: through a tunnel, with the same scenery on the far side.
+let budgetQueued = false;
+watch(() => props.budget, (n) => {
+  if (params.budgetGiven || !(n > 0) || n === params.budget) return;
+  params.budget = n;
+  if (!engine) return;
+  engine.director.queueTransition({ ...pending() });
+  budgetQueued = true;
+  publish();
+});
 
 // The audio element is replaced if CORS loading fails; follow it, and drop analysis if CORS is off.
 watch(() => [props.audioElement, props.audioCors], () => {
@@ -236,7 +244,8 @@ function publish() {
   if (!engine) return;
   const s = engine.director.state, p = pending();
   const next = (p.biome !== s.biome || p.level !== s.level || p.seed !== s.seed) ? { biome: p.biome, level: p.level } : null;
-  const state = { biome: s.biome, level: s.level, inTunnel: !!s.tunnel, next };
+  if (budgetQueued && !s.tunnel && !s.queued) budgetQueued = false;
+  const state = { biome: s.biome, level: s.level, inTunnel: !!s.tunnel, next, budgetQueued, budgetFixed: !!params.budgetGiven };
   const key = JSON.stringify(state);
   if (key !== lastPublished) { lastPublished = key; emit('state', state); }
 }

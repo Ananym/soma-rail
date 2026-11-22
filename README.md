@@ -18,6 +18,7 @@ While the mouse is moving an overlay shows the channel list, what is playing, an
 - **Dreamlike** switches the surreal version on or off (through a tunnel). Once touched, the channel no longer decides it.
 - **Ignore distraction** keeps the train at speed and the music up whatever you do; the overlay still comes and goes with the mouse.
 - **Max frame rate** caps the view at 30, 60 or 120 frames a second (60 unless you change it).
+- **Splats** sets how much the view is built from: 300k, 600k or 900k splats. It starts at 600k on a desktop and 300k on a phone or tablet; lower it if the view stutters. A change arrives through a tunnel, because the world is rebuilt behind it.
 
 The pointer is a small soft light that dims as you settle and is gone when your distraction reaches zero.
 
@@ -25,12 +26,13 @@ The pointer is a small soft light that dims as you settle and is gone when your 
 
 Where the main pointer is a finger there is no distraction mechanic: touching the screen is how you ask for the controls, not a lapse of attention.
 
-- **Tap** the glass for the overlay; tap the glass again to put it away, or leave it and it fades after five seconds. On a phone the three panels are laid out as one sheet: what is playing with a **pause** button, the channels, and the view's controls.
+- **Tap** the glass for the overlay. It is laid out as one sheet: what is playing with a **pause** button at the top, the view's controls at the bottom, and under them a **Hide** bar that puts the overlay away at once. A tap on the glass between them does the same, and left alone it fades after five seconds.
+- **Channel / Change** opens the channel list as a dialog of its own; choosing a channel closes it.
 - **Pause** brakes the train to a stop and silences the radio; play pulls away again.
 - **In the background** (another app, another tab, the screen locked) the radio stops at once. It starts again by itself when you come back, or asks for a tap where the browser insists on one.
 - **Keep screen on** (off unless you switch it on) stops the phone sleeping while the train is running, where the browser allows it.
 - The window works **both ways up**. Held upright it is a tall window: a narrower stretch of country than on its side, with much more sky above it and some more ground below.
-- A phone draws half as many splats as a desktop unless `budget` says otherwise. That figure is a guess, not a measurement.
+- A phone starts at 300k splats, half a desktop's (the **Splats** control changes it). That figure is a guess, not a measurement.
 
 ## Running Locally
 
@@ -62,7 +64,7 @@ Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
 | --- | --- | --- |
 | `level` | from the channel | Surreal level: `0` plausible, `1` dreamlike |
 | `biome` | from the channel | Force one biome: `downs`, `pinewood`, `saltflat`, `nightcity`, `karst`, `dunes`, `himalaya`, `motorway`, `winter`, `fuji` or `tropics` |
-| `budget` | `600000` (`300000` on a touch screen) | Total splats; lower it if the view stutters |
+| `budget` | the overlay's setting | Total splats, for example `450000`; overrides the overlay's Splats control and hides it |
 | `kmh` | `100` | Cruising speed |
 | `shutter` | `0.02` | Motion-blur length in seconds |
 | `blurKeep` | `0.6` | How solid blurred splats stay, 0 to 1 |

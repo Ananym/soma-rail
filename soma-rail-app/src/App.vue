@@ -8,6 +8,7 @@ import StartButton from './components/StartButton.vue';
 import ViewControls from './components/ViewControls.vue';
 import SoftCursor from './components/SoftCursor.vue';
 import CreditsPanel from './components/CreditsPanel.vue';
+import HideBar from './components/HideBar.vue';
 import { useSomaFM } from './composables/useSomaFM';
 import { useInteraction } from './composables/useInteraction';
 import { usePlaybackControl } from './composables/usePlaybackControl';
@@ -41,6 +42,7 @@ const pageVisible = ref(typeof document === 'undefined' || !document.hidden);
 const needsTap = ref(false);                    // the browser refused to restart the radio without a touch
 // whether the journey should be under way (touch screens only; elsewhere distraction decides)
 const running = computed(() => hasStarted.value && !userPaused.value && pageVisible.value && !needsTap.value);
+const splatBudget = computed(() => savedBudget.value || (touch.value ? 300000 : 600000));
 
 // Interaction tracking
 const {
@@ -48,6 +50,7 @@ const {
   lastMouseMoveTime,
   isFocused,
   holdOverlay,
+  hideOverlay,
   resetGracePeriod
 } = useInteraction({ touch, running: computed(() => !hasStarted.value || running.value) });   // before Start the train is not held back
 // The overlay shows for a few seconds after the mouse moves, but never while the window is not
@@ -61,9 +64,13 @@ const savedVolume = useLocalStorage('volume', 0.7);
 // its speed and the music its volume), and the frame-rate cap.
 const cheat = useLocalStorage('ignoreDistraction', false);
 const fpsCap = useLocalStorage('fpsCap', 60);
+// Splats in all: 0 until the listener chooses, which means the default for the kind of device
+// (see splatBudget above: a touch screen gets half a desktop's).
+const savedBudget = useLocalStorage('splatBudget', 0);
 // What the train window is showing and what is coming, for the overlay.
 const viewState = ref(null);
 const showCredits = ref(false);
+const showChannels = ref(false);    // touch: the channel list as a dialog
 
 // Playback control
 const {
@@ -208,6 +215,7 @@ onMounted(async () => {
 
 // Handle channel selection
 async function handleChannelSelect(channelId) {
+  showChannels.value = false;
   await setChannel(channelId);
   savedChannelId.value = channelId;
 }
@@ -256,7 +264,7 @@ onMounted(() => {
       :channel="currentChannel"
       :song="currentSong"
       :fps-cap="fpsCap"
-      :touch="touch"
+      :budget="splatBudget"
       @failed="handleWindowFailed"
       @state="viewState = $event"
     />
@@ -292,7 +300,7 @@ onMounted(() => {
          they are laid out together as one sheet (see .sheet below). -->
     <div class="panels" :class="{ sheet: touch }">
     <ChannelSelector
-      v-if="hasStarted"
+      v-if="hasStarted && !touch"
       :channels="channels"
       :current-channel-id="currentChannelId"
       :is-loading="isLoading"
@@ -307,10 +315,14 @@ onMounted(() => {
       :view="viewFailed ? null : viewState"
       :cheat="cheat"
       :fps="fpsCap"
+      :budget="splatBudget"
+      @update:budget="savedBudget = $event"
       :touch="touch"
       :keep-awake="keepAwake"
       :wake-supported="wakeSupported"
       :wake-note="wakeNote"
+      :channel-name="currentChannel ? currentChannel.title : ''"
+      @channels="showChannels = true"
       @update:keep-awake="setKeepAwake"
       :last-mouse-move-time="overlayMoveTime"
       @next-biome="windowRef && windowRef.nextBiome()"
@@ -332,6 +344,22 @@ onMounted(() => {
       @update:volume="baseVolume = $event"
       @toggle-pause="togglePause"
     />
+
+    <HideBar v-if="hasStarted && touch" :last-mouse-move-time="overlayMoveTime" @hide="hideOverlay" />
+    </div>
+
+    <!-- touch: the channels as a dialog over everything, so the sheet is not squeezed around them -->
+    <div v-if="touch && hasStarted && showChannels" class="channel-modal" @click.self="showChannels = false">
+      <ChannelSelector
+        modal
+        touch
+        :channels="channels"
+        :current-channel-id="currentChannelId"
+        :is-loading="isLoading"
+        :error="error"
+        @select-channel="handleChannelSelect"
+        @close="showChannels = false"
+      />
     </div>
 
     <CreditsPanel v-if="showCredits" @close="showCredits = false" />
@@ -382,10 +410,10 @@ onMounted(() => {
 
 /* With a mouse the wrapper does nothing: each panel is fixed in its own corner. */
 .panels { display: contents; }
-/* On a touch screen the three panels share the screen as one sheet: what is playing (and the pause
-   button) at the top, the channels in the middle, scrolling, and the view's controls at the bottom.
-   On its side the channels take the left half and the other two the right. Taps between the panels
-   fall through to the glass. */
+/* On a touch screen the panels share the screen as one sheet: what is playing (and the pause
+   button) at the top, the view's controls at the bottom, and under them a bar that puts the whole
+   overlay away. The glass shows between; taps there fall through to it. On its side, what is
+   playing takes the left and the controls the right. The channels open as a dialog (.channel-modal). */
 .panels.sheet {
   display: grid;
   position: fixed;
@@ -394,7 +422,7 @@ onMounted(() => {
   padding: 12px;
   padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   gap: 10px;
-  grid-template: "now" auto "channels" minmax(0, 1fr) "view" auto / minmax(0, 1fr);
+  grid-template: "now" auto "." minmax(0, 1fr) "view" auto "hide" auto / minmax(0, 1fr);
   z-index: 100;
   pointer-events: none;
 }
@@ -406,13 +434,26 @@ onMounted(() => {
 }
 .panels.sheet > :not(.fade-out) { pointer-events: auto; }
 .panels.sheet > .now-playing { grid-area: now; }
-.panels.sheet > .channel-selector { grid-area: channels; overscroll-behavior: contain; }
 .panels.sheet > .view-controls { grid-area: view; overflow-y: auto; max-height: 100%; }
+.panels.sheet > .hide-bar { grid-area: hide; }
 @media (orientation: landscape) {
   .panels.sheet {
-    grid-template: "channels now" auto "channels view" minmax(0, 1fr) / minmax(0, 1fr) minmax(0, 1fr);
+    grid-template: "now view" minmax(0, 1fr) "hide hide" auto / minmax(0, 1fr) minmax(0, 1fr);
   }
+  .panels.sheet > .now-playing { align-self: start; }
   .panels.sheet > .view-controls { align-self: end; }
+}
+
+.channel-modal {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
 }
 
 .resume-overlay {

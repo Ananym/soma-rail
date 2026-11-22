@@ -5,7 +5,7 @@ import { CONFIG } from '../config';
 // the overlay is asked for, not a lapse of attention. There the score follows `running` (a ref:
 // whether the journey should be under way) instead: not running, it climbs and the train brakes;
 // running, it falls and the train pulls away. Taps bring the overlay up and put it away.
-const PANELS = '.now-playing, .channel-selector, .view-controls, .credits-backdrop, .start-overlay, .resume-overlay';
+const PANELS = '.now-playing, .channel-selector, .channel-modal, .view-controls, .hide-bar, .credits-backdrop, .start-overlay, .resume-overlay';
 const TOUCH_FADE_DELAY = 5000;    // ms without a touch before the overlay fades on a touch screen
 
 export function useInteraction({ touch = null, running = null } = {}) {
@@ -78,8 +78,15 @@ export function useInteraction({ touch = null, running = null } = {}) {
   // `lastMouseMoveTime` is what the panels fade by, CONFIG.UI_FADE_DELAY after it. A touch screen
   // gets longer (no pointer rests on a panel to hold it open), so the time is set ahead by the
   // difference.
-  const overlayShown = () => Date.now() - lastMouseMoveTime.value <= CONFIG.UI_FADE_DELAY;
+  // Whether the overlay is up, judged by what is on the screen where there is something to judge by:
+  // the panels fade a moment after their time runs out (longer on a page that is working hard), and
+  // a tap must answer what the listener sees.
+  const overlayShown = () => {
+    const panel = typeof document !== 'undefined' && document.querySelector('.view-controls, .now-playing');
+    return panel ? !panel.classList.contains('fade-out') : Date.now() - lastMouseMoveTime.value <= CONFIG.UI_FADE_DELAY;
+  };
   const holdOverlay = () => { lastMouseMoveTime.value = Date.now() + (TOUCH_FADE_DELAY - CONFIG.UI_FADE_DELAY); };
+  const hideOverlay = () => { lastMouseMoveTime.value = Date.now() - 10000; };
   // A tap is acted on at `click`, not when the finger lands: by then the browser has already
   // decided what was tapped, so a tap that brings the overlay up cannot also press a button that
   // appears under the finger.
@@ -87,7 +94,7 @@ export function useInteraction({ touch = null, running = null } = {}) {
     if (!isTouch() || Date.now() < gracePeriodEnd.value) return;
     const t = event.target;
     const onPanel = !!(t && t.closest && t.closest(PANELS));
-    if (overlayShown() && !onPanel) lastMouseMoveTime.value = Date.now() - 10000;   // a tap on the glass puts it away
+    if (overlayShown() && !onPanel) hideOverlay();   // a tap on the glass puts it away
     else holdOverlay();
   }
   // Anything done to a panel that is showing keeps it showing: a press, a scroll of the channels.
@@ -214,6 +221,7 @@ export function useInteraction({ touch = null, running = null } = {}) {
     lastMouseMoveTime,
     isMouseMoving,
     holdOverlay,
+    hideOverlay,
     startMonitoring,
     stopMonitoring,
     resetGracePeriod

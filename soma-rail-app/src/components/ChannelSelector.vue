@@ -1,6 +1,7 @@
 <template>
-  <div class="channel-selector" :class="{ 'fade-out': shouldFade, touch }">
+  <div ref="rootEl" class="channel-selector" :class="{ 'fade-out': shouldFade && !modal, touch, modal }" :role="modal ? 'dialog' : null" :aria-modal="modal ? 'true' : null" aria-label="Select channel">
     <div class="selector-header">
+      <button v-if="modal" type="button" class="close" aria-label="Close channels" @click="$emit('close')">Close</button>
       <h2>Select Channel</h2>
       <div class="support-message">
         <p>
@@ -67,10 +68,24 @@ const props = defineProps({
   touch: {
     type: Boolean,
     default: false
+  },
+  // On a touch screen the channels open as a dialog of their own (see App.vue): it does not fade
+  // with the rest of the overlay, and has a Close button.
+  modal: {
+    type: Boolean,
+    default: false
   }
 });
 
-const emit = defineEmits(['select-channel']);
+const emit = defineEmits(['select-channel', 'close']);
+
+// As a dialog it opens at the channel that is playing, not at the top of a long list.
+const rootEl = ref(null);
+onMounted(() => {
+  if (!props.modal || !rootEl.value) return;
+  const active = rootEl.value.querySelector('.channel-item.active');
+  if (active && active.scrollIntoView) active.scrollIntoView({ block: 'center' });
+});
 
 const currentTime = ref(Date.now());
 let intervalId = null;
@@ -186,9 +201,12 @@ function selectChannel(channelId) {
   text-align: left;
 }
 
-.channel-item:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.3);
+/* only where a pointer can hover: on a touch screen the last thing tapped would stay lit */
+@media (hover: hover) {
+  .channel-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
 }
 
 .channel-item.active {
@@ -225,6 +243,24 @@ function selectChannel(channelId) {
 .channel-selector.touch .channel-item { padding: 8px; gap: 12px; }
 .channel-selector.touch .channel-image { width: 44px; height: 44px; }
 .channel-selector.touch .channel-info h3 { font-size: 15px; margin-bottom: 2px; }
+
+/* as a dialog (touch screens): placed and sized by App.vue's .channel-modal */
+.channel-selector.modal { position: static; width: 100%; max-width: 560px; max-height: 100%; overscroll-behavior: contain; }
+.channel-selector.modal .selector-header { position: relative; }
+.close {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  min-height: 36px;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+.close:focus-visible { outline: 2px solid #66d9ef; outline-offset: 2px; }
 
 /* Scrollbar styling */
 .channel-selector::-webkit-scrollbar {

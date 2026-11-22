@@ -25,7 +25,7 @@ const outDir = process.argv[2] || '.';
     // The plain address, as a visitor arrives: the train window, with music analysis live.
     // (At the full default splat budget a software renderer draws too slowly for the analysis to
     // settle, so this case only requires that the radio is attached and its audio context running.)
-    { name: 'default', query: '', wait: 20000, expect: 'window', tap: 'attached' },
+    { name: 'default', query: '', wait: 20000, expect: 'window', tap: 'attached', budgetControl: true },
     // the listener clicks Start before the stream is known: one click must still start the radio
     { name: 'early-click', query: '?budget=120000&seed=check', wait: 25000, expect: 'window', early: true },
     { name: 'tuned', query: Q, wait: 20000, expect: 'window', tap: true, distraction: true },
@@ -79,6 +79,24 @@ const outDir = process.argv[2] || '.';
     // (How fast it brakes cannot be judged here: on a software renderer the page's timers starve,
     // so the distraction score climbs far more slowly than on a real machine.)
     let brake = null;
+    // The overlay's splat budget (only offered when the URL sets none): the default for a desktop is
+    // 600k, and choosing another queues a tunnel to rebuild the world behind.
+    if (c.budgetControl) {
+      const B = await page.evaluate(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const row = () => [...document.querySelectorAll('.view-controls .row')].find((r) => r.querySelector('.label').textContent.trim() === 'Splats');
+        if (!row()) return { row: false };
+        const on = () => { const b = row().querySelector('button.on'); return b ? b.textContent.trim() : null; };
+        const options = [...row().querySelectorAll('button')].map((b) => b.textContent.trim());
+        const before = on();
+        [...row().querySelectorAll('button')].find((b) => b.textContent.trim() === '300k').click();
+        await wait(800);
+        const d = window.__trainWindow.director.state;
+        return { row: true, options, before, after: on(), note: row().querySelector('.value').textContent.trim(), tunnel: !!(d.tunnel || d.queued) };
+      });
+      B.ok = B.row && B.options.join() === '300k,600k,900k' && B.before === '600k' && B.after === '300k' && B.note === 'Queued' && B.tunnel;
+      brake = B;
+    }
     if (c.touch) {
       const T = {};
       const rate = () => page.evaluate(() => window.__trainWindow.director.state.rate);
@@ -104,16 +122,24 @@ const outDir = process.argv[2] || '.';
       T.shownAfterTap = await until(shown, 4000);
       await page.waitForTimeout(1500);
       T.tapPressedNothing = (await playing()) === srcBefore;     // the tap that reveals the channels must not choose one
-      // (a slow renderer may have let it fade already: bring it back first, then tap it away)
-      if (!(await shown())) await press('canvas');
-      T.shownBeforeSecondTap = await shown();
-      await press('canvas');
-      T.hiddenAfterSecondTap = await until(async () => !(await shown()), 3000);
-      await press('canvas');
+      // Done inside the page in one go: step by step from here, this renderer is slow enough for the
+      // overlay to fade by itself between two steps, and the tap would then bring it up instead.
+      const glass = await page.evaluate(async () => {
+        const c = document.querySelector('canvas'), np = document.querySelector('.now-playing');
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const up = () => !np.classList.contains('fade-out');
+        if (!up()) { c.click(); await wait(400); }
+        const before = up();
+        c.click(); await wait(400);
+        const after = up();
+        c.click(); await wait(400);
+        return { before, after, again: up() };
+      });
+      T.shownBeforeSecondTap = glass.before; T.hiddenAfterSecondTap = glass.before && !glass.after; T.shownByThirdTap = glass.again;
       // the controls a phone gets
       T.rows = await page.evaluate(() => [...document.querySelectorAll('.view-controls .label')].map((e) => e.textContent.trim()));
       T.wakeLockOffered = await page.evaluate(() => 'wakeLock' in navigator);
-      T.controlsOk = !T.rows.includes('Ignore distraction') && T.rows.includes('Scenery') && (!T.wakeLockOffered || T.rows.includes('Keep screen on'));
+      T.controlsOk = !T.rows.includes('Ignore distraction') && T.rows.includes('Scenery') && T.rows[0] === 'Channel' && (!T.wakeLockOffered || T.rows.includes('Keep screen on'));
       T.noVolume = await page.evaluate(() => !document.querySelector('.volume-control'));
       // pause brakes the train and silences the radio; play brings both back
       T.overlayBeforePause = await shown();
@@ -137,13 +163,15 @@ const outDir = process.argv[2] || '.';
       T.noResumePrompt = await page.evaluate(() => !document.querySelector('.resume-overlay'));
       // both ways up: every panel inside the screen, none overlapping another
       const layout = () => page.evaluate(() => {
-        const r = ['.now-playing', '.channel-selector', '.view-controls'].map((s) => document.querySelector(s).getBoundingClientRect());
-        const inside = r.every((b) => b.left >= 0 && b.top >= 0 && b.right <= innerWidth + 0.5 && b.bottom <= innerHeight + 0.5 && b.width > 120 && b.height > 60);
+        const r = ['.now-playing', '.view-controls', '.hide-bar'].map((s) => document.querySelector(s).getBoundingClientRect());
+        const inside = r.every((b) => b.left >= 0 && b.top >= 0 && b.right <= innerWidth + 0.5 && b.bottom <= innerHeight + 0.5 && b.width > 120 && b.height > 40);
         const apart = (a, b) => a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5;
         const c = document.querySelector('.window-container canvas');
         return { inside, apart: apart(r[0], r[1]) && apart(r[1], r[2]) && apart(r[0], r[2]), canvas: [c.clientWidth, c.clientHeight], view: [innerWidth, innerHeight] };
       });
-      const keep = () => page.evaluate(() => { clearInterval(window.__keep); window.__keep = setInterval(() => document.querySelector('.now-playing').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })), 400); });
+      // For the screenshots only, the overlay is pinned open: a capture takes this renderer longer
+      // than the overlay stays up.
+      const keep = () => page.evaluate(() => { const st = document.createElement('style'); st.id = 'pin-overlay'; st.textContent = '.app .fade-out { opacity: 1 !important; }'; document.head.appendChild(st); });
       await press('.now-playing'); await keep();
       T.portrait = await layout();
       await page.screenshot({ path: path.join(outDir, 'app-touch-portrait.png'), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
@@ -152,11 +180,37 @@ const outDir = process.argv[2] || '.';
       T.landscape = await layout();
       T.engineAspect = await page.evaluate(() => { const c = document.querySelector('.window-container canvas'); return +(c.width / c.height).toFixed(2); });
       await page.screenshot({ path: path.join(outDir, 'app-touch-landscape.png'), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
-      await page.evaluate(() => clearInterval(window.__keep));
+      await page.evaluate(() => document.getElementById('pin-overlay').remove());
+      // the bar at the bottom puts the overlay away at once
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForTimeout(1500);
+      const bar = await page.evaluate(async () => {
+        const c = document.querySelector('canvas'), np = document.querySelector('.now-playing');
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const up = () => !np.classList.contains('fade-out');
+        if (!up()) { c.click(); await wait(400); }
+        const before = up();
+        document.querySelector('.hide-bar').click(); await wait(300);
+        return { before, after: up() };
+      });
+      T.shownBeforeHide = bar.before; T.hideBarHides = bar.before && !bar.after;
+      T.noSplatsRowWithUrlBudget = await page.evaluate(() => ![...document.querySelectorAll('.view-controls .label')].some((e) => e.textContent.trim() === 'Splats'));
+      // the channels are a dialog: opened from the controls, closed by choosing one, and the choice plays
+      await press('canvas');
+      T.noListInSheet = await page.evaluate(() => !document.querySelector('.channel-selector'));
+      await press('.view-controls .row:nth-child(1) button');
+      await page.waitForTimeout(500);
+      T.channelDialog = await page.evaluate(() => { const d = document.querySelector('.channel-modal .channel-selector'); return d ? { items: d.querySelectorAll('.channel-item').length, close: !!d.querySelector('.close') } : null; });
+      await page.screenshot({ path: path.join(outDir, 'app-touch-channels.png'), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
+      const srcWas = await playing();
+      await page.evaluate(() => { const b = [...document.querySelectorAll('.channel-modal .channel-item')].find((e) => !e.classList.contains('active')); b.click(); });
+      T.dialogClosedByChoice = await until(() => page.evaluate(() => !document.querySelector('.channel-modal')), 3000);
+      T.choicePlays = await until(async () => (await playing()) !== srcWas && !(await audioPaused()), 60000);
       const lay = (l) => l.inside && l.apart && l.canvas[0] === l.view[0] && l.canvas[1] === l.view[1];
       T.ok = T.mediaQuery && T.touchClass && T.noDistraction && T.hiddenAtFirst && T.shownAfterTap && T.tapPressedNothing && T.hiddenAfterSecondTap && T.controlsOk && T.noVolume
         && T.pausedAudio && T.pausedTrain && T.playsAgain && T.silentInBackground && T.stillSilent && T.resumesOnReturn && T.noResumePrompt
-        && lay(T.portrait) && lay(T.landscape) && Math.abs(T.engineAspect - 844 / 390) < 0.05;
+        && lay(T.portrait) && lay(T.landscape) && Math.abs(T.engineAspect - 844 / 390) < 0.05
+        && T.shownByThirdTap && T.noSplatsRowWithUrlBudget && T.shownBeforeHide && T.hideBarHides && T.noListInSheet && !!T.channelDialog && T.channelDialog.items > 10 && T.channelDialog.close && T.dialogClosedByChoice && T.choicePlays;
       brake = T;
     }
     if (c.distraction) {
@@ -205,7 +259,7 @@ const outDir = process.argv[2] || '.';
       await page.waitForTimeout(6000);
       const c4 = await D();
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-      await press('.view-controls .row:nth-child(5) button', 'Credits');
+      await press('.view-controls .row button', 'Credits');
       // the photo credits are fetched when the panel opens: wait for them, not for a fixed moment
       await page.waitForFunction(() => document.querySelectorAll('.credits li').length >= 8, null, { timeout: 20000 }).catch(() => {});
       const credits = await page.evaluate(() => ({ open: !!document.querySelector('.credits'), items: document.querySelectorAll('.credits li').length, soma: !!document.querySelector('.credits a[href*="somafm.com"]') }));
@@ -221,7 +275,7 @@ const outDir = process.argv[2] || '.';
     // The minutes-long IDLE run rides out the odd dropped poll through a proxy; nothing else is excused.
     if (process.env.IDLE === '1') for (let i = ours.length - 1; i >= 0; i--) if (/net::ERR_CONNECTION_RESET/.test(ours[i])) ours.splice(i, 1);
     if (youtube.length) ours.push(`requests to YouTube hosts: ${youtube.length}`);
-    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log(c.touch ? 'touch:' : 'brake:', JSON.stringify(brake));
+    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log(c.touch ? 'touch:' : c.budgetControl ? 'budget:' : 'brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }
     const audioOk = state.audio && !state.audio.paused && state.audio.time > 0.5;
     const viewOk = c.expect === 'notice'
