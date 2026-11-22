@@ -1,14 +1,26 @@
-// "Himalaya": a cold, high, narrow Himalayan valley. The railway runs along one side of it; the
-// ground falls away from the line to a stony bed with a braided grey-blue glacial river, and a few
-// hundred metres beyond it a mountain wall rises over the window: spurs coming down to the valley
-// floor with gullies and couloirs between them, cliff bands, scree fans, side valleys with a
-// glacier snout or a torrent, villages of flat-roofed whitewashed and stone houses on terraced
-// benches low down, a monastery (gompa) perched on a spur now and then, snow lying in the gullies
-// and on the ledges above. Behind and between its summits stands the great range: huge
+// "Himalaya": a high, narrow Himalayan valley in late spring. The railway runs along one side of
+// it; the ground falls away from the line to a stony bed with a braided grey-blue glacial river,
+// and a few hundred metres beyond it a mountain wall rises over the window: spurs coming down to
+// the valley floor with gullies and couloirs between them, cliff bands, scree fans, side valleys
+// with a glacier snout or a torrent, villages of flat-roofed whitewashed and stone houses on
+// terraced benches low down, a monastery (gompa) perched on a spur now and then, snow lying in the
+// gullies and on the ledges above. Behind and between its summits stands the great range: huge
 // snow-and-rock peaks with glaciers and cloud banners.
 // Near the line: yaks grazing in loose herds, blue sheep on rocky outcrops, chortens, mani walls,
 // tall prayer-flag poles and prayer-flag bunting everywhere, and suspension footbridges across
 // the river hung with flags.
+//
+// What grows (see "Land cover"): the valley changes along the line between high bare stretches
+// (frost grass, tussocks, juniper, old snow in the hollows, bare poplars) and lower lush ones, which
+// are most of it: fir and blue pine forest on the shaded flanks and gullies of the lower wall up to
+// a ragged tree line, birch along the river, a belt of rhododendron in flower above the trees,
+// stands of tall firs and birches on the near slope, terraced barley, buckwheat and mustard in
+// walled plots stepping down to the river and on the fans across it, poplars and willows in leaf
+// about the houses, flowers by the line.
+// Scale: the valley was found sparse because its human things were true to size and far away. They
+// are now built larger than life (village houses 1.6 times, monasteries 1.5, hamlet houses 1.4,
+// yaks 1.8 to 2.3, people 1.6) and nearer; shrines stand 31-40 m from the line every kilometre or
+// so, and a footpath with people on it runs the whole way along the near slope.
 //
 // Structure (as karst.js): one pure layout of WORLD x and distance, hashed from the world seed and
 // cached per world: the valley profile, villages, monasteries, hamlets, flag sites, herds, blue
@@ -85,7 +97,22 @@ const C = {
   pole: [0.46, 0.39, 0.3],
   cord: [0.3, 0.28, 0.25],
   horn: [0.78, 0.74, 0.64],
+  // what grows (the lower, lusher stretches)
+  turf: [0.36, 0.47, 0.19], turfGold: [0.52, 0.52, 0.22], turfDark: [0.22, 0.32, 0.14],
+  alp: [0.38, 0.46, 0.2], alpGold: [0.55, 0.5, 0.24],
+  forest: [0.085, 0.15, 0.1], forestLit: [0.13, 0.21, 0.11], birchWood: [0.3, 0.4, 0.15],
+  fir: [0.075, 0.15, 0.1], pine: [0.15, 0.24, 0.19], birch: [0.31, 0.43, 0.16], birchBark: [0.72, 0.7, 0.64],
+  poplar: [0.3, 0.44, 0.15], willow: [0.38, 0.47, 0.2], rhodo: [0.09, 0.2, 0.1],
 };
+// Rhododendron in flower: crimson, rose, pale pink, magenta, white.
+const BLOOM = [[0.78, 0.1, 0.17], [0.8, 0.3, 0.46], [0.8, 0.56, 0.66], [0.62, 0.12, 0.4], [0.8, 0.78, 0.74]];
+// Crops, field by field: green barley, ripe barley, buckwheat in flower, mustard, potatoes, plough.
+// (mostly greens and golds: with more than a plot in ten of pink or yellow the valley turned into a
+// bulb farm)
+const CROPS = [[0.35, 0.47, 0.2], [0.45, 0.52, 0.24], [0.62, 0.54, 0.3], [0.68, 0.57, 0.55], [0.68, 0.62, 0.22], [0.22, 0.35, 0.17], [0.42, 0.33, 0.24]];
+const cropOf = (u) => CROPS[u < 0.32 ? 0 : u < 0.56 ? 1 : u < 0.73 ? 2 : u < 0.78 ? 3 : u < 0.82 ? 4 : u < 0.92 ? 5 : 6];
+// Alpine flowers by the line, in drifts of one or two colours.
+const FLOWERS = [[0.8, 0.72, 0.14], [0.5, 0.3, 0.72], [0.8, 0.4, 0.56], [0.8, 0.8, 0.76], [0.24, 0.4, 0.78]];
 // Prayer flags: blue, white, red, green, yellow, always in that order. Saturated, capped at 0.8.
 const FLAGS = [[0.1, 0.28, 0.72], [0.8, 0.8, 0.78], [0.76, 0.12, 0.09], [0.08, 0.52, 0.24], [0.8, 0.66, 0.08]];
 const YAKS = [[0.085, 0.072, 0.064], [0.1, 0.08, 0.07], [0.19, 0.12, 0.075], [0.075, 0.065, 0.06], [0.28, 0.25, 0.23]];
@@ -146,8 +173,8 @@ const ridge = (v) => 1 - Math.abs(2 * v - 1);
 // Everything about the valley that depends on x alone and changes slowly (over 600 m or more) is
 // kept on an 8 m grid per world and interpolated: the height function is called three times for
 // every ground splat, and these nine noises were half its cost.
-const VAL = { bn: 0, bf: 0, fy: 0, head: 0, A0: 0, S: 0, cm: 0, mz: 0, dm: 0 };
-const CG = 8, CN = 8192, CP = 9;
+const VAL = { bn: 0, bf: 0, fy: 0, head: 0, A0: 0, S: 0, cm: 0, mz: 0, dm: 0, lu: 0, fm: 0, wd: 0 };
+const CG = 8, CN = 8192, CP = 12;
 const colCaches = new Map();
 let colWs = NaN, colTag = null, colVal = null;
 function colSlot(ws, k) {
@@ -156,10 +183,14 @@ function colSlot(ws, k) {
     const wx = k * CG, o = i * CP;
     const bn = 185 + 30 * (2 * noise1(wx / 2300, ws + 11) - 1) + 12 * (2 * noise1(wx / 640, ws + 12) - 1);
     const bf = bn + 45 + 50 * noise1(wx / 1700, ws + 13);
-    colVal[o] = bn; colVal[o + 1] = bf; colVal[o + 2] = -40 - 14 * noise1(wx / 4100, ws + 14);
+    colVal[o] = bn; colVal[o + 1] = bf; colVal[o + 2] = -32 - 11 * noise1(wx / 4100, ws + 14);
     colVal[o + 3] = bf + WALL.D1 + WALL.D2 + WALL.BAY * noise1(wx / 1500, ws + 48);   // the gully-head line
     colVal[o + 4] = crestA(ws, wx); colVal[o + 5] = crestS(ws, wx);
     colVal[o + 6] = noise1(wx / 1100, ws + 37); colVal[o + 7] = noise1(wx / 1300, ws + 38); colVal[o + 8] = noise1(wx / 600, ws + 39);
+    // what grows (see "Land cover"): lu 0 a high bare stretch .. 1 a lower, wooded and farmed one
+    // (barer where the snow falls); fm the farmed stretches within it, wd the wooded ones
+    const lu = 0.1 + 0.9 * smooth(0.14, 0.4, noise1(wx / 5200, ws + 2001)) * (1 - 0.7 * smooth(0.56, 0.75, noise1(wx / 2700, ws + 1711)));
+    colVal[o + 9] = lu; colVal[o + 10] = smooth(0.4, 0.58, noise1(wx / 1900, ws + 2002)) * Math.sqrt(lu); colVal[o + 11] = smooth(0.36, 0.56, noise1(wx / 800, ws + 2003)) * lu;
     colTag[i] = k;
   }
   return i * CP;
@@ -175,6 +206,7 @@ function valleyAt(ws, wx) {
   VAL.bn = V[a] + (V[b] - V[a]) * t; VAL.bf = V[a + 1] + (V[b + 1] - V[a + 1]) * t; VAL.fy = V[a + 2] + (V[b + 2] - V[a + 2]) * t;
   VAL.head = V[a + 3] + (V[b + 3] - V[a + 3]) * t; VAL.A0 = V[a + 4] + (V[b + 4] - V[a + 4]) * t; VAL.S = V[a + 5] + (V[b + 5] - V[a + 5]) * t;
   VAL.cm = V[a + 6] + (V[b + 6] - V[a + 6]) * t; VAL.mz = V[a + 7] + (V[b + 7] - V[a + 7]) * t; VAL.dm = V[a + 8] + (V[b + 8] - V[a + 8]) * t;
+  VAL.lu = V[a + 9] + (V[b + 9] - V[a + 9]) * t; VAL.fm = V[a + 10] + (V[b + 10] - V[a + 10]) * t; VAL.wd = V[a + 11] + (V[b + 11] - V[a + 11]) * t;
   return VAL;
 }
 
@@ -438,7 +470,7 @@ function channelAt(W, wx, u, bw) {
 function mainChannelD(W, wx) { const v = valleyAt(W.ws, wx); return v.bn + (v.bf - v.bn) * channelCentre(W, wx, 0); }
 
 // --- villages on the facing slope: tiers of houses stepped up the mountainside ---
-const VCELL = 2300;
+const VCELL = 2300, VK = 1.6;
 function village(W, i) { return cache(W, 'v', i, () => makeVillage(W, i)); }
 // Where a village stands, from hashes alone (the height function reads it to cut the terraces, so it
 // must not touch the terrain itself).
@@ -449,9 +481,11 @@ function villageSite(ws, i) {
   if (v !== undefined) return v;
   v = null;
   if (hh(i, 1, ws + 801) < 0.78) {
-    const sc = 30 + 210 * Math.pow(hh(i, 3, ws + 801), 1.2);
-    const nT = 3 + Math.floor(hh(i, 5, ws + 801) * 4), sp = 18 + 10 * hh(i, 6, ws + 801);
-    v = { cx: (i + 0.2 + 0.6 * hh(i, 2, ws + 801)) * VCELL, sc, R: 70 + 90 * hh(i, 4, ws + 801), nT, tsp: sp, sLo: sc - sp * nT / 2 - 20, sHi: sc + sp * nT / 2 + 15 };
+    // (VK: the villages are built larger than life, houses, lanes and terraces alike, and low on
+    // the wall, since at 450-700 m a true-sized house is a dozen pixels)
+    const sc = 20 + 150 * Math.pow(hh(i, 3, ws + 801), 1.2);
+    const nT = 3 + Math.floor(hh(i, 5, ws + 801) * 4), sp = (18 + 10 * hh(i, 6, ws + 801)) * VK;
+    v = { cx: (i + 0.2 + 0.6 * hh(i, 2, ws + 801)) * VCELL, sc, R: (70 + 90 * hh(i, 4, ws + 801)) * 1.35, nT, tsp: sp, sLo: sc - sp * nT / 2 - 20, sHi: sc + sp * nT / 2 + 15 };
     // the bench's spur and rib values (taken at its middle) and its foot behind the head line
     v.sp = spurOf(ws, v.cx, 0); v.rib = ribOf(ws, v.cx, 0);
     v.foot = WALL.D1 * v.sp + WALL.D2 * v.rib;
@@ -476,26 +510,26 @@ function makeVillage(W, i) {
     const Rt = R * (1 - 0.16 * Math.abs(t - (nT - 1) / 2)) * (0.8 + 0.3 * r());
     let x = cx - Rt + r() * 8;
     while (x < cx + Rt) {
-      const w = 9 + 6 * r();
-      if (r() < 0.18) { x += 12 + 18 * r(); continue; }
-      const hx = x + w / 2, hs = s + (r() - 0.5) * 7;
+      const w = (9 + 6 * r()) * VK;
+      if (r() < 0.18) { x += (12 + 18 * r()) * VK; continue; }
+      const hx = x + w / 2, hs = s + (r() - 0.5) * 7 * VK;
       const d = vFoot(hx) + hs;
       v.houses.push({
-        wx: hx, d, w, dep: 8 + 3 * r(), h: r() < 0.6 ? 6.6 + 1.2 * r() : 4.4 + r(), yaw: (r() - 0.5) * 0.16,
+        wx: hx, d, w, dep: (8 + 3 * r()) * 1.5, h: (r() < 0.6 ? 6.6 + 1.2 * r() : 4.4 + r()) * VK, yaw: (r() - 0.5) * 0.16,
         wall: HOUSE_WALLS[Math.floor(r() * HOUSE_WALLS.length)], tier: t, seed: hashInts(seed, 3, v.houses.length),
       });
-      x += w + (r() < 0.6 ? 0.2 : 2 + 6 * r());
+      x += w + (r() < 0.6 ? 0.2 : 2 + 6 * r()) * VK;
     }
   }
   // bare poplars along the lowest tier, a chorten at each end, flag poles above
-  for (let k = 0; k < 4 + Math.floor(r() * 6); k++) {
+  for (let k = 0; k < 8 + Math.floor(r() * 8); k++) {
     const wx = cx + (r() - 0.5) * 2.2 * R, s = v.sLo - 6 - 25 * r();
-    v.trees.push({ wx, d: vFoot(wx) + s, h: 10 + 6 * r(), seed: hashInts(seed, 5, k) });
+    v.trees.push({ wx, d: Math.max(vFoot(wx) + s, valleyAt(W.ws, wx).bf + 10), h: 15 + 9 * r(), seed: hashInts(seed, 5, k), willow: k % 4 === 3 });
   }
   for (const side of [-1, 1]) {
     if (r() < 0.25) continue;
     const wx = cx + side * (R + 10 + 20 * r()), s = sc + (r() - 0.6) * 40;
-    v.chortens.push({ wx, d: vFoot(wx) + s, H: 5 + 3 * r(), seed: hashInts(seed, 7, side) });
+    v.chortens.push({ wx, d: vFoot(wx) + s, H: (5 + 3 * r()) * VK, seed: hashInts(seed, 7, side) });
   }
   // strings between roofs, and from a high pole above the village down to the roofs
   const hs = v.houses;
@@ -506,16 +540,16 @@ function makeVillage(W, i) {
     for (let tr = 0; tr < 6; tr++) {
       const c = hs[Math.floor(r() * hs.length)];
       const dd = Math.hypot(c.wx - a.wx, c.d - a.d);
-      if (c !== a && dd > 20 && dd < 90) { b = c; break; }
+      if (c !== a && dd > 30 && dd < 140) { b = c; break; }
     }
     if (b) v.strings.push({ a: [a.wx, topY(a) + 1.5, a.d], b: [b.wx, topY(b) + 1.5, b.d], sag: 0.05, seed: hashInts(seed, 9, k), fw: 0.5 });
   }
   const px = cx + (r() - 0.5) * R, ps = v.sHi + 25 + 30 * r();
   const pd = vFoot(px) + ps, py = W.H(px, pd);
-  v.poles.push({ wx: px, d: pd, h: 10, seed: hashInts(seed, 11) });
+  v.poles.push({ wx: px, d: pd, h: 16, seed: hashInts(seed, 11) });
   for (let k = 0; k < 5 && hs.length; k++) {
     const a = hs[Math.floor(r() * hs.length)];
-    v.strings.push({ a: [px, py + 9.5, pd], b: [a.wx, topY(a), a.d], sag: 0.04, seed: hashInts(seed, 13, k), fw: 0.5 });
+    v.strings.push({ a: [px, py + 15.5, pd], b: [a.wx, topY(a), a.d], sag: 0.04, seed: hashInts(seed, 13, k), fw: 0.5 });
   }
   return v;
 }
@@ -526,7 +560,7 @@ function gompa(W, i) { return cache(W, 'g', i, () => makeGompa(W, i)); }
 function makeGompa(W, i) {
   const seed = hashInts(W.ws, 851, i), r = makeRng(seed);
   if (r() > 0.72) return null;
-  const s = 220 + 420 * r();
+  const s = 170 + 330 * r();
   // on a spur: the best of a few candidates along the cell
   let best = -1, bx = 0;
   for (let k = 0; k < 9; k++) {
@@ -542,22 +576,22 @@ function makeGompa(W, i) {
   const d = bfAt(W, bx) + s;
   const g = { i, wx: bx, s, d, seed, y: W.H(bx, d), houses: [], chortens: [], poles: [], strings: [] };
   const yaw = (r() - 0.5) * 0.2;
-  g.main = { wx: bx, d, w: 24 + 10 * r(), dep: 14 + 4 * r(), h: 12 + 4 * r(), yaw, seed: hashInts(seed, 1), wall: r() < 0.8 ? C.white : [0.74, 0.58, 0.3] };
+  g.main = { wx: bx, d, w: (24 + 10 * r()) * 1.5, dep: (14 + 4 * r()) * 1.4, h: (12 + 4 * r()) * 1.5, yaw, seed: hashInts(seed, 1), wall: r() < 0.8 ? C.white : [0.74, 0.58, 0.3] };
   g.halls = [];
   for (const side of [-1, 1]) {
     if (r() < 0.35) continue;
     const wx = bx + side * (g.main.w / 2 + 9 + 4 * r()), hd = d + 2 + 6 * r();
     const red = r() < 0.35;
-    g.halls.push({ wx, d: hd, w: 12 + 6 * r(), dep: 10 + 3 * r(), h: 8 + 3 * r(), yaw: yaw + (r() - 0.5) * 0.1, wall: red ? [0.5, 0.13, 0.1] : C.white, band: !red, seed: hashInts(seed, 2, side) });
+    g.halls.push({ wx, d: hd, w: (12 + 6 * r()) * 1.5, dep: (10 + 3 * r()) * 1.4, h: (8 + 3 * r()) * 1.5, yaw: yaw + (r() - 0.5) * 0.1, wall: red ? [0.5, 0.13, 0.1] : C.white, band: !red, seed: hashInts(seed, 2, side) });
   }
   // monks' houses stepping down the spur
   for (let k = 0; k < 8 + Math.floor(r() * 12); k++) {
-    const wx = bx + (r() - 0.5) * 140, hs = s - 25 - 110 * Math.pow(r(), 0.8);
-    g.houses.push({ wx, d: bfAt(W, wx) + hs, w: 6 + 4 * r(), dep: 6 + 2 * r(), h: 4.5 + 2 * r(), yaw: yaw + (r() - 0.5) * 0.2, wall: r() < 0.85 ? C.white : HOUSE_WALLS[4], seed: hashInts(seed, 3, k) });
+    const wx = bx + (r() - 0.5) * 200, hs = s - 36 - 150 * Math.pow(r(), 0.8);
+    g.houses.push({ wx, d: bfAt(W, wx) + hs, w: (6 + 4 * r()) * 1.5, dep: (6 + 2 * r()) * 1.4, h: (4.5 + 2 * r()) * 1.5, yaw: yaw + (r() - 0.5) * 0.2, wall: r() < 0.85 ? C.white : HOUSE_WALLS[4], seed: hashInts(seed, 3, k) });
   }
   for (let k = 0; k < 1 + Math.floor(r() * 3); k++) {
     const wx = bx + (r() < 0.5 ? -1 : 1) * (g.main.w / 2 + 25 + 40 * r()), cs = s - 10 - 40 * r();
-    g.chortens.push({ wx, d: bfAt(W, wx) + cs, H: 7 + 4 * r(), seed: hashInts(seed, 4, k) });
+    g.chortens.push({ wx, d: bfAt(W, wx) + cs, H: 10 + 6 * r(), seed: hashInts(seed, 4, k) });
   }
   // the long strings of flags from the roof down to poles on the slope below and to the sides
   const ry = g.y + g.main.h + 1.2;
@@ -584,31 +618,36 @@ const HCELL = 1500;
 function hamlet(W, i) { return cache(W, 'h', i, () => makeHamlet(W, i)); }
 function makeHamlet(W, i) {
   const seed = hashInts(W.ws, 871, i), r = makeRng(seed);
-  if (r() > 0.55) return null;
+  const u0 = r();
   const wx = (i + 0.2 + 0.6 * r()) * HCELL;
+  // (most cells hold one where the valley is farmed)
+  if (u0 > 0.55 + 0.4 * valleyAt(W.ws, wx).fm) return null;
   const bn = bnAt(W, wx);
-  const d = 75 + (Math.min(bn - 50, 230) - 75) * r();
-  if (d < 70) return null;
+  // near enough to read: 62-150 m out, the houses built half as big again as life
+  const d = 62 + (Math.min(bn - 58, 150) - 62) * r();
+  if (d < 58) return null;
   const h = { i, wx, d, seed, houses: [], walls: [], trees: [], chortens: [], poles: [], strings: [], mani: null };
-  const n = 2 + Math.floor(r() * 4);
+  const n = 3 + Math.floor(r() * 5);
   for (let k = 0; k < n; k++) {
-    const hx = wx + (k - (n - 1) / 2) * (14 + 8 * r()), hd = d + (r() - 0.5) * 24;
-    h.houses.push({ wx: hx, d: hd, w: 8 + 4 * r(), dep: 7 + 3 * r(), h: r() < 0.5 ? 6.5 : 4.6, yaw: (r() - 0.5) * 0.9, wall: HOUSE_WALLS[Math.floor(r() * HOUSE_WALLS.length)], seed: hashInts(seed, 1, k), roofFlag: r() < 0.8 });
+    const hx = wx + (k - (n - 1) / 2) * (19 + 10 * r()), hd = d + (r() - 0.5) * 30;
+    h.houses.push({ wx: hx, d: hd, w: 11 + 5 * r(), dep: 9 + 4 * r(), h: r() < 0.6 ? 9.2 : 6.4, yaw: (r() - 0.5) * 0.9, wall: HOUSE_WALLS[Math.floor(r() * HOUSE_WALLS.length)], seed: hashInts(seed, 1, k), roofFlag: r() < 0.8 });
   }
   // walled plots below the houses
   for (let k = 0; k < 2 + Math.floor(r() * 3); k++) {
-    const px = wx + (r() - 0.5) * 90, pd = d - 22 - 25 * r(), pw = 18 + 20 * r(), pdp = 10 + 12 * r();
+    const px = wx + (r() - 0.5) * 130, pd = d - 26 - 25 * r(), pw = 18 + 20 * r(), pdp = 10 + 12 * r();
     if (pd - pdp / 2 < 35) continue;
     h.walls.push([px - pw / 2, pd - pdp / 2, px + pw / 2, pd - pdp / 2], [px + pw / 2, pd - pdp / 2, px + pw / 2, pd + pdp / 2], [px - pw / 2, pd - pdp / 2, px - pw / 2, pd + pdp / 2]);
     if (r() < 0.6) h.walls.push([px - pw / 2, pd + pdp / 2, px + pw / 2, pd + pdp / 2]);
   }
-  for (let k = 0; k < 2 + Math.floor(r() * 4); k++) {
-    const tx = wx + (r() - 0.5) * 80, td = d + (r() - 0.7) * 30;
-    h.trees.push({ wx: tx, d: Math.max(45, td), h: 9 + 6 * r(), seed: hashInts(seed, 2, k), willow: r() < 0.35 });
+  // poplars and willows behind and between the houses (never in front of them), tall enough to
+  // stand over the roofs
+  for (let k = 0; k < 4 + Math.floor(r() * 5); k++) {
+    const tx = wx + (r() - 0.5) * (40 + 22 * n), td = d + 9 + 24 * r();
+    h.trees.push({ wx: tx, d: Math.max(45, td), h: 13 + 9 * r(), seed: hashInts(seed, 2, k), willow: r() < 0.35 });
   }
-  const cx = wx + (r() < 0.5 ? -1 : 1) * (35 + 20 * r());
-  h.chortens.push({ wx: cx, d: d - 10 + 10 * r(), H: 4.5 + 2 * r(), seed: hashInts(seed, 3) });
-  const pole = { wx: wx + (r() - 0.5) * 30, d: d + 18 + 8 * r(), h: 9 + 3 * r(), seed: hashInts(seed, 4), banner: true };
+  const cx = wx + (r() < 0.5 ? -1 : 1) * (12 * n + 16 + 20 * r());
+  h.chortens.push({ wx: cx, d: d - 10 + 10 * r(), H: 6.5 + 3 * r(), seed: hashInts(seed, 3) });
+  const pole = { wx: wx + (r() - 0.5) * 30, d: d + 20 + 8 * r(), h: 13 + 4 * r(), seed: hashInts(seed, 4), banner: true };
   h.poles.push(pole);
   const py = W.H(pole.wx, pole.d) + pole.h - 0.4;
   for (const hz of h.houses) {
@@ -617,7 +656,7 @@ function makeHamlet(W, i) {
   }
   const cc = h.chortens[0];
   h.strings.push({ a: [cc.wx, W.H(cc.wx, cc.d) + cc.H * 0.95, cc.d], b: [pole.wx, py - 1, pole.d], sag: 0.08, seed: hashInts(seed, 6) });
-  if (r() < 0.6) { const mx = wx + (r() - 0.5) * 60; h.mani = { wx: mx, d: d - 30 - 10 * r(), len: 10 + 20 * r(), seed: hashInts(seed, 7) }; }
+  if (r() < 0.6) { const mx = wx + (r() - 0.5) * 60; h.mani = { wx: mx, d: Math.max(36, d - 32 - 10 * r()), len: 16 + 26 * r(), h: 1.9, seed: hashInts(seed, 7) }; }
   return h;
 }
 
@@ -631,13 +670,13 @@ function makeFlagSite(W, i) {
   const bn = bnAt(W, wx);
   const d = 45 + (Math.min(bn - 20, 230) - 45) * Math.pow(r(), 1.2);
   const hm = hamlet(W, Math.floor(wx / HCELL));
-  if (hm && Math.abs(hm.wx - wx) < 110 && Math.abs(hm.d - d) < 60) return null;
+  if (hm && Math.abs(hm.wx - wx) < 135 && Math.abs(hm.d - d) < 66) return null;
   const f = { i, wx, d, seed, chortens: [], poles: [], strings: [], mani: null, cairns: [] };
   const kind = r();
   const gy = (x, dd) => W.H(x, dd);
   if (kind < 0.45) {
     // a chorten with strings from its spire to stakes round about, and a few poles
-    const H = 5 + 3 * r();
+    const H = 7 + 4 * r();
     f.chortens.push({ wx, d, H, seed: hashInts(seed, 1) });
     const top = [wx, gy(wx, d) + H * 0.97, d];
     const n = 3 + Math.floor(r() * 4);
@@ -680,6 +719,57 @@ function makeFlagSite(W, i) {
   return f;
 }
 
+// --- shrines close by the line: a big chorten with flags, a long mani wall, or a row of three
+// chortens, 31-40 m out, so that something made by hand passes near the window every kilometre
+// or so (the villages and monasteries are far off; these are the human things at arm's length) ---
+const LSCELL = 620;
+function lineShrine(W, i) { return cache(W, 'ls', i, () => makeLineShrine(W, i)); }
+function makeLineShrine(W, i) {
+  const seed = hashInts(W.ws, 2201, i), r = makeRng(seed);
+  if (r() > 0.72) return null;
+  const wx = (i + 0.15 + 0.7 * r()) * LSCELL, d = 31 + 8 * r(), u = r();
+  const s = { i, wx, d, seed, chortens: [], poles: [], strings: [], mani: null };
+  const gy = (x, dd) => W.H(x, dd);
+  if (u < 0.4) {
+    const H = 7.5 + 2.5 * r(), cd = d + 3;
+    s.chortens.push({ wx, d: cd, H, seed: hashInts(seed, 1) });
+    const top = [wx, gy(wx, cd) + H * 0.97, cd];
+    for (const sg of [-1, 1]) {
+      const ex = wx + sg * (15 + 9 * r()), ed = d + 6 * r(), ph = 3.6 + 1.6 * r();
+      s.poles.push({ wx: ex, d: ed, h: ph, seed: hashInts(seed, 2, sg) });
+      s.strings.push({ a: top, b: [ex, gy(ex, ed) + ph, ed], sag: 0.06, seed: hashInts(seed, 3, sg), fw: 0.44 });
+    }
+  } else if (u < 0.75) {
+    const len = 24 + 22 * r();
+    s.mani = { wx, d: d + 1, len, h: 2.1, seed: hashInts(seed, 4) };
+    const ends = [];
+    for (const sg of [-1, 1]) {
+      const px = wx + sg * (len / 2 + 2.5), ph = 7 + 3 * r();
+      s.poles.push({ wx: px, d: d + 1, h: ph, seed: hashInts(seed, 5, sg), banner: true });
+      ends.push([px, gy(px, d + 1) + ph - 0.4, d + 1]);
+    }
+    s.strings.push({ a: ends[0], b: ends[1], sag: 0.07, seed: hashInts(seed, 6), fw: 0.44 });
+    if (r() < 0.6) s.chortens.push({ wx: wx + (r() < 0.5 ? -1 : 1) * (len / 2 + 8), d: d + 3, H: 4.6 + 1.4 * r(), seed: hashInts(seed, 7) });
+  } else {
+    // the three protectors: an ochre, a white and a blue-black chorten in a row
+    const tones = [[0.72, 0.5, 0.22], C.white, [0.2, 0.24, 0.32]];
+    for (let k = 0; k < 3; k++) s.chortens.push({ wx: wx + (k - 1) * 6.4, d: d + 2, H: 5 + 0.6 * r(), seed: hashInts(seed, 8, k), white: tones[k] });
+    const px = wx + 14, ph = 9 + 2 * r();
+    s.poles.push({ wx: px, d: d + 3, h: ph, seed: hashInts(seed, 9), banner: true });
+  }
+  return s;
+}
+function* lineShrines(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 60) / LSCELL); i <= Math.floor((ctx.x0 + ctx.length + 60) / LSCELL); i++) {
+    const s = lineShrine(W, i);
+    if (!s || !inX(ctx, s.wx, 60)) continue;
+    for (const c of s.chortens) if (inD(c.d, dLo, dHi) && inX(ctx, c.wx, 8)) yield* drawChorten(ctx, out, W, c, { white: c.white });
+    for (const p of s.poles) if (inD(p.d, dLo, dHi) && inX(ctx, p.wx, 5)) yield* flagPole(ctx, out, W, p);
+    for (const st of s.strings) yield* flagString(ctx, out, st, dLo, dHi);
+    if (s.mani && inD(s.mani.d, dLo, dHi) && inX(ctx, s.mani.wx, s.mani.len)) yield* maniWall(ctx, out, W, s.mani);
+  }
+}
+
 // --- yak herds ---
 const YCELL = 420;
 function herd(W, i) { return cache(W, 'y', i, () => makeHerd(W, i)); }
@@ -690,16 +780,16 @@ function makeHerd(W, i) {
   const v = valleyAt(W.ws, wx);
   // close enough to be animals and not dots, yet far enough to clear the blur and the bottom edge
   // of the window (the ground falls away steeply here): mostly 52-100 m out
-  const d = 52 + (Math.min(v.bf - 30, 170) - 52) * Math.pow(r(), 1.8);
+  const d = 50 + (Math.min(v.bf - 30, 150) - 50) * Math.pow(r(), 2.2);
   const n = 3 + Math.floor(r() * 9);
   const hd = { i, wx, d, seed, yaks: [] };
   const flow = (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.6;
   for (let k = 0; k < n; k++) {
-    const yx = wx + (r() - 0.5) * (14 + 4 * n), yd = Math.max(47, d + (r() - 0.5) * (8 + 1.6 * n));
+    const yx = wx + (r() - 0.5) * (19 + 5.5 * n), yd = Math.max(47, d + (r() - 0.5) * (10 + 2 * n));
     const yv = valleyAt(W.ws, yx);
     if (yd > yv.bn && yd < yv.bf && channelAt(W, yx, (yd - yv.bn) / (yv.bf - yv.bn), yv.bf - yv.bn)) continue;
     hd.yaks.push({
-      wx: yx, d: yd, yaw: flow + (r() - 0.5) * 1.6, k: 1.3 + 0.35 * r(), col: YAKS[Math.floor(r() * YAKS.length)],
+      wx: yx, d: yd, yaw: flow + (r() - 0.5) * 1.6, k: 1.8 + 0.5 * r(), col: YAKS[Math.floor(r() * YAKS.length)],
       graze: r() < 0.7, tassel: r() < 0.3, blanket: r() < 0.15, white: r() < 0.2, seed: hashInts(seed, 1, k),
     });
   }
@@ -733,7 +823,7 @@ function makeSheep(W, i) {
     } else {
       x = wx + (r() - 0.5) * 30; dd = d + (r() - 0.5) * 12; y = W.H(x, dd);
     }
-    g.sheep.push({ wx: x, d: dd, y, yaw: (r() - 0.5) * 2 * Math.PI, look: r() < 0.4, k: 1.4 + 0.3 * r(), seed: hashInts(seed, 2, k) });
+    g.sheep.push({ wx: x, d: dd, y, yaw: (r() - 0.5) * 2 * Math.PI, look: r() < 0.4, k: 1.9 + 0.4 * r(), seed: hashInts(seed, 2, k) });
   }
   return g;
 }
@@ -811,7 +901,7 @@ function stream(W, i) {
       const v = valleyAt(ws, wx), d = headLine(ws, wx, v) + s0;
       pts.push([wx, W.H(wx, d) + 0.3, d]);
     }
-    return { pts, frozen: hh(i, 11, ws + 931) < 0.6, w: 1, seed: hashInts(ws, 932, i) };
+    return { pts, frozen: hh(i, 11, ws + 931) < 0.6 * (1 - valleyAt(ws, xg).lu), w: 1, seed: hashInts(ws, 932, i) };
   });
 }
 // distance at which the wall's se reaches `se` at x (a few steps of a fixed-point search)
@@ -865,12 +955,13 @@ function mistAmt(W, wx) { return smooth(0.5, 0.78, noise1(wx / 3100, W.ws + 701)
 // Surfaces
 // ---------------------------------------------------------------------------------------------
 const T = { NEAR: 0, BED: 1, CHANNEL: 2, FACE: 3, FLOOR: 4 };
-const SURF = { t: 0, y: 0, bn: 0, bf: 0, fy: 0, u: 0, ch: null, terr: 0, vterr: 0, se: 0, sp: 1, rib: 1, sv: 0, svG: 0, cliff: 0, fan: 0, tongue: 0, mor: 0, base: 0 };
+const SURF = { t: 0, y: 0, bn: 0, bf: 0, fy: 0, u: 0, ch: null, terr: 0, vterr: 0, se: 0, sp: 1, rib: 1, sv: 0, svG: 0, cliff: 0, fan: 0, tongue: 0, mor: 0, base: 0, lu: 0, fm: 0, wd: 0, cou: 1 };
 function surface(W, wx, d) {
   const S = SURF;
   const v = valleyAt(W.ws, wx);
   const bn = v.bn, bf = v.bf, fy = v.fy;
   S.bn = bn; S.bf = bf; S.fy = fy; S.ch = null; S.terr = 0;
+  S.lu = v.lu; S.fm = v.fm; S.wd = v.wd;
   S.y = W.H(wx, d);
   if (d < bn) { S.t = T.NEAR; return S; }
   if (d < bf) {
@@ -887,6 +978,65 @@ function surface(W, wx, d) {
 
 // (low enough that the upper third of the wall seen from the window is under snow: this is a cold place)
 function snowLine(W, wx, d) { return 100 + 150 * noise2(wx / 1800, d / 1500, W.ws + 81) + 70 * (noise2(wx / 160, d / 160, W.ws + 82) - 0.5); }
+
+// ---------------------------------------------------------------------------------------------
+// Land cover: what grows where. One answer, read by the ground colour and by the things that
+// stand on the ground (the trees are planted where the ground is painted forest), so the two
+// never disagree. The shapes follow the mountain: forest clothes the shaded flanks of the spurs
+// and the gully bottoms up to a ragged tree line, a belt of rhododendron and juniper scrub lies
+// above it, fields are whole walled plots on the gentle ground, a riverine wood follows the far
+// bank. valleyAt().lu (0 a high bare stretch .. 1 a lower lush one) scales all of it.
+// ---------------------------------------------------------------------------------------------
+const FC = { forest: 0, birch: 0, scrub: 0, bloom: -1, top: 0 };
+// On the facing wall and its apron. S from surface(), nn the ground normal there.
+function faceCover(W, S, wx, nn) {
+  const F = FC;
+  F.forest = 0; F.birch = 0; F.scrub = 0; F.bloom = -1;
+  const L = S.lu;
+  const top = 50 + 130 * L * (0.6 + 0.8 * noise1(wx / 900, W.ws + 2011));    // the tree line, above the valley floor
+  F.top = top;
+  if (L < 0.04) return F;
+  const h = S.y - S.fy, ny = nn[1];
+  if (h > top + 170 || ny < 0.5 || S.tongue > 0.2 || S.mor > 1) return F;
+  const crease = Math.max(smooth(0.32, 0.02, S.rib), smooth(0.38, 0.02, S.sp));
+  const shadeSide = smooth(0.05, 0.3, nn[0]);
+  const open = smooth(0.5, 0.62, ny) * (1 - S.cliff) * (1 - S.vterr);
+  const pat = 0.42 * shadeSide + 0.3 * crease + 0.85 * noise2(wx / 210, S.y / 110, W.ws + 2012) + 0.25 * L;
+  // (on the high stretches only a thin scatter of stunted trees, not a wood)
+  F.forest = smooth(0.66, 0.8, pat) * smooth(top + 25, top - 35, h) * open * smooth(0.05, 0.3, L);
+  if (F.forest > 0) F.birch = noise2(wx / 130, S.y / 60, W.ws + 2015) + 0.3 * crease - 0.002 * h > 0.56 ? 1 : 0;
+  // the scrub belt: above the trees, and in the gaps between them
+  const sc = Math.min(1, 1.6 * L) * smooth(top + 160, top + 50, h) * open * smooth(0.46, 0.6, noise2(wx / 95, S.y / 48, W.ws + 2013) + 0.2 * shadeSide);
+  F.scrub = sc * (1 - F.forest);
+  if (F.scrub > 0.3 && noise2(wx / 34, S.y / 20, W.ws + 2014) > 0.55) F.bloom = bloomAt(W, wx);
+  return F;
+}
+// A terraced plot on a fan or on the apron under the wall (4 m a step, by the contour)? h: height
+// above the valley floor, ny: the ground normal's y. Asked by the ground colour and the tree planter.
+function fanFieldAt(W, S, wx, h, ny, rng) {
+  if (!(S.fm > 0.33 && h < 95 && ny > 0.9 && S.cliff <= 0 && S.vterr < 0.25 && S.mor <= 1 && S.tongue <= 0.2)) return null;
+  const f = S.base / 4, row = Math.floor(f);
+  return fieldAt(W, S, wx, row + 900, f - row, 2044, rng);
+}
+// The colour the rhododendrons of a stretch mostly flower in (it drifts along the valley).
+function bloomAt(W, wx) { return Math.floor(hh(Math.floor(wx / 340 + noise1(wx / 90, W.ws + 2016)), 1, W.ws + 2017) * 4); }
+// The riverine wood on the flat floor beyond the river (0..1).
+function floorWood(W, S, wx, d) {
+  if (S.lu < 0.04) return 0;
+  return smooth(0.05, 0.3, S.lu) * smooth(0.52, 0.66, noise2(wx / 170, d / 80, W.ws + 2041) + 0.3 * smooth(70, 8, d - S.bf));
+}
+// Fields: whole plots, never a blurred patch. row/col name the plot; the test is made per plot, so
+// the edge of the farmed ground is the edge of a field. Returns the plot's colour, a wall or riser
+// colour on its border, or null where the ground is not farmed.
+function fieldAt(W, S, wx, row, fr, lenSalt, rng) {
+  const len = 18 + 22 * hh(row, 0, W.ws + lenSalt);
+  const fx = wx / len + hh(row, 1, W.ws + lenSalt), col = Math.floor(fx);
+  if (S.fm < 0.5 + 0.6 * (hh(row, col, W.ws + 2034) - 0.5)) return null;
+  if (fr > 0.84 || (fx - col) * len < 1.4) return mix3(C.riser, C.wallStone, 0.5 * rng());
+  const c = cropOf(hh(row, col, W.ws + 2035));
+  // the drill rows, faintly
+  return mul3(c, 0.92 + 0.16 * noise1(wx / 2.2, row));
+}
 
 // Colour of the ground at a point, lit from its normal nn. Every texture here belongs to the
 // mountain: rock in beds that follow the contours, scree streaked down the fall line, snow lying in
@@ -906,31 +1056,70 @@ function surfColor(W, S, wx, d, rng, nn) {
   }
   switch (S.t) {
     case T.CHANNEL: {
-      const ice = S.ch.f > 0.72 && noise1(wx / 60, W.ws + 91) > 0.5;
+      const ice = S.ch.f > 0.72 && noise1(wx / 60, W.ws + 91) > 0.5 + 0.6 * S.lu;
       c = ice ? C.ice : mix3(C.water, C.waterDeep, (1 - S.ch.f) * (S.ch.k === 0 ? 0.6 : 0.2));
       c = mix3(c, [0.62, 0.68, 0.72], smooth(0.75, 0.9, noise2(wx / 25, d / 4, W.ws + 92)) * 0.5);
       return jitter(c, rng, 0.03);
     }
     case T.BED: {
+      // gravel bars: long tongues of pale shingle between darker wet gravel, drawn out along the flow
       c = mix3(C.bed, C.bedDark, noise2(wx / 9, d / 6, W.ws + 93));
-      if (noise2(wx / 70, d / 30, W.ws + 94) > 0.72) c = mix3(c, C.grassDry, 0.5);
-      if (noise2(wx / 20, d / 9, W.ws + 99) > 0.88) c = mix3(c, C.snow, 0.7);
+      c = mix3(c, [0.66, 0.65, 0.62], 0.6 * smooth(0.5, 0.68, noise2(wx / 110, d / 14, W.ws + 2061)));
+      if (noise2(wx / 70, d / 30, W.ws + 94) > 0.72) c = mix3(c, mix3(C.grassDry, C.turf, S.lu), 0.5 + 0.3 * S.lu);
+      if (S.lu < 0.4 && noise2(wx / 20, d / 9, W.ws + 99) > 0.88 + 0.3 * S.lu) c = mix3(c, C.snow, 0.7);
       return jitter(c, rng, 0.1);
     }
     case T.NEAR: {
+      const L = S.lu;
       const n1 = noise2(wx / 30, d / 25, W.ws + 95), n2 = noise2(wx / 8, d / 6, W.ws + 96);
       c = mix3(C.grass, C.grassDry, smooth(0.3, 0.7, n1));
-      if (n2 > 0.7) c = mix3(c, C.grassDark, 0.6);
-      if (noise2(wx / 14, d / 11, W.ws + 97) > 0.78) c = C.stone;
-      if (noise2(wx / 13, d / 10, W.ws + 98) > 0.84) c = C.snow;       // old snow lying in hollows
+      if (L > 0.04) c = mix3(c, mix3(C.turf, C.turfGold, smooth(0.3, 0.75, noise2(wx / 80, d / 40, W.ws + 2031))), 0.92 * L);
+      if (n2 > 0.7) c = mix3(c, mix3(C.grassDark, C.turfDark, L), 0.6);
+      // terraced fields stepping down to the river: a row to every 3.4 m of fall, so the rows
+      // follow the contours, each cut along its length into plots
+      let field = null;
+      if (S.fm > 0.33 && d > 24) {
+        const f = (S.y - S.fy) / 3.4, row = Math.floor(f);
+        field = fieldAt(W, S, wx, row, f - row, 2033, rng);
+      }
+      if (field) c = field;
+      else {
+        // old snow only on the high bare stretches, and lying in the hollows of the ground itself
+        // (the same noise that dents the slope), never scattered
+        if (L < 0.45 && noise2(wx / 45, d / 70, W.ws + 21) < 0.27 - 0.3 * L && noise2(wx / 13, d / 10, W.ws + 98) > 0.35) c = C.snow;
+        // alpine flowers in drifts near the line
+        if (L > 0.12 && d < 70) {
+          const fl = noise2(wx / 24, d / 9, W.ws + 2036);
+          if (fl > 0.56 && rng() < 0.55 * Math.min(1, 2 * L) * smooth(70, 30, d)) {
+            const k = Math.floor(wx / 130), two = rng() < 0.3 ? 1 : 0;
+            c = FLOWERS[Math.floor(hh(k, two, W.ws + 2037) * FLOWERS.length)];
+          }
+        }
+      }
       break;
     }
     case T.FLOOR: {
       // the valley floor between the river and the wall: frost grass, stones, juniper, old snow
+      const L = S.lu;
       const n1 = noise2(wx / 40, d / 30, W.ws + 131);
       c = mix3(C.grass, C.grassDry, smooth(0.3, 0.7, n1));
-      if (noise2(wx / 16, d / 12, W.ws + 132) > 0.72) c = mix3(C.bed, C.stone, 0.5);
-      if (noise2(wx / 12, d / 9, W.ws + 134) > 0.9) c = mix3(c, C.snow, 0.7);
+      if (L > 0.04) c = mix3(c, mix3(C.turf, C.turfGold, smooth(0.3, 0.75, noise2(wx / 110, d / 45, W.ws + 2031))), 0.92 * L);
+      // strip fields on the flat ground beyond the river, in rows parallel to it
+      let field = null;
+      if (S.fm > 0.33) {
+        const f = (d - S.bf) / 21, row = Math.floor(f);
+        field = fieldAt(W, S, wx, row + 500, 1 - (f - row), 2043, rng);
+      }
+      if (field) { c = field; S.terr = 1; }
+      else {
+        const fw = floorWood(W, S, wx, d);
+        if (fw > 0) c = mix3(c, mix3(C.birchWood, C.forest, noise2(wx / 60, d / 40, W.ws + 2042)), 0.85 * fw);
+        if (L < 0.4) {
+          // stones washed out over the floor in fans below the gullies; old snow only up high
+          if (noise2(wx / 90, d / 22, W.ws + 132) > 0.7 + 0.5 * L) c = mix3(C.bed, C.stone, 0.5);
+          if (noise2(wx / 12, d / 9, W.ws + 134) > 0.9 + 0.2 * L) c = mix3(c, C.snow, 0.7);
+        }
+      }
       break;
     }
     default: {
@@ -945,23 +1134,40 @@ function surfColor(W, S, wx, d, rng, nn) {
       const streak = noise2(wx / (3.5 + 0.004 * d), y / (40 + 0.04 * d), W.ws + 121);
       const form = smooth(0.3, 0.72, noise2(wx / 1700, y / 700, W.ws + 124));
       // (the edge of the fields ragged, field by field, not the outline of the bench)
+      // fields on the fans and the apron under the wall, where the valley is farmed: terraces by
+      // the contour (4 m a step), whole plots
+      const fanField = fanFieldAt(W, S, wx, h, ny, rng);
       if (h < 260 && S.vterr > 0.25 + 0.6 * (hh(Math.floor(S.base / 4.5), Math.floor(wx / 45), W.ws + 108) - 0.5) * smooth(0.9, 0.3, S.vterr)) {
         // a village bench: terraces cut into the ground, risers at the top 30% of each 4.5 m step
         const f = S.base / 4.5, row = Math.floor(f), fr = f - row;
         const len = 40 + 40 * hh(row, 0, W.ws + 107);
         const field = hh(row, Math.floor(wx / len), W.ws + 106);
         c = fr > 0.7 ? C.riser : field < 0.5 ? C.barley : field < 0.62 ? mix3(C.barley, C.barleyGreen, 0.6) : field < 0.85 ? C.grassDry : mix3(C.plough, C.grassDry, 0.4);
+        // (green barley, buckwheat and mustard among the ripe plots where the valley is lush)
+        if (fr <= 0.7 && S.lu > 0.3 && hh(row, Math.floor(wx / len), W.ws + 2045) < 0.75 * S.lu) c = cropOf(field);
+        S.terr = 1;
+      } else if (fanField) {
+        c = fanField;
         S.terr = 1;
       } else {
-        c = wScree > 0 ? mix3(mix3(C.scree, C.screeWarm, form), C.screeDark, smooth(0.25, 0.8, streak)) : C.scree;
-        if (wScree < 1) {
+        const F = faceCover(W, S, wx, nn);
+        // (grass holds the scree on the lower slopes of a lush stretch)
+        const alp = S.lu * smooth(F.top + 240, F.top + 40, h);
+        const wS = wScree * (1 - 0.5 * alp);
+        c = wS > 0 ? mix3(mix3(C.scree, C.screeWarm, form), C.screeDark, smooth(0.25, 0.8, streak)) : C.scree;
+        if (wS < 1) {
           // the low ground: frost grass, and juniper scrub on the shaded (+x facing) flanks of the
           // spurs and in the gully bottoms, so it draws the relief instead of spotting it
-          let low = mix3(C.grass, C.grassDry, smooth(0.25, 0.75, noise2(wx / 90, d / 70, W.ws + 101)));
+          const lowN = smooth(0.25, 0.75, noise2(wx / 90, d / 70, W.ws + 101));
+          let low = mix3(C.grass, C.grassDry, lowN);
+          if (alp > 0) low = mix3(low, mix3(C.alp, C.alpGold, lowN), 0.9 * alp);
           const shadeSide = smooth(0.08, 0.3, nn[0]) + 0.4 * Math.max(crease, big);
           if (h < 360 && ny > 0.62 && shadeSide * smooth(360, 200, h) + 0.25 * (noise2(wx / 14, y / 10, W.ws + 112) - 0.5) > 0.55) low = mix3(C.juniper, C.grassDark, 0.3 * noise2(wx / 9, y / 7, W.ws + 113));
-          c = mix3(low, c, wScree);
+          c = mix3(low, c, wS);
         }
+        // forest floor under the trees, the scrub belt above them (rhododendron in flower in patches)
+        if (F.forest > 0) c = mix3(c, F.birch ? mix3(C.birchWood, C.forestLit, 0.4 * streak) : mix3(C.forest, C.forestLit, 0.5 * streak), Math.min(1, 1.15 * F.forest));
+        else if (F.scrub > 0) c = mix3(c, F.bloom >= 0 && rng() < 0.3 ? mix3(BLOOM[F.bloom], BLOOM[2], 0.35) : mix3(C.rhodo, C.juniper, streak), 0.85 * F.scrub);
         if (wRock > 0) {
           // rock in beds following the contours, some pale, some dark
           const bedN = noise1((y + 30 * noise2(wx / 320, d / 320, W.ws + 122)) / 13, W.ws + 120);
@@ -971,7 +1177,7 @@ function surfColor(W, S, wx, d, rng, nn) {
           c = mix3(c, rock, wRock);
         }
       }
-      if (S.mor > 1) c = mix3(C.scree, C.stoneDark, 0.3 + 0.4 * streak);
+      if (S.mor > 1) c = mix3(mix3(C.scree, C.stoneDark, 0.3 + 0.4 * streak), mix3(C.alp, C.turfDark, streak), 0.85 * S.lu);
       // a glacier's tongue: grey-white ice with dark moraine stripes running down it
       if (S.tongue > 0.25) {
         const stripe = noise1(wx / 22, W.ws + 140) > 0.78;
@@ -982,7 +1188,7 @@ function surfColor(W, S, wx, d, rng, nn) {
       // snow: patchy below the line, lying lower in the gullies and on ledges, solid above, but not
       // on steep rock or the crests of the ribs
       const gullyK = Math.max(crease, big) * smooth(220, 420, h);
-      const sn = h < 60 ? 0 : smooth(-40, 40, h - snowLine(W, wx, d) + 300 * gullyK + 160 * smooth(0.8, 0.93, ny) - 120 * smooth(0.66, 0.45, ny) - 160 * S.cliff - 170 * smooth(0.7, 1, S.rib) * steep);
+      const sn = h < 60 ? 0 : smooth(-40, 40, h - snowLine(W, wx, d) - 90 * S.lu + 300 * gullyK + 160 * smooth(0.8, 0.93, ny) - 120 * smooth(0.66, 0.45, ny) - 160 * S.cliff - 170 * smooth(0.7, 1, S.rib) * steep);
       c = mul3(shade(c, nn[0], nn[1], nn[2], 0.4, 0.75), ao);
       if (sn > 0) {
         const snc = mul3(mix3(C.snowShade, C.snow, clamp(lit * 1.35 - 0.15, 0, 1)), 0.75 + 0.25 * ao);
@@ -1315,7 +1521,7 @@ function* flagString(ctx, out, st, dLo, dHi, kind = KIND.OTHER) {
     if (out.due()) yield;
   }
   if (st.noFlags) return;
-  const fw0 = st.fw || 0.34;
+  const fw0 = st.fw || 0.46;
   const spacing = Math.max(fw0, 0.0024 * dmid) * 1.3 / (dmid > 300 ? Math.min(1, Math.sqrt(out.density)) : 1);
   const N = clamp(Math.floor(L / spacing), 2, 900);
   const seed = st.seed | 0;
@@ -1513,20 +1719,22 @@ function* stoneWall(ctx, out, W, ax, ad, bx, bd, h, salt, kind = KIND.OTHER) {
 // A mani wall: a long low wall of stones, its top heaped with pale carved and painted mani stones.
 function* maniWall(ctx, out, W, m) {
   const ax = m.wx - m.len / 2, bx = m.wx + m.len / 2;
-  yield* stoneWall(ctx, out, W, ax, m.d, bx, m.d, 1.3, m.seed & 0xffff);
+  const mh = m.h || 1.3;
+  yield* stoneWall(ctx, out, W, ax, m.d, bx, m.d, mh, m.seed & 0xffff);
   const step = Math.max(0.3, detail(out, m.d, 1.1));
   for (let x = ax + step / 2; x < bx; x += step) {
     const lx = x - ctx.x0;
     if (lx < -1 || lx > ctx.length + 1) continue;
     const r = hh(Math.round(x * 10), m.seed & 0xffff, 5);
     const c = r < 0.6 ? [0.66, 0.64, 0.6] : r < 0.75 ? [0.62, 0.26, 0.18] : r < 0.88 ? [0.28, 0.38, 0.55] : [0.7, 0.6, 0.3];
-    out(lx, W.H(x, m.d) + 1.38, -m.d, step * 0.6, 0.12, 0.45, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
+    out(lx, W.H(x, m.d) + mh + 0.08, -m.d, step * 0.6, 0.12 * mh / 1.3, 0.45, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
     if (out.due()) yield;
   }
 }
 
 // A bare poplar (narrow, upward-sweeping twigs) or a pollarded willow, as in the village lanes.
 function* bareTree(ctx, out, W, t, kind = KIND.TREE) {
+  if (valleyAt(W.ws, t.wx).lu > 0.14) { yield* leafTree(ctx, out, W, t, kind); return; }
   const x = t.wx - ctx.x0, d = t.d, y = W.H(t.wx, d) - 0.2;
   const r = makeRng(t.seed);
   if (d > 300) {
@@ -1638,7 +1846,7 @@ function* villages(ctx, out, W, dLo, dHi, opts = {}) {
       const fl = floating && hz.tier === v.floatTier;
       if (!inD(hz.d - (fl ? fwd : 0), dLo, dHi) || !inX(ctx, hz.wx, 20)) continue;
       if (fl) yield* houseOf(ctx, beatOut(out), W, { ...hz, d: hz.d - fwd }, { lit, y: minGround(W, hz), lift, kind: KIND.SURREAL });
-      else yield* houseOf(ctx, out, W, hz, { lit, kind: KIND.BUILDING });
+      else yield* houseOf(ctx, out, W, hz, { lit, kind: KIND.BUILDING, k: out.density > 1.2 ? 0.7 : 1 });
     }
     yield* terraceLines(ctx, out, W, v, dLo, dHi);
     if (floating) yield* floatingRoot(ctx, out, W, v, lift, dLo, dHi, fwd);
@@ -1739,7 +1947,7 @@ function* gompas(ctx, out, W, dLo, dHi, opts = {}) {
       if (y - lift > g0 + 0.8) yield* plinth(floatG ? beatOut(out) : out, m.wx - ctx.x0, m.d, m.w, m.dep, m.yaw, g0 - 0.6 + lift, y + 0.2, s, kind, rng);
       yield* flatHouse(ctx, floatG ? beatOut(out) : out, m.wx - ctx.x0, m.d, { w: m.w, dep: m.dep, h: m.h, yaw: m.yaw, wall: m.wall, y, s, rng, band: true, lit, kind, salt: m.seed & 0xffff });
       // the gilded roof pavilion and the gold victory banners on the roof corners
-      yield* house(ctx, out, m.wx - ctx.x0, m.d + 1, { w: Math.min(9, m.w * 0.3), depth: 6, h: 2.8, roofH: 2.2, wall: C.maroon, roof: C.gold, windows: false, chimney: false, rng, y: y + m.h, yaw: m.yaw, s, kind });
+      yield* house(ctx, out, m.wx - ctx.x0, m.d + 1, { w: Math.min(13.5, m.w * 0.3), depth: 9, h: 4.2, roofH: 3.3, wall: C.maroon, roof: C.gold, windows: false, chimney: false, rng, y: y + m.h, yaw: m.yaw, s, kind });
       const gr = Math.max(0.35, 0.0011 * m.d);
       const [ex, ez] = rotY(1, 0, m.yaw), [fx, fz] = rotY(0, 1, m.yaw);
       for (const a of [-0.46, 0.46]) {
@@ -1772,7 +1980,10 @@ function* hamlets(ctx, out, W, dLo, dHi) {
     const h = hamlet(W, i);
     if (!h || !inX(ctx, h.wx, 140)) continue;
     for (const w of h.walls) if (inD((w[1] + w[3]) / 2, dLo, dHi)) yield* stoneWall(ctx, out, W, w[0], w[1], w[2], w[3], 1.1, Math.round(w[0] * 7) & 0xffff);
-    for (const hz of h.houses) if (inD(hz.d, dLo, dHi) && inX(ctx, hz.wx, 15)) yield* houseOf(ctx, out, W, hz, { lit });
+    // (k: at the default budget and above the larger houses are drawn a little coarser, so a
+    // hamlet costs what it did and leaves the chunk's count for what grows round it; below that
+    // they are coarse already, and any coarser would lose their windows)
+    for (const hz of h.houses) if (inD(hz.d, dLo, dHi) && inX(ctx, hz.wx, 15)) yield* houseOf(ctx, out, W, hz, { lit, k: out.density > 0.6 ? 1.25 : 1 });
     for (const t of h.trees) if (inD(t.d, dLo, dHi) && inX(ctx, t.wx, 10)) yield* bareTree(ctx, out, W, t);
     for (const c of h.chortens) if (inD(c.d, dLo, dHi) && inX(ctx, c.wx, 8)) yield* drawChorten(ctx, out, W, c);
     for (const p of h.poles) if (inD(p.d, dLo, dHi) && inX(ctx, p.wx, 5)) yield* flagPole(ctx, out, W, p);
@@ -2001,7 +2212,7 @@ function mood(W, wx) {
 function nearFree(W, wx, d, rad) {
   if (d > bnAt(W, wx) - 18 || d < 42) return false;
   const h = hamlet(W, Math.floor(wx / HCELL));
-  if (h && Math.abs(h.wx - wx) < 70 + rad && Math.abs(h.d - d) < 40 + rad * 0.5) return false;
+  if (h && Math.abs(h.wx - wx) < 100 + rad && Math.abs(h.d - d) < 46 + rad * 0.5) return false;
   for (let i = Math.floor(wx / FCELL) - 1; i <= Math.floor(wx / FCELL) + 1; i++) {
     const f = flagSite(W, i);
     if (f && Math.abs(f.wx - wx) < 35 + rad && Math.abs(f.d - d) < 30 + rad * 0.5) return false;
@@ -2078,7 +2289,7 @@ const JACKETS = [[0.72, 0.16, 0.1], [0.12, 0.3, 0.62], [0.78, 0.48, 0.08], [0.1,
 function* person(ctx, out, wx, y, d, o) {
   out = beatOut(out);
   const role = o.role || 'herder';
-  const k = (o.k || 1.3) * (role === 'child' ? 0.66 : 1);
+  const k = (o.k || 1.6) * (role === 'child' ? 0.66 : 1);
   const ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
   const pt = [0, 0, 0];
   const P = (u, h, v) => { pt[0] = x0 + (u * ca - v * sa) * k; pt[1] = y + h * k; pt[2] = -(d + (u * sa + v * ca) * k); return pt; };
@@ -2143,7 +2354,7 @@ function* person(ctx, out, wx, y, d, o) {
 const HORSES = [[0.3, 0.18, 0.1], [0.16, 0.11, 0.09], [0.48, 0.46, 0.42], [0.5, 0.38, 0.24], [0.24, 0.2, 0.17]];
 function* horse(ctx, out, wx, y, d, o) {
   out = beatOut(out);
-  const k = o.k || 1.3, ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
+  const k = o.k || 1.6, ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
   const pt = [0, 0, 0];
   const P = (u, h, v) => { pt[0] = x0 + (u * ca - v * sa) * k; pt[1] = y + h * k; pt[2] = -(d + (u * sa + v * ca) * k); return pt; };
   const q = quatYaw(o.yaw);
@@ -2176,7 +2387,7 @@ function* horse(ctx, out, wx, y, d, o) {
 }
 
 // A worn path across the near slope: d = d0 + A sin((wx - x0) / P + ph), from xa to xb.
-const pathD = (p, wx) => p.d0 + p.A * Math.sin((wx - p.xa) / p.P + p.ph);
+const pathD = (p, wx) => (p.fn ? p.fn(wx) : p.d0 + p.A * Math.sin((wx - p.xa) / p.P + p.ph));
 function* drawPath(ctx, out, W, p, dLo, dHi) {
   const xa = Math.max(p.xa, ctx.x0 - 1), xb = Math.min(p.xb, ctx.x0 + ctx.length + 1);
   if (xb <= xa) return;
@@ -2192,7 +2403,7 @@ function* drawPath(ctx, out, W, p, dLo, dHi) {
       const dd = d + off * p.w, y = W.H(wx, dd);
       const e = 1.2, nn = norm3(-(W.H(wx + e, dd) - y) / e, 1, (W.H(wx, dd + e) - y) / e);
       const u = hh(Math.round(wx * 3), Math.round(off * 10), p.seed & 0xffff);
-      const c = shade(mix3([0.67, 0.64, 0.59], [0.55, 0.51, 0.45], u), nn[0], nn[1], nn[2], 0.55, 0.6);
+      const c = shade(p.pale ? mix3([0.78, 0.74, 0.66], [0.68, 0.62, 0.52], u) : mix3([0.67, 0.64, 0.59], [0.55, 0.51, 0.45], u), nn[0], nn[1], nn[2], 0.55, 0.6);
       const qq = quatUpTo(nn[0], nn[1], nn[2]);
       out(wx - ctx.x0, y + 0.2, -dd, s * 1.1, s * 0.1, Math.max(s * 0.8, p.w * 0.35), c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], KIND.GROUND);
     }
@@ -2238,14 +2449,14 @@ function makeCaravan(W, i) {
   const na = kind === 'none' ? 0 : 4 + Math.floor(r() * 6);
   const packs = [[0.55, 0.42, 0.26], [0.2, 0.3, 0.55], [0.6, 0.2, 0.12], [0.45, 0.45, 0.4]];
   for (let k = 0; k < na; k++) {
-    if (kind === 'mule') list.push({ type: 'mule', gap: 3.3, ph: ph(), col: HORSES[Math.floor(r() * HORSES.length)], pack: packs[Math.floor(r() * packs.length)] });
-    else list.push({ type: 'yak', gap: 3.6, ph: ph(), k: 1.3 + 0.2 * r(), col: YAKS[Math.floor(r() * YAKS.length)], graze: false, tassel: r() < 0.6, load: packs[Math.floor(r() * packs.length)], white: r() < 0.2, seed: hashInts(seed, 3, k) });
-    if (k === Math.floor(na / 2) && r() < 0.7) list.push({ role: 'herder', gap: 2.4, ph: ph(), col: [0.25, 0.18, 0.14] });
+    if (kind === 'mule') list.push({ type: 'mule', gap: 4.1, ph: ph(), col: HORSES[Math.floor(r() * HORSES.length)], pack: packs[Math.floor(r() * packs.length)] });
+    else list.push({ type: 'yak', gap: 4.8, ph: ph(), k: 1.7 + 0.25 * r(), col: YAKS[Math.floor(r() * YAKS.length)], graze: false, tassel: r() < 0.6, load: packs[Math.floor(r() * packs.length)], white: r() < 0.2, seed: hashInts(seed, 3, k) });
+    if (k === Math.floor(na / 2) && r() < 0.7) list.push({ role: 'herder', gap: 2.9, ph: ph(), col: [0.25, 0.18, 0.14] });
   }
   const np = kind === 'none' ? 3 + Math.floor(r() * 4) : Math.floor(r() * 3);
-  for (let k = 0; k < np; k++) list.push({ role: 'porter', gap: 2.4, ph: ph(), load: r() < 0.6 ? [0.14, 0.32, 0.62] : [0.62, 0.2, 0.12] });
+  for (let k = 0; k < np; k++) list.push({ role: 'porter', gap: 2.9, ph: ph(), load: r() < 0.6 ? [0.14, 0.32, 0.62] : [0.62, 0.2, 0.12] });
   const nt = 1 + Math.floor(r() * 3);
-  for (let k = 0; k < nt; k++) list.push({ role: 'trekker', gap: 3, ph: ph(), col: JACKETS[Math.floor(r() * 5)], pack: JACKETS[Math.floor(r() * JACKETS.length)], hat: r() < 0.4 ? [0.75, 0.7, 0.6] : null });
+  for (let k = 0; k < nt; k++) list.push({ role: 'trekker', gap: 3.6, ph: ph(), col: JACKETS[Math.floor(r() * 5)], pack: JACKETS[Math.floor(r() * JACKETS.length)], hat: r() < 0.4 ? [0.75, 0.7, 0.6] : null });
   const len = list.reduce((a, m) => a + m.gap, 0);
   const lead = wx + dir * len / 2;
   return { i, wx, d: d0, seed, path: p, walkers: fileAlong(W, p, lead, dir, list), kind };
@@ -2274,7 +2485,7 @@ function makeMonks(W, i) {
   const dir = r() < 0.5 ? 1 : -1;
   const n = 5 + Math.floor(r() * 8);
   const list = [];
-  for (let k = 0; k < n; k++) list.push({ role: 'monk', gap: k ? 1.9 + 0.5 * r() : 0, ph: r(), hat: null });
+  for (let k = 0; k < n; k++) list.push({ role: 'monk', gap: k ? 2.4 + 0.6 * r() : 0, ph: r(), hat: null });
   // the head of the line: a senior monk under a yellow crested hat, now and then
   if (r() < 0.5) list[0].hat = [0.8, 0.62, 0.1];
   const len = list.reduce((a, m) => a + m.gap, 0);
@@ -2303,10 +2514,10 @@ function* monkLines(ctx, out, W, dLo, dHi) {
 function* kaniGate(ctx, out, W, g) {
   const rng = makeRng(g.seed);
   const yaw = g.yaw + Math.PI / 2;      // the passage runs along the path
-  const pw = 2.6, pier = 1.7, dep = 4.2, ph = 3.4, lh = 1.5;
+  const pw = 3.2, pier = 2.1, dep = 5.2, ph = 4.3, lh = 1.9;
   const [ex, ez] = rotY(1, 0, yaw);
   let lo = Infinity, hi = -Infinity;
-  for (const a of [-1, 1]) for (const b of [-1, 1]) { const yy = W.H(g.wx + ex * a * 3.2 + b * 2, g.d - ez * a * 3.2); lo = Math.min(lo, yy); hi = Math.max(hi, yy); }
+  for (const a of [-1, 1]) for (const b of [-1, 1]) { const yy = W.H(g.wx + ex * a * 4 + b * 2.5, g.d - ez * a * 4); lo = Math.min(lo, yy); hi = Math.max(hi, yy); }
   const y = Math.max(lo, hi - 0.8) - 0.2;
   const x = g.wx - ctx.x0, s = clamp(sizeS(out, g.d, 0.7), 0.1, 0.5);
   const white = C.white;
@@ -2325,7 +2536,7 @@ function* kaniGate(ctx, out, W, g) {
   }, KIND.BUILDING, rng);
   // the dark of the passage, seen through the gate
   yield* box(out, x, y, g.d, pw * 0.98, dep * 0.96, ph * 0.98, yaw, s, (f) => (f === 4 ? null : [0.1, 0.09, 0.08]), KIND.BUILDING, rng);
-  yield* chorten(ctx, out, x, g.d, 4.2, { y: y + ph + lh, s: clamp(s, 0.06, 0.45), rng, kind: KIND.BUILDING, yaw });
+  yield* chorten(ctx, out, x, g.d, 5.3, { y: y + ph + lh, s: clamp(s, 0.06, 0.45), rng, kind: KIND.BUILDING, yaw });
 }
 // Kani gates on their own, at the entrance to a hamlet.
 function* hamletGates(ctx, out, W, h, dLo, dHi) {
@@ -2380,17 +2591,17 @@ function* drawWheelWall(ctx, out, W, p) {
   // the back wall, whitewashed, with a maroon band under the roof
   const [bx, bz] = at(0, -0.9);
   // (the front face is in deep shadow behind the wheels, so the drums stand out against it)
-  yield* box(out, bx, y, -bz, p.len, 0.7, 2.6, p.yaw, s, (f, a, b, nx, nz) => (f === 4 ? C.parapet : f === 0 && b > 0.22 && b < 0.78 ? [0.16, 0.1, 0.08] : faceTone(b > 0.8 ? C.maroon : C.white, nx, nz)), KIND.BUILDING, rng);
+  yield* box(out, bx, y, -bz, p.len, 0.7, 3.3, p.yaw, s, (f, a, b, nx, nz) => (f === 4 ? C.parapet : f === 0 && b > 0.22 && b < 0.78 ? [0.16, 0.1, 0.08] : faceTone(b > 0.8 ? C.maroon : C.white, nx, nz)), KIND.BUILDING, rng);
   // the roof: a deep eave over the wheels on a row of posts
   const [rx, rz] = at(0, -0.3);
-  yield* box(out, rx, y + 2.6, -rz, p.len + 0.8, 1.9, 0.32, p.yaw, s, (f, a, b, nx, nz) => (f === 4 ? jitter([0.3, 0.2, 0.15], rng, 0.08) : faceTone(f === 0 ? [0.72, 0.56, 0.22] : C.parapet, nx, nz)), KIND.BUILDING, rng);
+  yield* box(out, rx, y + 3.3, -rz, p.len + 0.8, 1.9, 0.36, p.yaw, s, (f, a, b, nx, nz) => (f === 4 ? jitter([0.3, 0.2, 0.15], rng, 0.08) : faceTone(f === 0 ? [0.72, 0.56, 0.22] : C.parapet, nx, nz)), KIND.BUILDING, rng);
   const pr = Math.max(0.06, 0.0005 * p.d);
   for (let t = -p.len / 2; t <= p.len / 2 + 0.01; t += p.len / Math.max(2, Math.round(p.len / 4.5))) {
     const [px, pz] = at(t, 0.6);
-    strut(out, px, y, pz, px, y + 2.6, pz, pr, [0.3, 0.14, 0.1], 2, 1, KIND.BUILDING);
+    strut(out, px, y, pz, px, y + 3.3, pz, pr, [0.3, 0.14, 0.1], 2, 1, KIND.BUILDING);
   }
   // the wheels: upright drums in copper, gold and red, side by side on their spindles
-  const wr = Math.max(0.26, 0.0022 * p.d), step = wr * 2.7;
+  const wr = Math.max(0.33, 0.0022 * p.d), step = wr * 2.7;
   const nw = Math.floor((p.len - 0.8) / step);
   for (let k = 0; k < nw; k++) {
     const t = -((nw - 1) / 2) * step + k * step;
@@ -2398,10 +2609,10 @@ function* drawWheelWall(ctx, out, W, p) {
     const u = hh(k, p.seed & 0xffff, 21);
     const c = u < 0.45 ? [0.72, 0.46, 0.22] : u < 0.85 ? [0.8, 0.64, 0.22] : [0.66, 0.16, 0.1];
     const cs = shade(c, 0, 0.3, 1, 0.7, 0.5);
-    out(wxx, y + 1.3, wz, wr, wr * 1.5, wr, cs[0], cs[1], cs[2], 1, 0, 0, 0, 1, KIND.BUILDING);
+    out(wxx, y + 1.65, wz, wr, wr * 1.5, wr, cs[0], cs[1], cs[2], 1, 0, 0, 0, 1, KIND.BUILDING);
     // a painted band round the middle and the dark cap
-    out(wxx, y + 1.3, wz + wr * 0.15, wr * 1.03, wr * 0.28, wr * 1.03, 0.62, 0.14, 0.1, 1, 0, 0, 0, 1, KIND.BUILDING);
-    out(wxx, y + 1.3 + wr * 1.25, wz, wr * 0.9, wr * 0.25, wr * 0.9, 0.2, 0.12, 0.08, 1, 0, 0, 0, 1, KIND.BUILDING);
+    out(wxx, y + 1.65, wz + wr * 0.15, wr * 1.03, wr * 0.28, wr * 1.03, 0.62, 0.14, 0.1, 1, 0, 0, 0, 1, KIND.BUILDING);
+    out(wxx, y + 1.65 + wr * 1.25, wz, wr * 0.9, wr * 0.25, wr * 0.9, 0.2, 0.12, 0.08, 1, 0, 0, 0, 1, KIND.BUILDING);
     if (out.due()) yield;
   }
 }
@@ -2506,7 +2717,7 @@ function makeCamp(W, i) {
   const ny = Math.floor(r() * 5);
   for (let k = 0; k < ny; k++) {
     const yx = wx + (r() - 0.5) * 50, yd = d + 10 + 10 * r();
-    c.yaks.push({ wx: yx, d: yd, yaw: r() * 6.3, k: 1.3 + 0.3 * r(), col: YAKS[Math.floor(r() * YAKS.length)], graze: r() < 0.7, tassel: r() < 0.3, white: r() < 0.25, seed: hashInts(seed, 4, k) });
+    c.yaks.push({ wx: yx, d: yd, yaw: r() * 6.3, k: 1.7 + 0.4 * r(), col: YAKS[Math.floor(r() * YAKS.length)], graze: r() < 0.7, tassel: r() < 0.3, white: r() < 0.25, seed: hashInts(seed, 4, k) });
   }
   const np = 1 + Math.floor(r() * 3);
   for (let k = 0; k < np; k++) {
@@ -2629,7 +2840,7 @@ function hamletExtras(W, h) {
   const e = { orchard: [], field: null, gate: null };
   const side = r() < 0.5 ? -1 : 1;
   if (r() < 0.45 + 0.35 * m.farm) {
-    const ox = h.wx + side * (40 + 25 * r()), od = h.d - 6 + 14 * r();
+    const ox = h.wx + side * (14 * h.houses.length + 20 + 25 * r()), od = h.d - 6 + 14 * r();
     const nt = 5 + Math.floor(r() * 8), white = r() < 0.3;
     for (let k = 0; k < nt; k++) {
       const tx = ox + ((k % 4) - 1.5) * 7 + (r() - 0.5) * 2, td = Math.max(45, od + (Math.floor(k / 4) - 1) * 7 + (r() - 0.5) * 2);
@@ -2639,13 +2850,13 @@ function hamletExtras(W, h) {
   if (r() < 0.55) {
     // beside the hamlet, on the gate's side and a little further down the slope than the houses
     const fw = 18 + 14 * r(), fdp = 10 + 8 * r();
-    const fx = h.wx - side * (30 + fw / 2 + 20 * r()), fd = Math.min(h.d + 16 + 10 * r(), bnAt(W, h.wx) - 20 - fdp / 2);
+    const fx = h.wx - side * (14 * h.houses.length + 10 + fw / 2 + 20 * r()), fd = Math.min(h.d + 16 + 10 * r(), bnAt(W, h.wx) - 20 - fdp / 2);
     const hit = (ax, ad, bx, bd) => Math.max(ax, bx) > fx - fw / 2 - 3 && Math.min(ax, bx) < fx + fw / 2 + 3 && Math.max(ad, bd) > fd - fdp / 2 - 3 && Math.min(ad, bd) < fd + fdp / 2 + 3;
     const clash = (h.mani && hit(h.mani.wx - h.mani.len / 2, h.mani.d, h.mani.wx + h.mani.len / 2, h.mani.d)) || h.walls.some((w) => hit(w[0], w[1], w[2], w[3]));
     if (!clash && fd - fdp / 2 > 42) e.field = { x0: fx - fw / 2, x1: fx + fw / 2, d0: fd - fdp / 2, d1: fd + fdp / 2, seed: hashInts(h.seed, 32), bare: r() < 0.3 };
   }
   if (r() < 0.4) {
-    const gx = h.wx - side * (55 + 15 * r()), gd = h.d - 12 + 6 * r();
+    const gx = h.wx - side * (14 * h.houses.length + 30 + 15 * r()), gd = h.d - 12 + 6 * r();
     if (gd > 45) e.gate = { wx: gx, d: gd, yaw: (r() - 0.5) * 0.4, seed: hashInts(h.seed, 33) };
   }
   h.extras = e;
@@ -3015,7 +3226,7 @@ function* forts(ctx, out, W, dLo, dHi) {
 // --- snowfall: in some stretches a light fall of small flakes drifts past the window ---
 // Round splats tagged MOVE.FALL, scattered evenly through the slab of air the shader wraps them in
 // (3.4 m below rail level to 12.6 m above), each at its own distance. Few and small.
-function snowAmt(W, wx) { return smooth(0.56, 0.75, noise1(wx / 2700, W.ws + 1711)) * (0.5 + 0.5 * mood(W, wx).wild); }
+function snowAmt(W, wx) { return smooth(0.56, 0.75, noise1(wx / 2700, W.ws + 1711)) * (0.5 + 0.5 * mood(W, wx).wild) * (1 - 0.85 * valleyAt(W.ws, wx).lu); }
 function* snowfall(ctx, out, W, dLo, dHi, perM2) {
   const xm = ctx.x0 + ctx.length / 2;
   const a = Math.max(snowAmt(W, ctx.x0), snowAmt(W, xm), snowAmt(W, ctx.x0 + ctx.length));
@@ -3103,6 +3314,394 @@ function* repeatingChorten(ctx, out, W, logic) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Vegetation: firs and blue pines, birches, poplars and willows in leaf, rhododendron and juniper
+// ---------------------------------------------------------------------------------------------
+// A fir or a blue pine: a straight trunk and whorls of drooping boughs narrowing to a point, every
+// whorl lit on its sunward (-x) side and dark on the other, so it holds from any side.
+//   t: { wx, d, y, h, w, col, seed }; lod 0 near (whorls of five boughs), 1 middle distance (three),
+//   2 far (a spindle of two or three splats)
+function* fir(ctx, out, t, lod, kind = KIND.TREE) {
+  const x = t.wx - ctx.x0, d = t.d, y = t.y - 0.3, H = t.h, Wd = t.w, c = t.col;
+  if (lod >= 2) {
+    const k = 0.9 + 0.25 * hh(t.seed | 0, 1, 5);
+    out(x, y + H * 0.36, -d, Wd * 0.46, H * 0.3, Wd * 0.46, c[0] * 0.85 * k, c[1] * 0.85 * k, c[2] * 0.85 * k, 1, 0, 0, 0, 1, kind);
+    out(x - Wd * 0.06, y + H * 0.7, -d, Wd * 0.25, H * 0.26, Wd * 0.25, c[0] * 1.1 * k, c[1] * 1.1 * k, c[2] * 1.1 * k, 1, 0, 0, 0, 1, kind);
+    if (d < 800) out(x - Wd * 0.22, y + H * 0.42, -(d - Wd * 0.2), Wd * 0.22, H * 0.24, Wd * 0.2, c[0] * 1.7 * k + 0.02, c[1] * 1.55 * k + 0.02, c[2] * 1.3 * k, 1, 0, 0, 0, 1, kind);
+    return;
+  }
+  const r = makeRng(t.seed);
+  const tr = Math.max(0.15, H * 0.011, 0.0007 * d);
+  strut(out, x, y, -d, x, y + H * 0.34, -d, tr, [0.25, 0.2, 0.16], 2, 1, kind);
+  const tiers = t.tiers || (lod ? clamp(Math.round(H / 5), 3, 5) : clamp(Math.round((H / 2.8) * Math.min(1, Math.sqrt(out.density) + 0.15)), 4, 10));
+  const lobes = lod ? 3 : 5;
+  for (let i = 0; i < tiers; i++) {
+    const f = (i + 0.5) / tiers;
+    const th = (H * 0.84) / tiers, ty = y + H * 0.15 + H * 0.84 * f, tw = Wd * 0.5 * (1 - 0.88 * f) + 0.12;
+    const up = 0.78 + 0.34 * f;
+    out(x, ty, -d, tw * 0.6, th * 0.52, tw * 0.6, c[0] * 0.6 * up, c[1] * 0.6 * up, c[2] * 0.6 * up, 1, 0, 0, 0, 1, kind);
+    const a0 = r() * 6.28;
+    for (let j = 0; j < lobes; j++) {
+      // (at middle distance: one bough to the sun, one to the camera, one to the shade)
+      const a = lod ? [Math.PI, Math.PI / 2, 0][j] + (r() - 0.5) * 0.7 : a0 + (j * 6.28) / lobes;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const lk = up * (1.08 + 0.95 * Math.max(0, -ca) - 0.2 * Math.max(0, ca) + 0.22 * Math.max(0, sa)) * (0.88 + 0.24 * r());
+      out(x + ca * tw * 0.58, ty - th * 0.2, -d + sa * tw * 0.58, tw * 0.42, th * 0.3, tw * 0.42, c[0] * lk + 0.012 * Math.max(0, -ca), c[1] * lk + 0.012 * Math.max(0, -ca), c[2] * lk, 1, 0, 0, 0, 1, kind);
+    }
+    if (out.due()) yield;
+  }
+  out(x, y + H * 1.0, -d, Math.max(0.1, tr * 0.7), H * 0.045, Math.max(0.1, tr * 0.7), c[0] * 1.2, c[1] * 1.2, c[2] * 1.2, 1, 0, 0, 0, 1, kind);
+}
+// A birch: a tall white stem and a light, fresh-green crown.
+function* birch(ctx, out, t, lod, kind = KIND.TREE) {
+  const x = t.wx - ctx.x0, d = t.d, y = t.y - 0.2, H = t.h, cw = t.w, c = t.col || C.birch;
+  const tr = Math.max(0.13, H * 0.014, 0.0007 * d);
+  if (lod >= 2) {
+    strut(out, x, y, -d, x, y + H * 0.6, -d, tr, C.birchBark, 1, 1, kind);
+    const k = 0.9 + 0.25 * hh(t.seed | 0, 1, 5);
+    out(x, y + H * 0.68, -d, cw * 0.34, H * 0.25, cw * 0.34, c[0] * 0.8 * k, c[1] * 0.8 * k, c[2] * 0.8 * k, 1, 0, 0, 0, 1, kind);
+    out(x - cw * 0.16, y + H * 0.76, -(d - cw * 0.15), cw * 0.2, H * 0.16, cw * 0.2, c[0] * 1.12 * k, c[1] * 1.1 * k, c[2] * k, 1, 0, 0, 0, 1, kind);
+    return;
+  }
+  const r = makeRng(t.seed);
+  // the stem leans a little; pale, with dark bands
+  const lx = (r() - 0.5) * 0.1 * H, top = H * 0.78;
+  strut(out, x, y, -d, x + lx, y + top, -d, tr, C.birchBark, lod ? 3 : 5, 1, kind);
+  if (!lod) for (let k = 0; k < 3; k++) { const f = 0.12 + 0.5 * r(); out(x + lx * f, y + top * f, -d + tr * 0.5, tr * 1.05, tr * 0.5, tr * 0.6, 0.17, 0.15, 0.13, 1, 0, 0, 0, 1, kind); }
+  // the crown: an open, ragged oval of small lumps hung about the upper stem (a ball of big ones
+  // made a lollipop)
+  const lumps = t.tiers ? 3 : lod ? 5 : 10, n = t.tiers ? 3 : lod ? 5 : Math.round(clamp(treeSplats2(out, d, cw) * 0.14, 7, 12));
+  for (let k = 0; k < lumps; k++) {
+    const a = k * 2.4 + r(), f = (k + 0.3 + 0.6 * r()) / lumps;
+    const bulge = Math.sin(Math.PI * (0.12 + 0.8 * f)), rr = cw * (lod ? 0.17 + 0.1 * r() : 0.13 + 0.09 * r()) * (0.7 + 0.5 * bulge);
+    const off = cw * 0.3 * bulge * (0.5 + 0.6 * r());
+    yield* blob(ctx, out, x + lx * (0.5 + 0.5 * f) + Math.cos(a) * off, y + H * (0.4 + 0.58 * f) - rr * 0.2, d + Math.sin(a) * off * 0.8, rr, rr * 1.05, rr, { n, color: jitter(c, r, 0.16), rng: r, kind, inner: 0.35, amb: 0.6, clump: 0.8 });
+  }
+}
+// A poplar in leaf (a tall narrow column) or a willow (a round, drooping crown): the trees of the
+// village lanes where the valley is lush enough for leaves.
+function* leafTree(ctx, out, W, t, kind = KIND.TREE) {
+  const x = t.wx - ctx.x0, d = t.d, y = W.H(t.wx, d) - 0.2, H = t.h;
+  const c = t.willow ? C.willow : C.poplar;
+  if (d > 300) {
+    // (a stem, a dark body and a lit flank: two pale soft splats alone read as a green smudge)
+    const cw = Math.max(t.willow ? H * 0.3 : H * 0.13, 0.0013 * d), k = 0.9 + 0.2 * hh(t.seed | 0, 2, 5);
+    strut(out, x, y, -d, x, y + H * 0.4, -d, Math.max(0.18, 0.0007 * d), C.bark, 1, 1, kind);
+    out(x, y + H * 0.6, -d, cw, H * (t.willow ? 0.26 : 0.36), cw, c[0] * 0.66 * k, c[1] * 0.7 * k, c[2] * 0.66 * k, 1, 0, 0, 0, 1, kind);
+    out(x - cw * 0.4, y + H * 0.64, -(d - cw * 0.3), cw * 0.5, H * (t.willow ? 0.17 : 0.26), cw * 0.5, c[0] * 1.05 * k, c[1] * 1.05 * k, c[2] * 0.95 * k, 1, 0, 0, 0, 1, kind);
+    return;
+  }
+  const r = makeRng(t.seed);
+  const tr = Math.max(0.16, 0.0007 * d);
+  strut(out, x, y, -d, x, y + H * 0.35, -d, tr, C.bark, 2, 1, kind);
+  if (t.willow) {
+    const R = H * 0.34, n = Math.round(clamp(treeSplats2(out, d, R * 2) * 0.25, 8, 22));
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * 6.28 + r();
+      yield* blob(ctx, out, x + Math.cos(a) * R * 0.45, y + H * 0.62 + (r() - 0.5) * R * 0.3, d + Math.sin(a) * R * 0.35, R * 0.62, R * 0.7, R * 0.6, { n, color: jitter(c, r, 0.1), rng: r, kind, inner: 0.35, amb: 0.64, clump: 0.7 });
+    }
+    return;
+  }
+  const cw = H * 0.11 + 0.5, n = Math.round(clamp(treeSplats2(out, d, cw * 2) * 0.5, 6, 16));
+  for (let k = 0; k < 4; k++) {
+    const f = (k + 0.5) / 4, rw = cw * (0.75 + 0.5 * Math.sin(Math.PI * (0.15 + 0.75 * f)));
+    yield* blob(ctx, out, x + (r() - 0.5) * 0.4, y + H * (0.2 + 0.74 * f), d, rw, H * 0.15, rw, { n, color: jitter(c, r, 0.1), rng: r, kind, inner: 0.35, amb: 0.64, clump: 0.6 });
+  }
+}
+// A rhododendron: a dark, glossy, rounded bush, with trusses of flowers over its top and the side
+// toward the window when in bloom. b: { wx, d, w, h, bloom (index into BLOOM, or -1), seed }
+function* rhodo(ctx, out, W, b, kind = KIND.HEDGE) {
+  const x = b.wx - ctx.x0, y = W.H(b.wx, b.d), r = makeRng(b.seed);
+  const n = Math.round(clamp(treeSplats2(out, b.d, b.w) * 0.45, 5, 24));
+  yield* blob(ctx, out, x, y + b.h * 0.4, b.d, b.w / 2, b.h * 0.58, b.w * 0.42, { n, color: b.col || C.rhodo, rng: r, kind, inner: 0.4, amb: 0.55, clump: 0.6 });
+  if (b.bloom < 0) return;
+  const bc = BLOOM[b.bloom], m = Math.round(clamp(n * 1.1, 7, 22)), s0 = Math.max(0.2, b.w * 0.095, 0.0026 * b.d);
+  for (let k = 0; k < m; k++) {
+    let ux = r() * 2 - 1, uy = 0.1 + 0.9 * r(), uz = r() * 1.7 - 0.6;
+    const l = Math.hypot(ux, uy, uz) || 1; ux /= l; uy /= l; uz /= l;
+    const sz = s0 * (0.8 + 0.5 * r()), kk = (0.78 + 0.3 * uy) * (0.9 + 0.2 * r());
+    out(x + ux * b.w * 0.5, y + b.h * 0.4 + uy * b.h * 0.6, -(b.d - uz * b.w * 0.42), sz, sz * 0.8, sz, bc[0] * kk, bc[1] * kk, bc[2] * kk, 1, 0, 0, 0, 1, kind);
+  }
+}
+
+// Would something tall at (wx, d), rad metres across, stand in front of (or on top of) one of the
+// things a viewer is meant to see on the near slope? Trees stand behind or beside the hamlets,
+// herds, shrines, camps and paths, never between them and the window. low: a bush, which only has
+// to keep off them.
+function veiled(W, wx, d, rad, low = false) {
+  const B = (cd, m) => (low ? Math.abs(d - cd) < m * 0.5 : d < cd + m);
+  for (let i = Math.floor((wx - 220) / HCELL); i <= Math.floor((wx + 220) / HCELL); i++) { const h = hamlet(W, i); if (h && Math.abs(h.wx - wx) < 95 + rad && B(h.d, 34)) return true; }
+  for (let i = Math.floor((wx - 90) / FCELL); i <= Math.floor((wx + 90) / FCELL); i++) { const f = flagSite(W, i); if (f && Math.abs(f.wx - wx) < 42 + rad && B(f.d, 22)) return true; }
+  for (let i = Math.floor((wx - 90) / YCELL); i <= Math.floor((wx + 90) / YCELL); i++) { const g = herd(W, i); if (g && Math.abs(g.wx - wx) < 36 + rad && B(g.d, 20)) return true; }
+  for (let i = Math.floor((wx - 70) / SCELL); i <= Math.floor((wx + 70) / SCELL); i++) { const g = sheepGroup(W, i); if (g && Math.abs(g.wx - wx) < 24 + rad && B(g.d, 16)) return true; }
+  for (const c of claimsBefore(W, 4, wx - rad, wx + rad)) if (Math.abs(c.wx - wx) < c.r + rad + 8 && B(c.d, c.r * 0.6 + 12)) return true;
+  for (let i = Math.floor((wx - 200) / CVCELL); i <= Math.floor((wx + 200) / CVCELL); i++) { const c = caravan(W, i); if (c && wx > c.path.xa - rad && wx < c.path.xb + rad && B(pathD(c.path, clamp(wx, c.path.xa, c.path.xb)), low ? 10 : 14)) return true; }
+  for (let i = Math.floor((wx - 300) / MKCELL); i <= Math.floor((wx + 300) / MKCELL); i++) {
+    const m = monkLine(W, i);
+    if (!m) continue;
+    if (wx > m.path.xa - rad && wx < m.path.xb + rad && B(pathD(m.path, clamp(wx, m.path.xa, m.path.xb)), low ? 10 : 14)) return true;
+    if (Math.abs(m.gate.wx - wx) < 14 + rad && B(m.gate.d, 16)) return true;
+    if (Math.abs(m.chorten.wx - wx) < 14 + rad && B(m.chorten.d, 16)) return true;
+  }
+  for (let i = Math.floor((wx - 60) / LSCELL); i <= Math.floor((wx + 60) / LSCELL); i++) { const s = lineShrine(W, i); if (s && Math.abs(s.wx - wx) < 30 + rad && B(s.d, 22)) return true; }
+  for (let i = Math.floor((wx - 60) / TWCELL); i <= Math.floor((wx + 60) / TWCELL); i++) { const p = trailParty(W, i); if (p && Math.abs(p.wx - wx) < 26 + rad && B(p.d, 14)) return true; }
+  if (!low) for (let i = Math.floor((wx - 60) / BCELL); i <= Math.floor((wx + 60) / BCELL); i++) { const b = bridge(W, i); if (b && Math.abs(b.wx - wx) < 50 + rad) return true; }
+  return false;
+}
+
+// --- the valley trail: a worn footpath along the near slope the whole way, with people on it:
+// monks, a herder with a child and a pack yak, porters, trekkers, a led horse ---
+function trailD(W, wx) {
+  const bn = valleyAt(W.ws, wx).bn;
+  return Math.min(bn - 32, 50 + 34 * noise1(wx / 620, W.ws + 2301) + 7 * (noise1(wx / 85, W.ws + 2302) - 0.5));
+}
+function trailPath(W) { return W.trail || (W.trail = { xa: -1e12, xb: 1e12, fn: (wx) => trailD(W, wx), w: 2.3, pale: true, seed: 2303 }); }
+const TWCELL = 380;
+function trailParty(W, i) { return cache(W, 'tw', i, () => makeTrailParty(W, i)); }
+function makeTrailParty(W, i) {
+  const seed = hashInts(W.ws, 2311, i), r = makeRng(seed);
+  if (r() > 0.62) return null;
+  const wx = (i + 0.15 + 0.7 * r()) * TWCELL, d = trailD(W, wx);
+  const dir = r() < 0.5 ? 1 : -1, u = r();
+  // not through the middle of a hamlet, a camp, a lodge yard or a school
+  const h = hamlet(W, Math.floor(wx / HCELL));
+  if (h && Math.abs(h.wx - wx) < 100 && Math.abs(h.d - d) < 28) return null;
+  if (taken(W, 4, wx, d, 22) || !nearFree(W, wx, d, 16)) return null;
+  for (let k = Math.floor((wx - 60) / SCELL); k <= Math.floor((wx + 60) / SCELL); k++) { const g = sheepGroup(W, k); if (g && Math.abs(g.wx - wx) < 34 && Math.abs(g.d - d) < 16) return null; }
+  const list = [];
+  const packs = [[0.55, 0.42, 0.26], [0.2, 0.3, 0.55], [0.6, 0.2, 0.12]];
+  if (u < 0.24) {
+    const n = 2 + Math.floor(r() * 3);
+    for (let k = 0; k < n; k++) list.push({ role: 'monk', gap: k ? 2.5 + 0.6 * r() : 0, ph: r(), hat: null });
+  } else if (u < 0.46) {
+    list.push({ role: 'herder', gap: 0, ph: r(), hat: r() < 0.5 ? [0.3, 0.24, 0.16] : null, col: [0.2, 0.15, 0.12] });
+    const n = 1 + Math.floor(r() * 3);
+    for (let k = 0; k < n; k++) list.push({ type: 'yak', gap: 4.9, ph: r(), k: 1.7 + 0.25 * r(), col: YAKS[Math.floor(r() * YAKS.length)], graze: false, tassel: r() < 0.6, load: packs[Math.floor(r() * packs.length)], white: r() < 0.2 });
+    list.push({ role: 'child', gap: 3.2, ph: r(), col: r() < 0.5 ? [0.46, 0.1, 0.1] : [0.14, 0.24, 0.52], hat: null });
+  } else if (u < 0.66) {
+    const n = 2 + Math.floor(r() * 3);
+    for (let k = 0; k < n; k++) list.push({ role: 'porter', gap: k ? 3 : 0, ph: r(), load: r() < 0.6 ? [0.14, 0.32, 0.62] : [0.62, 0.2, 0.12] });
+  } else if (u < 0.84) {
+    const n = 2 + Math.floor(r() * 2);
+    for (let k = 0; k < n; k++) list.push({ role: 'trekker', gap: k ? 3.6 : 0, ph: r(), col: JACKETS[Math.floor(r() * 5)], pack: JACKETS[Math.floor(r() * JACKETS.length)], hat: r() < 0.4 ? [0.75, 0.7, 0.6] : null });
+    list.push({ role: 'porter', gap: 3.2, ph: r(), load: [0.14, 0.32, 0.62] });
+  } else {
+    list.push({ role: 'herder', gap: 0, ph: r(), hat: [0.3, 0.24, 0.16], col: [0.25, 0.18, 0.14] });
+    list.push({ type: 'horse', gap: 3.6, ph: r(), col: HORSES[Math.floor(r() * HORSES.length)], saddle: [0.62, 0.14, 0.1] });
+    if (r() < 0.5) list.push({ type: 'mule', gap: 4.2, ph: r(), col: HORSES[Math.floor(r() * HORSES.length)], pack: packs[Math.floor(r() * packs.length)] });
+  }
+  const len = list.reduce((a, m) => a + m.gap, 0);
+  return { i, wx, d, seed, walkers: fileAlong(W, trailPath(W), wx + dir * len / 2, dir, list) };
+}
+function* trail(ctx, out, W, dLo, dHi) {
+  yield* drawPath(ctx, out, W, trailPath(W), dLo, dHi);
+  for (let i = Math.floor((ctx.x0 - 40) / TWCELL); i <= Math.floor((ctx.x0 + ctx.length + 40) / TWCELL); i++) {
+    const p = trailParty(W, i);
+    if (p) yield* drawWalkers(ctx, out, p.walkers, dLo, dHi);
+  }
+}
+
+// --- grass tussocks and alpine flowers: the grain of the open ground near the line, in drifts.
+// A tussock is a dark foot and a pale tuft; a flower clump a green foot and a bright head (the
+// colour of the stretch, with a second mixed in). Thinned by world hash at low budgets.
+function* tussocks(ctx, out, W, dLo, dHi) {
+  const CS = 3.1, dA = Math.max(dLo, 9), dB = Math.min(dHi, 105);
+  if (dB <= dA) return;
+  const keep = 0.55 * clamp(out.density, 0.25, 1);
+  for (let gd = Math.floor(dA / CS); gd * CS < dB; gd++) {
+    for (let gx = Math.floor(ctx.x0 / CS); gx * CS < ctx.x0 + ctx.length; gx++) {
+      if (hh(gx, gd, W.ws + 2401) > keep) continue;
+      const wx = (gx + hh(gx, gd, W.ws + 2402)) * CS, d = (gd + hh(gx, gd, W.ws + 2403)) * CS;
+      if (d < dA || d >= dB || wx < ctx.x0 || wx >= ctx.x0 + ctx.length) continue;
+      if (noise2(wx / 38, d / 26, W.ws + 2404) < 0.42) continue;
+      const v = valleyAt(W.ws, wx), lu = v.lu;
+      if (d > v.bn - 2 || v.fm > 0.35) continue;
+      const y = W.H(wx, d), x = wx - ctx.x0;
+      const sz = (0.3 + 0.3 * hh(gx, gd, 2405)) * Math.max(1, d / 42), u2 = hh(gx, gd, W.ws + 2406), k = 0.85 + 0.3 * hh(gx, gd, 2407);
+      if (lu > 0.12 && d < 80 && u2 < 0.36 * Math.min(1, 2 * lu)) {
+        const c = FLOWERS[Math.floor(hh(Math.floor(wx / 130), u2 < 0.1 ? 1 : 0, W.ws + 2037) * FLOWERS.length)];
+        out(x, y + sz * 0.25, -d, sz * 0.9, sz * 0.3, sz * 0.8, 0.2 * k, 0.32 * k, 0.13 * k, 1, 0, 0, 0, 1, KIND.GROUND);
+        out(x, y + sz * 0.6, -d + sz * 0.1, sz * 0.75, sz * 0.3, sz * 0.65, c[0] * k, c[1] * k, c[2] * k, 1, 0, 0, 0, 1, KIND.GROUND);
+      } else {
+        const tip = mix3([0.6, 0.52, 0.31], [0.44, 0.5, 0.23], lu), foot = mix3([0.33, 0.28, 0.18], [0.2, 0.28, 0.13], lu);
+        out(x, y + sz * 0.3, -d, sz * 0.85, sz * 0.38, sz * 0.7, foot[0] * k, foot[1] * k, foot[2] * k, 1, 0, 0, 0, 1, KIND.GROUND);
+        out(x - sz * 0.1, y + sz * 0.85, -d + sz * 0.05, sz * 0.4, sz * 0.55, sz * 0.4, tip[0] * k, tip[1] * k, tip[2] * k, 1, 0, 0, 0, 1, KIND.GROUND);
+      }
+    }
+    if (out.due()) yield;
+  }
+}
+
+// --- stands of trees on the near slope: firs and blue pines, birches toward the river ---
+const WSCELL = 52;
+function stand(W, i) { return cache(W, 'ws', i, () => makeStand(W, i)); }
+function makeStand(W, i) {
+  const seed = hashInts(W.ws, 2101, i), r = makeRng(seed);
+  const wx = (i + r()) * WSCELL;
+  const v = valleyAt(W.ws, wx), wd = v.wd, lu = v.lu, bn = v.bn;
+  // in the wooded stretches most cells hold a stand; elsewhere a lone clump now and then
+  if (r() > (wd > 0.05 ? 0.2 + 0.75 * wd : 0.14 * lu)) return null;
+  const n = 3 + Math.floor(r() * (4 + 8 * wd)), rx = 8 + 13 * r(), rd = 5 + 8 * r();
+  let d = 0;
+  for (let tr = 0; tr < 3 && !d; tr++) { const c = 46 + (bn - 66) * Math.pow(r(), 1.25); if (!veiled(W, wx, c - rd, rx)) d = c; }
+  if (!d) return null;
+  const u = r(), river = d > 0.78 * bn;
+  const kind = u < (river ? 0.55 : 0.2) ? 'birch' : u < 0.82 ? 'fir' : 'pine';
+  const st = { i, wx, d, kind, trees: [], bushes: [] };
+  for (let k = 0; k < n; k++) {
+    const a = r() * 6.28, q = Math.sqrt(r());
+    const tx = wx + Math.cos(a) * rx * q, td = Math.max(37, d + Math.sin(a) * rd * q);
+    const mixB = kind !== 'birch' && r() < 0.15, far = d > 78 || k < 5;
+    const isB = kind === 'birch' || mixB;
+    const h = isB ? 10 + 7 * r() : (kind === 'pine' ? 15 : 17) + 13 * r() * (0.6 + 0.4 * q);
+    const w = isB ? h * (0.4 + 0.12 * r()) : h * (kind === 'pine' ? 0.4 : 0.32) * (0.85 + 0.3 * r());
+    const col = isB ? jitter(C.birch, r, 0.12) : jitter(kind === 'pine' ? C.pine : C.fir, r, 0.14);
+    if (td > bn - 4 || !far) continue;
+    st.trees.push({ wx: tx, d: td, y: W.H(tx, td), h, w, birch: isB, col, seed: hashInts(seed, 1, k) });
+  }
+  // rhododendrons round the skirts of the stand, mostly on the side toward the line
+  if (lu > 0.15) {
+    const bl = r() < 0.75 ? bloomAt(W, wx) : Math.floor(r() * BLOOM.length);
+    const nb = 2 + Math.floor(r() * 5);
+    for (let k = 0; k < nb; k++) {
+      const a = Math.PI * 1.5 + (r() - 0.5) * 3.6;
+      const bx = wx + Math.cos(a) * rx * (1 + 0.4 * r()), bd = Math.max(32, d + Math.sin(a) * rd * (1 + 0.5 * r()));
+      st.bushes.push({ wx: bx, d: bd, w: 2.6 + 2.6 * r(), h: 1.8 + 1.6 * r(), bloom: r() < 0.8 ? bl : -1, seed: hashInts(seed, 2, k) });
+    }
+  }
+  return st;
+}
+function* nearWoods(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 40) / WSCELL); i <= Math.floor((ctx.x0 + ctx.length + 40) / WSCELL); i++) {
+    const st = stand(W, i);
+    if (!st) continue;
+    for (const t of st.trees) {
+      if (!inD(t.d, dLo, dHi) || !inX(ctx, t.wx, t.w)) continue;
+      const lod = t.d > 150 ? 1 : 0;
+      if (t.birch) yield* birch(ctx, out, t, lod); else yield* fir(ctx, out, t, lod);
+    }
+    for (const b of st.bushes) if (inD(b.d, dLo, dHi) && inX(ctx, b.wx, b.w)) yield* rhodo(ctx, out, W, b);
+  }
+}
+
+// --- drifts of rhododendron and juniper scrub over the near slope ---
+const SBCELL = 26;
+function drift(W, i) { return cache(W, 'sb', i, () => makeDrift(W, i)); }
+function makeDrift(W, i) {
+  const seed = hashInts(W.ws, 2111, i), r = makeRng(seed);
+  const wx = (i + r()) * SBCELL;
+  const v = valleyAt(W.ws, wx), lu = v.lu, bn = v.bn, fm = v.fm;
+  // (even a bare stretch has its juniper; the farmed ground is kept for the fields)
+  if (r() > (0.22 + 0.6 * lu) * (1 - 0.7 * fm)) return null;
+  const d = 31 + (bn - 44) * Math.pow(r(), 1.5);
+  const sx = 3 + 8 * r(), sd = 2 + 4 * r();
+  if (veiled(W, wx, d, sx, true)) return null;
+  const rh = r() < 0.2 + 0.7 * lu;
+  const bl = r() < 0.75 ? bloomAt(W, wx) : Math.floor(r() * BLOOM.length), inBloom = r() < 0.85;
+  const n = 2 + Math.floor(r() * 6);
+  const bushes = [];
+  for (let k = 0; k < n; k++) {
+    const bx = wx + (r() * 2 - 1) * sx, bd = Math.max(30.5, d + (r() * 2 - 1) * sd);
+    const w = r(), h = r(), fl = r();
+    if (bd > bn - 3) continue;
+    if (rh) bushes.push({ wx: bx, d: bd, w: 2.2 + 2.6 * w, h: 1.5 + 1.7 * h, bloom: inBloom && fl < 0.9 ? bl : -1, seed: hashInts(seed, 1, k) });
+    else bushes.push({ wx: bx, d: bd, w: 2 + 2.4 * w, h: 0.8 + 0.8 * h, bloom: -1, col: C.juniper, seed: hashInts(seed, 1, k) });
+  }
+  return { wx, d, bushes };
+}
+function* drifts(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 20) / SBCELL); i <= Math.floor((ctx.x0 + ctx.length + 20) / SBCELL); i++) {
+    const dr = drift(W, i);
+    if (!dr) continue;
+    for (const b of dr.bushes) if (inD(b.d, dLo, dHi) && inX(ctx, b.wx, b.w)) yield* rhodo(ctx, out, W, b);
+  }
+}
+
+// --- the woods beyond the river: the riverine wood on the floor, the forest on the lower wall up
+// to the tree line, rhododendron and juniper in the scrub belt above. Planted cell by cell where
+// faceCover() and floorWood() say the ground is wooded (the same answer the ground colour reads).
+// The cells grow with distance (a far tree stands for a clump); at low budgets a share of the
+// cells, chosen by world hash, is left empty and the rest drawn a little broader.
+const FWROWS = (() => { const a = []; let d = 205; while (d < 1300) { const cs = Math.max(10, 0.027 * d); a.push([d, cs]); d += cs; } return a; })();
+function inLake(W, wx, d) {
+  const li = Math.floor(wx / LKCELL);
+  for (let i = li - 1; i <= li + 1; i++) { const L = lake(W, i); if (L && Math.hypot((wx - L.wx) / L.rx, (d - L.d) / L.rz) < 1.1) return true; }
+  return false;
+}
+const NNV = [0, 1, 0];
+function* farWoods(ctx, out, W, dLo, dHi) {
+  // (the same share of the cells in both bands at any budget: out.density is counted against a
+  // different nominal count in each, 0.845 and 1.652 at the default 600k)
+  const keep = clamp(out.density / (ctx.layer === 'mid' ? 1.652 : 0.845), 0.2, 1), broad = Math.pow(keep, -0.35);
+  // the foot of the wall along the chunk, so cells far above the tree line are skipped unseen
+  const FT = 40, f0 = Math.floor(ctx.x0 / FT), foot = [];
+  for (let k = 0; k <= Math.ceil(ctx.length / FT) + 1; k++) foot.push(footAt(W.ws, (f0 + k) * FT));
+  for (let ri = 0; ri < FWROWS.length; ri++) {
+    const d0 = FWROWS[ri][0], cs = FWROWS[ri][1];
+    if (d0 + cs <= dLo || d0 >= dHi) continue;
+    const k0 = Math.floor((ctx.x0 - 8) / cs), k1 = Math.floor((ctx.x0 + ctx.length + 8) / cs);
+    for (let k = k0; k <= k1; k++) {
+      if (out.due()) yield;
+      if (hh(k, ri, W.ws + 2051) > keep) continue;
+      const wx = (k + hh(k, ri, W.ws + 2052)) * cs, d = d0 + hh(k, ri, W.ws + 2053) * cs;
+      if (d < dLo || d >= dHi || !inX(ctx, wx, 8)) continue;
+      const v = valleyAt(W.ws, wx);
+      if (v.lu < 0.04 || d < v.bf + 3) continue;
+      if (d > foot[clamp(Math.floor(wx / FT) - f0, 0, foot.length - 1)] + 560) continue;
+      const e = Math.max(2, 0.008 * d);
+      const hxp = W.H(wx + e, d), hdp = W.H(wx, d + e);
+      const S = surface(W, wx, d);
+      const y = S.y, u = hh(k, ri, W.ws + 2054), u2 = hh(k, ri, W.ws + 2055);
+      const seed = (k * 7349 + ri * 131) | 0;
+      // whorled trees out to 300 m, spindles beyond 420 m, and between the two a mixture thinning
+      // with distance, so no line shows where the near band hands over to the middle one. All of
+      // them a mass (KIND.HEDGE): a whole wood swelling on the beat would be the mountain moving.
+      const lod = d < 300 || hh(k, ri, W.ws + 2056) < (420 - d) / 120 ? 1 : 2;
+      const tiers = d < 300 ? 0 : 3;
+      const kind = KIND.HEDGE;
+      if (S.t === T.FLOOR) {
+        const f = (d - S.bf) / 21, row = Math.floor(f);
+        if (S.fm > 0.33 && fieldAt(W, S, wx, row + 500, 0.5, 2043, HALF)) {
+          // a poplar or a willow on a field wall now and then
+          if (u < 0.05 && !inLake(W, wx, d)) yield* leafTree(ctx, out, W, { wx, d, h: 11 + 7 * u2, willow: u2 < 0.4, seed }, kind);
+          continue;
+        }
+        const fw = floorWood(W, S, wx, d);
+        if (u > fw * 0.9 || inLake(W, wx, d)) continue;
+        const h = (10 + 9 * u2) * broad;
+        if (u2 < 0.62) yield* birch(ctx, out, { wx, d, y, h, w: Math.max(h * 0.45, cs * 0.7), seed, tiers }, lod, kind);
+        else yield* fir(ctx, out, { wx, d, y, h: h * 1.5, w: Math.max(h * 0.5, cs * 0.75), col: u2 < 0.8 ? C.pine : C.fir, seed, tiers }, lod, kind);
+        continue;
+      }
+      if (S.t !== T.FACE) continue;
+      const nx = -(hxp - y) / e, nz = (hdp - y) / e, nl = Math.hypot(nx, 1, nz);
+      NNV[0] = nx / nl; NNV[1] = 1 / nl; NNV[2] = nz / nl;
+      if (S.vterr > 0.25) continue;
+      if (fanFieldAt(W, S, wx, y - S.fy, NNV[1], HALF)) {
+        if (u < 0.04) yield* leafTree(ctx, out, W, { wx, d, h: 11 + 7 * u2, willow: u2 < 0.4, seed }, kind);
+        continue;
+      }
+      const F = faceCover(W, S, wx, NNV);
+      if (F.forest > 0 && u < F.forest) {
+        const h = (13 + 12 * u2) * broad * (1 - 0.3 * smooth(F.top - 60, F.top + 20, y - S.fy));   // smaller toward the tree line
+        if (F.birch) yield* birch(ctx, out, { wx, d, y, h: h * 0.75, w: Math.max(h * 0.4, cs * 0.75), col: u2 < 0.25 ? C.turfGold : C.birch, seed, tiers }, lod, kind);
+        else yield* fir(ctx, out, { wx, d, y, h, w: Math.max(h * 0.36, cs * 0.62), col: mul3(u2 < 0.3 ? C.pine : C.fir, 0.9 + 0.3 * hh(k, ri, 77)), seed, tiers }, lod, kind);
+      } else if (F.scrub > 0.3 && u < 0.7 * F.scrub) {
+        // a rhododendron (in flower where the ground is painted so) or a juniper: one dark lump,
+        // and the flowers as one or two bright ones on its top and near side
+        const w = Math.max(3, cs * 0.5) * broad, hgt = w * 0.5;
+        const dk = F.bloom >= 0 ? C.rhodo : C.juniper;
+        out(wx - ctx.x0, y + hgt * 0.5, -d, w * 0.5, hgt * 0.5, w * 0.4, dk[0], dk[1], dk[2], 1, 0, 0, 0, 1, KIND.HEDGE);
+        if (F.bloom >= 0) {
+          const bc = BLOOM[u2 < 0.8 ? F.bloom : Math.floor(u2 * 97) % BLOOM.length], kk = 0.82 + 0.25 * u2;
+          out(wx - ctx.x0 - w * 0.12, y + hgt * 0.95, -(d - w * 0.15), w * 0.34, hgt * 0.3, w * 0.3, bc[0] * kk, bc[1] * kk, bc[2] * kk, 1, 0, 0, 0, 1, KIND.HEDGE);
+          if (d < 600) out(wx - ctx.x0 + w * 0.2, y + hgt * 0.7, -(d - w * 0.3), w * 0.22, hgt * 0.22, w * 0.2, bc[0] * kk * 0.85, bc[1] * kk * 0.85, bc[2] * kk * 0.85, 1, 0, 0, 0, 1, KIND.HEDGE);
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Bands
 // ---------------------------------------------------------------------------------------------
 function* trackside(ctx0, emit) {
@@ -3133,6 +3732,17 @@ function* trackside(ctx0, emit) {
     const wx = wx0 + 9 * r(), d = 10 + 18 * r(), rad = 0.3 + 0.8 * r() * r();
     yield* blob(ctx, out, wx - ctx.x0, W.H(wx, d) + rad * 0.2, d, rad, rad * 0.6, rad * 0.8, { n: 14, color: mix3(C.rock, C.stone, r()), rng: r, kind: KIND.ROCK, inner: 0.25, amb: 0.5, clump: 0.2 });
   }
+  // dwarf rhododendron and juniper close by the line (low, round, blur-friendly), tussocks and flowers
+  for (const { i, wx0 } of cellsAround(ctx, 11, 3)) {
+    const r = worldRng(ctx, 1505, i);
+    const wx = wx0 + 11 * r(), lu = valleyAt(W.ws, wx).lu;
+    if (r() > 0.14 + 0.4 * lu) continue;
+    const d = 10 + 17 * r(), w = 1.3 + 1.5 * r(), h = 0.6 + 0.6 * r();
+    const rh = r() < 0.15 + 0.75 * lu, fl = r();
+    if (!inX(ctx, wx, w)) continue;
+    yield* rhodo(ctx, out, W, { wx, d, w, h, bloom: rh && fl < 0.8 ? bloomAt(W, wx) : -1, col: rh ? null : C.juniper, seed: hashInts(W.ws, 1506, i) });
+  }
+  yield* tussocks(ctx, out, W, 9, ctx.zFar);
   yield* snowfall(ctx, out, W, 6.5, ctx.zFar, 0.04);
   out.limit = Infinity;
   const rest = out.left();
@@ -3152,6 +3762,8 @@ function* near(ctx0, emit) {
   yield* gompas(ctx, out, W, lo, hi, { topo: dz.topology || 0 });
   yield* hamlets(ctx, out, W, lo, hi);
   yield* flagSites(ctx, out, W, lo, hi);
+  yield* lineShrines(ctx, out, W, lo, hi);
+  yield* trail(ctx, out, W, lo, hi);
   yield* herds(ctx, out, W, lo, hi);
   yield* sheepGroups(ctx, out, W, lo, hi);
   yield* caravans(ctx, out, W, lo, hi);
@@ -3165,6 +3777,15 @@ function* near(ctx0, emit) {
   yield* lakes(ctx, out, W, lo, hi);
   yield* forts(ctx, out, W, lo, hi);
   yield* snowfall(ctx, out, W, lo, Math.min(hi, 140), 0.018);
+  // what grows: with a cap of its own, so that it never squeezes the ground fill
+  const vegFrom = out.n;
+  out.limit = Math.min(ctx.count * 0.62, out.n + ctx.count * 0.3);
+  yield* nearWoods(ctx, out, W, lo, hi);
+  yield* drifts(ctx, out, W, lo, hi);
+  yield* farWoods(ctx, out, W, lo, hi);
+  yield* tussocks(ctx, out, W, lo, hi);
+  if (globalThis.__himLog) { const L = globalThis.__himLog; L.veg = Math.max(L.veg || 0, (out.n - vegFrom) / ctx.count); if (out.n >= out.limit) L.capped = (L.capped || 0) + 1; }
+  out.limit = ctx.count * 0.62;
   yield* scatter(ctx, out, W, lo, hi);
   if ((dz.logic || 0) > 0) yield* repeatingChorten(ctx, out, W, dz.logic);
   if ((dz.scale || 0) > 0) yield* giantStrings(ctx, out, W, lo, hi, dz.scale);
@@ -3176,8 +3797,13 @@ function* mid(ctx0, emit) {
   const [ctx, W] = local(ctx0);
   const out = makeOut(ctx, emit, { detailK: 1.6 });
   const dz = ctx.dials || {};
-  out.limit = ctx.count * 0.6;
   const lo = ctx.zNear, hi = ctx.zFar;
+  // the forest first, with a cap of its own: it is most of what stands on the wall, and a village
+  // placed before it must not push its upper rows out of a small budget
+  out.limit = ctx.count * 0.22;
+  yield* farWoods(ctx, out, W, lo, hi);
+  if (globalThis.__himLog && out.n >= out.limit) globalThis.__himLog.cappedMid = (globalThis.__himLog.cappedMid || 0) + 1;
+  out.limit = ctx.count * 0.6;
   yield* villages(ctx, out, W, lo, hi, { topo: dz.topology || 0 });
   yield* gompas(ctx, out, W, lo, hi, { topo: dz.topology || 0 });
   for (let i = Math.floor((ctx.x0 - 700) / RCELL); i <= Math.floor((ctx.x0 + ctx.length + 300) / RCELL); i++) {
@@ -3194,6 +3820,7 @@ function* mid(ctx0, emit) {
   yield* forts(ctx, out, W, lo, hi);
   if ((dz.scale || 0) > 0) { yield* giantYaks(ctx, out, W, lo, hi, dz.scale); yield* giantStrings(ctx, out, W, lo, hi, dz.scale); }
   if ((dz.topology || 0) > 0) yield* skyStrings(ctx, out, W, lo, hi, dz.topology);
+  if (globalThis.__himLog && out.n >= out.limit) globalThis.__himLog.fullMid = (globalThis.__himLog.fullMid || 0) + 1;
   yield* mist(ctx, out, W, lo, hi, 150, 110, 0.2);
   yield* fillSurface(ctx, out, W, { cover: 3.4, strips: 8 });
 }
@@ -3369,4 +3996,4 @@ function layout(seedStr, x0, x1) {
     snow: (() => { const res = []; let on = false; for (let x = x0; x <= x1; x += 100) { const a = snowAmt(W, x) > 0.05; if (a !== on) { res.push(Math.round(x)); on = a; } } return res; })(),
   };
 }
-export const _debug = { world, at, layout, valleyAt, heightAt, footAt, WL, surface, village, gompa, hamlet, flagSite, herd, sheepGroup, bridge, caravan, monkLine, wheelWall, lodge, camp, school, birdFlock, icefall, lake, fort, snowAmt, hamletExtras, hangingIce };
+export const _debug = { stand, drift, lineShrine, trailParty, trailD, world, at, layout, valleyAt, heightAt, footAt, WL, surface, village, gompa, hamlet, flagSite, herd, sheepGroup, bridge, caravan, monkLine, wheelWall, lodge, camp, school, birdFlock, icefall, lake, fort, snowAmt, hamletExtras, hangingIce };
