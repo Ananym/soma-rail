@@ -25,8 +25,10 @@ const props = defineProps({
   audioCors: { type: Boolean, default: false },   // true when the stream was loaded with CORS, so it can be analysed
   channel: { type: Object, default: null },
   song: { type: Object, default: null },
+  fpsCap: { type: Number, default: 60 },          // frames a second at most (the overlay's setting)
 });
-const emit = defineEmits(['failed']);
+// 'state' carries { biome, level, next } for the overlay whenever it changes
+const emit = defineEmits(['failed', 'state']);
 
 const params = readParams();
 const canvasEl = ref(null);
@@ -34,7 +36,7 @@ const ready = ref(false);
 const statsText = ref('');
 
 let engine = null;
-let statsTimer = null;
+let statsTimer = null, stateTimer = null;
 let lastSongKey = null;
 let startChannelId = null;
 let tap = null;            // music analysis (window/audio.js), only when the stream was loaded with CORS
@@ -157,6 +159,9 @@ async function play() {
       window.addEventListener('keydown', onDebugKey);
     }
     if (typeof window !== 'undefined') window.__trainWindow = engine;   // for tuning from the console
+    engine.setFpsCap(params.fps > 0 ? params.fps : props.fpsCap);
+    publish();
+    stateTimer = setInterval(publish, 400);
   } catch (err) {
     if (engine) { engine.dispose(); engine = null; }
     emit('failed', err);
@@ -164,6 +169,7 @@ async function play() {
 }
 
 watch(() => props.rate, (r) => { if (engine) engine.setRate(r); });
+watch(() => props.fpsCap, (n) => { if (engine && !(params.fps > 0)) engine.setFpsCap(n); });
 
 // The audio element is replaced if CORS loading fails; follow it, and drop analysis if CORS is off.
 watch(() => [props.audioElement, props.audioCors], () => {
@@ -190,12 +196,47 @@ watch(() => props.song, (song) => {
 
 onUnmounted(() => {
   if (statsTimer) clearInterval(statsTimer);
+  if (stateTimer) clearInterval(stateTimer);
   window.removeEventListener('keydown', onDebugKey);
   disconnectAudio();
   if (engine) engine.dispose();
 });
 
-defineExpose({ play });
+// --- controls from the overlay ---------------------------------------------------------------
+// A change of level or scenery arrives through a tunnel. `pending` is what has been asked for: the
+// queued change if one is on its way, otherwise the present state.
+function pending() {
+  const s = engine.director.state, t = s.tunnel;
+  if (s.queued) return s.queued;
+  if (t && t.phase === 'approach') return t.next;
+  return { seed: s.seed, biome: s.biome, level: s.level };
+}
+function toggleDreamlike() {
+  if (!engine) return;
+  const p = pending();
+  params.levelFixed = true;   // the listener has chosen: the channel no longer sets the level
+  engine.director.queueTransition({ seed: p.seed, biome: p.biome, level: p.level ? 0 : 1 });
+  publish();
+}
+function nextBiome() {
+  if (!engine) return;
+  const p = pending(), names = engine.biomeNames();
+  const seed = (Math.random() * 0xffffffff) >>> 0;
+  engine.director.queueTransition({ seed, biome: names[(names.indexOf(p.biome) + 1) % names.length], level: p.level });
+  publish();
+}
+// What the overlay shows: where we are and what is coming.
+let lastPublished = '';
+function publish() {
+  if (!engine) return;
+  const s = engine.director.state, p = pending();
+  const next = (p.biome !== s.biome || p.level !== s.level || p.seed !== s.seed) ? { biome: p.biome, level: p.level } : null;
+  const state = { biome: s.biome, level: s.level, next };
+  const key = JSON.stringify(state);
+  if (key !== lastPublished) { lastPublished = key; emit('state', state); }
+}
+
+defineExpose({ play, toggleDreamlike, nextBiome });
 </script>
 
 <style scoped>

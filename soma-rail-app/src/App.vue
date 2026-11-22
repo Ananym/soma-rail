@@ -1,10 +1,13 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import TrainWindow from './components/TrainWindow.vue';
 import AudioPlayer from './components/AudioPlayer.vue';
 import ChannelSelector from './components/ChannelSelector.vue';
 import NowPlaying from './components/NowPlaying.vue';
 import StartButton from './components/StartButton.vue';
+import ViewControls from './components/ViewControls.vue';
+import SoftCursor from './components/SoftCursor.vue';
+import CreditsPanel from './components/CreditsPanel.vue';
 import { useSomaFM } from './composables/useSomaFM';
 import { useInteraction } from './composables/useInteraction';
 import { usePlaybackControl } from './composables/usePlaybackControl';
@@ -29,8 +32,23 @@ const {
 const {
   distractionScore,
   lastMouseMoveTime,
+  isFocused,
   resetGracePeriod
 } = useInteraction();
+// The overlay shows for a few seconds after the mouse moves, but never while the window is not
+// the one in use: a pointer crossing a background window should not bring it up.
+const overlayMoveTime = computed(() => (isFocused.value ? lastMouseMoveTime.value : 0));
+
+// LocalStorage persistence
+const savedChannelId = useLocalStorage('selectedChannel', null);
+const savedVolume = useLocalStorage('volume', 0.7);
+// Overlay settings: ignore distraction (the overlay still follows the mouse, but the train keeps
+// its speed and the music its volume), and the frame-rate cap.
+const cheat = useLocalStorage('ignoreDistraction', false);
+const fpsCap = useLocalStorage('fpsCap', 60);
+// What the train window is showing and what is coming, for the overlay.
+const viewState = ref(null);
+const showCredits = ref(false);
 
 // Playback control
 const {
@@ -38,11 +56,7 @@ const {
   volumeMultiplier,
   baseVolume,
   setAudioElement
-} = usePlaybackControl(distractionScore);
-
-// LocalStorage persistence
-const savedChannelId = useLocalStorage('selectedChannel', null);
-const savedVolume = useLocalStorage('volume', 0.7);
+} = usePlaybackControl(distractionScore, cheat);
 
 // Set saved volume
 baseVolume.value = savedVolume.value;
@@ -124,7 +138,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :class="{ started: hasStarted }">
     <TrainWindow
       v-if="!viewFailed"
       ref="windowRef"
@@ -134,7 +148,9 @@ onMounted(() => {
       :audio-cors="audioCors"
       :channel="currentChannel"
       :song="currentSong"
+      :fps-cap="fpsCap"
       @failed="handleWindowFailed"
+      @state="viewState = $event"
     />
     <div v-else class="no-view">
       <p>The train window needs WebGL2, which this browser does not provide.</p>
@@ -164,8 +180,29 @@ onMounted(() => {
       :current-channel-id="currentChannelId"
       :is-loading="isLoading"
       :error="error"
-      :last-mouse-move-time="lastMouseMoveTime"
+      :last-mouse-move-time="overlayMoveTime"
       @select-channel="handleChannelSelect"
+    />
+
+    <ViewControls
+      v-if="hasStarted"
+      :view="viewFailed ? null : viewState"
+      :cheat="cheat"
+      :fps="fpsCap"
+      :last-mouse-move-time="overlayMoveTime"
+      @next-biome="windowRef && windowRef.nextBiome()"
+      @toggle-dreamlike="windowRef && windowRef.toggleDreamlike()"
+      @update:cheat="cheat = $event"
+      @update:fps="fpsCap = $event"
+      @credits="showCredits = true"
+    />
+
+    <CreditsPanel v-if="showCredits" @close="showCredits = false" />
+
+    <SoftCursor
+      v-if="hasStarted"
+      :distraction-score="distractionScore"
+      :last-mouse-move-time="lastMouseMoveTime"
     />
 
     <NowPlaying
@@ -173,7 +210,7 @@ onMounted(() => {
       :channel="currentChannel"
       :song="currentSong"
       :playback-rate="playbackRate"
-      :last-mouse-move-time="lastMouseMoveTime"
+      :last-mouse-move-time="overlayMoveTime"
       :volume="baseVolume"
       @update:volume="baseVolume = $event"
     />
@@ -193,6 +230,12 @@ onMounted(() => {
   text-align: center;
   color: rgba(255, 255, 255, 0.6);
   background: radial-gradient(ellipse at 50% 70%, #1b2530 0%, #05070a 70%);
+}
+
+/* Once the journey has started the system cursor is hidden everywhere and SoftCursor stands in
+   for it: a small light that fades as the listener settles. (Only where there is a mouse.) */
+@media (hover: hover) and (pointer: fine) {
+  .app.started, .app.started :deep(*) { cursor: none !important; }
 }
 
 .app {

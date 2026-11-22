@@ -1,6 +1,6 @@
 // End-to-end smoke check of the built app in headless Chromium.
 //   npm run build && node scripts/app-check.cjs [out-dir]
-// Runs four cases, clicking Start in each: the plain address, the same with tuning parameters (and a
+// Runs five cases, clicking Start in each: the plain address, the same with tuning parameters (and a
 // check that distraction brakes the train), a browser without WebGL2 (a notice, radio still playing)
 // and streams refusing CORS (must keep playing, without analysis). No case may contact YouTube.
 // It talks to the real SomaFM servers, so it needs network access (HTTPS_PROXY is honoured).
@@ -25,6 +25,8 @@ const outDir = process.argv[2] || '.';
     // (At the full default splat budget a software renderer draws too slowly for the analysis to
     // settle, so this case only requires that the radio is attached and its audio context running.)
     { name: 'default', query: '', wait: 20000, expect: 'window', tap: 'attached' },
+    // the listener clicks Start before the stream is known: one click must still start the radio
+    { name: 'early-click', query: '?budget=120000&seed=check', wait: 25000, expect: 'window', early: true },
     { name: 'tuned', query: Q, wait: 20000, expect: 'window', tap: true, distraction: true },
     // No WebGL2: a notice instead of the view, and the radio plays on.
     { name: 'no-webgl2', query: Q, wait: 8000, expect: 'notice',
@@ -46,15 +48,19 @@ const outDir = process.argv[2] || '.';
     page.on('request', (r) => { if (/youtube|ytimg|googlevideo/i.test(r.url())) youtube.push(r.url()); });
     await page.goto(`http://127.0.0.1:${port}/${c.query}`);
     await page.waitForSelector('.start-overlay', { timeout: 30000 });
-    await page.waitForFunction(() => { const a = document.querySelector('audio'); return a && a.src; }, null, { timeout: 30000 });
+    // `early` clicks Start the moment it appears, before the stream is known: one click must still do.
+    if (!c.early) await page.waitForFunction(() => { const a = document.querySelector('audio'); return a && a.src; }, null, { timeout: 30000 });
     if (c.settle) await page.waitForTimeout(c.settle);     // let the CORS fallback run before Start
     await page.click('.start-overlay');
+    await page.waitForTimeout(400);
+    const goneAtOnce = await page.evaluate(() => !document.querySelector('.start-overlay'));
     await page.waitForTimeout(c.wait);
     const state = await page.evaluate(() => {
       const a = document.querySelector('audio');
       return {
         audio: a ? { paused: a.paused, time: +a.currentTime.toFixed(1), crossOrigin: a.crossOrigin, error: a.error && a.error.code } : null,
         startGone: !document.querySelector('.start-overlay'),
+        goneAtOnce: false,
         hasCanvas: !!document.querySelector('.window-container canvas'),
         windowHidden: !!document.querySelector('.window-container.hidden'),
         notice: !!document.querySelector('.no-view'),
@@ -62,6 +68,7 @@ const outDir = process.argv[2] || '.';
         tap: window.__trainWindowAudio ? window.__trainWindowAudio() : null,
       };
     });
+    state.goneAtOnce = goneAtOnce;
     // Distraction in the generated view brakes the train instead of fading to black. Check the wiring:
     // losing focus must lower the rate the director runs at, and nothing may draw a black overlay.
     // (How fast it brakes cannot be judged here: on a software renderer the page's timers starve,
@@ -89,6 +96,38 @@ const outDir = process.argv[2] || '.';
         brake.ok = brake.ok && idle.rate === 0 && idle.idle === true && idle.still && idle.beat === 0 && idle.sparkle === 0 && idle.breath === 0;
       }
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      // The overlay's controls: they show while the mouse moves, and each must reach the engine.
+      // (The buttons are pressed from inside the page: this renderer is too slow for a real pointer
+      // to reach a button before the overlay fades again, and the wiring is what is being checked.)
+      const press = async (sel, text) => {
+        await page.evaluate(({ sel, text }) => {
+          const b = [...document.querySelectorAll(sel)].find((e) => !text || e.textContent.trim() === text);
+          if (!b) throw new Error('no button ' + sel + ' ' + text);
+          b.click();
+        }, { sel, text });
+        await page.waitForTimeout(600);
+      };
+      const D = () => page.evaluate(() => { const d = window.__trainWindow.director.state; const p = d.queued || (d.tunnel && d.tunnel.phase === 'approach' ? d.tunnel.next : d); return { biome: d.biome, level: d.level, wantBiome: p.biome, wantLevel: p.level, rate: d.rate, fpsCap: window.__trainWindow.stats().fpsCap }; });
+      const c0 = await D();
+      await press('.view-controls .row:nth-child(1) button', 'Next');
+      const c1 = await D();
+      await press('.view-controls .row:nth-child(2) button');
+      const c2 = await D();
+      await press('.view-controls .group button', '30');
+      const c3 = await D();
+      await press('.view-controls .row:nth-child(3) button');
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      await page.waitForTimeout(6000);
+      const c4 = await D();
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await press('.view-controls .row:nth-child(5) button', 'Credits');
+      await page.waitForTimeout(1500);
+      const credits = await page.evaluate(() => ({ open: !!document.querySelector('.credits'), items: document.querySelectorAll('.credits li').length, soma: !!document.querySelector('.credits a[href*="somafm.com"]') }));
+      await press('.credits .close');
+      const creditsClosed = await page.evaluate(() => !document.querySelector('.credits'));
+      const controls = { before: c0, nextBiome: c1.wantBiome, dreamlike: c2.wantLevel, fpsCap: c3.fpsCap, rateWhileCheating: c4.rate,
+        ok: c1.wantBiome !== c0.wantBiome && c2.wantLevel === 1 - c1.wantLevel && c0.fpsCap === 60 && c3.fpsCap === 30 && c4.rate === 1 && credits.open && credits.items >= 8 && credits.soma && creditsClosed, credits };
+      brake.controls = controls; brake.ok = brake.ok && controls.ok;
     }
     await page.screenshot({ path: path.join(outDir, `app-${name}.png`), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
     // Only the case that breaks the streams on purpose may log load failures.
@@ -105,8 +144,8 @@ const outDir = process.argv[2] || '.';
     const tapOk = c.tap === undefined ? true
       : c.tap ? !!(state.tap && (c.tap === 'attached' || state.tap.active) && state.tap.context === 'running' && state.audio.crossOrigin === 'anonymous')
         : !state.tap && state.audio.crossOrigin === null;
-    const ok = state.startGone && audioOk && viewOk && tapOk && !ours.length && (!brake || brake.ok);
-    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk})`); if (!ok) failed = true;
+    const ok = state.startGone && state.goneAtOnce && audioOk && viewOk && tapOk && !ours.length && (!brake || brake.ok);
+    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, at once ${state.goneAtOnce}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk})`); if (!ok) failed = true;
     await ctx.close();
   }
   await browser.close(); server.httpServer.close();

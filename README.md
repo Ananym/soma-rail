@@ -12,6 +12,15 @@ The page **requires your complete attention**. Any distraction makes the journey
 
 Fidget enough and the train stands still, the view sharp and silent. Stay settled to keep moving.
 
+While the mouse is moving an overlay shows the channel list, what is playing, and a few controls for the view:
+
+- **Scenery / Next** queues a tunnel into the next kind of scenery.
+- **Dreamlike** switches the surreal version on or off (through a tunnel). Once touched, the channel no longer decides it.
+- **Ignore distraction** keeps the train at speed and the music up whatever you do; the overlay still comes and goes with the mouse.
+- **Frame rate** caps the view at 30, 60 or 120 frames a second (60 unless you change it).
+
+The pointer is a small soft light that dims as you settle and is gone when your distraction reaches zero.
+
 ## Running Locally
 
 ```bash
@@ -31,7 +40,7 @@ What it does today:
 - **Scenery** is generated ahead of the train in chunks and thrown away behind it. Changes of scenery happen inside tunnels.
 - **Distraction brakes the train.** Fidget and it slows to a stop, the motion blur shrinking until the view stands sharp and still; settle and it pulls away again. The audio quietens with it. A stopped train costs almost nothing to show: the clock and the music's effects rest, the view is redrawn twice a second, and a hidden tab is not drawn at all.
 - **Time of day** is drawn afresh for each stretch of scenery: dawn and dusk (golden hour) about half the time, full day the rest, and night in the city and on the motorway.
-- **Music** changes the view. Each SomaFM channel starts in scenery that suits it, and a new track queues a tunnel and new scenery. The audio is analysed live: each kick or snare makes trees, buildings and lights swell and brighten briefly (in karst, desert and Himalaya only chosen things do: houses, trees, boats, tents, camels, yaks, never the hills themselves), the treble makes foliage shimmer and lights twinkle, and the bass makes everything breathe. At night the stars scintillate, a different third of them flares on each beat, and a meteor crosses now and then. In Safari and on iPhones and iPads the analysis is off unless you add `audio=1`, because those browsers can go silent when a radio stream is analysed; the channel and track changes still steer the view there.
+- **Music** changes the view. Each SomaFM channel starts in scenery that suits it, and a new track queues a tunnel and new scenery, of a kind not seen in the last few changes where the channel has that many to offer (a channel with one kind borrows a neighbour: the night city and the night motorway, farmland and pine forest). The app asks SomaFM what is playing every 8 to 20 seconds, so the tunnel follows a new song closely. The audio is analysed live: each kick or snare makes trees, buildings and lights swell and brighten briefly (in karst, desert and Himalaya only chosen things do: houses, trees, boats, tents, camels, yaks, never the hills themselves), the treble makes foliage shimmer and lights twinkle, and the bass makes everything breathe. At night the stars scintillate, a different third of them flares on each beat, and a meteor crosses now and then. In Safari and on iPhones and iPads the analysis is off unless you add `audio=1`, because those browsers can go silent when a radio stream is analysed; the channel and track changes still steer the view there.
 - **A few things move on their own**: prayer flags, washing lines and pennants ripple in gusts; vehicles run along the motorway with white headlamps, red tail lamps and amber-sided lorries, three lanes each way at different speeds; mist, smoke, dust and plumes billow slowly. They stop when the train does.
 - **Eight kinds of scenery** are written in code: rolling farmland, pine forest with lakes, salt flat with mesas, a city at night, karst country with limestone towers, paddies and river boats, a sand-sea desert with caravans, camps, forts and oases, a high Himalayan valley under a steep mountain wall (villages on terraced benches, prayer flags, yaks), and an English motorway at night (lamp-lit junctions, traffic, floodlit landmarks on a low horizon, and a sky of stars and the Milky Way filling most of the window). Each has a plausible and a dreamlike version.
 - **Photo pieces** made from CC0 photographs stand among the code-made farmland (`soma-rail-app/public/kit/`, credits in its `index.json`).
@@ -47,6 +56,7 @@ Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
 | `shutter` | `0.02` | Motion-blur length in seconds |
 | `blurKeep` | `0.6` | How solid blurred splats stay, 0 to 1 |
 | `slot` | drawn per scenery | Start every stretch at one time of day: `dawn`, `day`, `dusk` or `night` |
+| `fps` | the overlay's setting | Frame-rate cap, for example `30`; overrides the overlay |
 | `hour` | runs | Pin the time of day, 0 to 24 |
 | `horizon` | the scenery's own | How far the horizon sits below the middle of the window, `0` to `0.6`; higher gives the sky more room |
 | `gold` | `1` | Strength of the warm light at dawn and dusk; `0` turns it off |
@@ -65,7 +75,7 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | Script | What it does |
 | --- | --- |
 | `node scripts/window-shot.cjs out.png "seed=1&hour=12"` | Screenshot the view on its own (`window-harness.html`) |
-| `npm run build && node scripts/app-check.cjs` | Start the built app in four cases (the bare URL, a tuned run, no WebGL2, streams refusing CORS) and check each runs. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
+| `npm run build && node scripts/app-check.cjs` | Start the built app in five cases (the bare URL, a Start click before the stream is known, a tuned run that also presses the overlay's controls, no WebGL2, streams refusing CORS) and check each runs. `IDLE=1 ONLY=tuned` in front also waits for the train to stop and checks the engine goes idle (several minutes) |
 | `node scripts/motion-frames.cjs outDir "biome=motorway&hour=1&kmh=0" --n 24 --dt 0.1` | Capture a run of frames with the motion clock stepped by hand, to look at moving things on a machine too slow to play them |
 | `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |
 | `node scripts/check-biomes.mjs` | Test the scenery generators |

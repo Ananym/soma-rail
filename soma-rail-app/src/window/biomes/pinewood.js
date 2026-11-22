@@ -987,20 +987,20 @@ function* powerLines(ctx, out, W, dLo, dHi) {
       for (const off of [-6, 0, 6]) {
         const ya = p.y + 26 + (off === 0 ? 4 : 0), yb = p2.y + 26 + (off === 0 ? 4 : 0);
         const len = Math.hypot(p2.wx - p.wx, p2.d - p.d);
-        const steps = Math.ceil(len / Math.max(1, 0.004 * p.d));
-        const r = Math.max(0.03, 0.00055 * p.d);   // thin at any distance: a conductor is a line, not a ribbon
+        // Each piece runs from one point of the curve to the next, so it lies along the wire's true
+        // slope (level pieces along a sagging curve made a broken, stair-stepped line), overlaps its
+        // neighbours, and takes its thickness from its own distance, not the pylon's.
+        const steps = Math.ceil(len / Math.max(1.2, 0.006 * Math.min(p.d, p2.d)));
+        const at = (t) => [lerp(p.wx, p2.wx, t) + off - ctx.x0, lerp(ya, yb, t) - 9 * 4 * t * (1 - t), lerp(p.d, p2.d, t)];
+        let a = at(0);
         for (let s = 0; s < steps; s++) {
-          const t = (s + 0.5) / steps;
-          const d = lerp(p.d, p2.d, t);
-          if (d < dLo || d >= dHi) continue;
-          const wx = lerp(p.wx, p2.wx, t) + off;
-          const x = wx - ctx.x0;
-          if (x < 0 || x >= ctx.length) continue;
-          const y = lerp(ya, yb, t) - 9 * 4 * t * (1 - t);
-          const sl = len / steps * 0.6;
-          const q = quatXTo(...norm3(p2.wx - p.wx, 0, -(p2.d - p.d)));
-          out(x, y, -d, sl, r, r, 0.2, 0.2, 0.2, 0.9, q[0], q[1], q[2], q[3], KIND.WIRE);
-          if (out.due()) yield;
+          const b = at((s + 1) / steps);
+          const d = (a[2] + b[2]) / 2, x = (a[0] + b[0]) / 2;
+          if (d >= dLo && d < dHi && x >= 0 && x < ctx.length) {
+            strut(out, a[0], a[1], -a[2], b[0], b[1], -b[2], Math.max(0.035, 0.0007 * d), [0.17, 0.17, 0.18], 1, 1, KIND.WIRE);
+            if (out.due()) yield;
+          }
+          a = b;
         }
       }
     }

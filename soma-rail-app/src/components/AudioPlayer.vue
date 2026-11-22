@@ -28,7 +28,7 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  // Start playing as soon as the stream loads (used when the element is remounted mid-session).
+  // True once the listener has pressed Start: the radio should be playing whenever it can.
   resume: {
     type: Boolean,
     default: false
@@ -80,33 +80,18 @@ function handleError(event) {
   emit('error', event);
 }
 
-function handleLoaded() {
-  console.log('Audio loaded and ready');
-
-  // Resume playback if it was playing before channel change
-  if (wasPlayingBeforeChange.value && audioElement.value) {
-    audioElement.value.play().then(() => {
-      console.log('Resumed playback after channel change');
-      wasPlayingBeforeChange.value = false;
-    }).catch(err => {
-      console.error('Failed to resume playback:', err);
-    });
-  }
+// Play as soon as the stream can, whenever playing is wanted: after Start (`resume`), after a
+// change of channel, or after a recovery from a refused server. Start's own click may have come
+// before the stream was ready, so this is also what makes one click enough.
+function playIfWanted() {
+  const el = audioElement.value;
+  if (!el || !el.paused || !(props.resume || wasPlayingBeforeChange.value)) return;
+  el.play().then(() => { wasPlayingBeforeChange.value = false; }).catch((err) => {
+    console.warn('Could not start the radio yet:', err && err.name);
+  });
 }
-
-function handleCanPlay() {
-  console.log('Audio can play');
-
-  // Resume playback if it was playing before channel change
-  if (wasPlayingBeforeChange.value && audioElement.value) {
-    audioElement.value.play().then(() => {
-      console.log('Resumed playback after channel change');
-      wasPlayingBeforeChange.value = false;
-    }).catch(err => {
-      console.error('Failed to resume playback:', err);
-    });
-  }
-}
+function handleLoaded() { playIfWanted(); }
+function handleCanPlay() { playIfWanted(); }
 
 function handlePlay() {
   isPlaying.value = true;
@@ -130,6 +115,8 @@ watch(() => props.streamUrl, (newUrl) => {
     console.log('New stream URL loaded:', newUrl);
   }
 }, { immediate: true });
+
+watch(() => props.resume, (want) => { if (want) playIfWanted(); });
 
 // Watch for volume changes
 watch(() => props.volume, (newVolume) => {

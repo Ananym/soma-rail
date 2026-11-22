@@ -1,7 +1,9 @@
 import { ref, computed, watch } from 'vue';
 import { CONFIG } from '../config';
 
-export function usePlaybackControl(distractionScore) {
+// `cheat` (a ref, optional): while true, distraction neither brakes the train nor quietens the
+// music. The overlay still comes and goes with the mouse; that is decided elsewhere.
+export function usePlaybackControl(distractionScore, cheat = null) {
   const audioElement = ref(null);
   const baseVolume = ref(0.7); // User-controlled volume
 
@@ -11,6 +13,7 @@ export function usePlaybackControl(distractionScore) {
    * max distraction = 0.0 (stopped)
    */
   const playbackRate = computed(() => {
+    if (cheat && cheat.value) return 1;
     const normalizedDistraction = distractionScore.value / CONFIG.DISTRACTION_MAX;
     return Math.max(0, 1 - normalizedDistraction);
   });
@@ -19,6 +22,7 @@ export function usePlaybackControl(distractionScore) {
    * Calculate volume multiplier based on distraction score
    */
   const volumeMultiplier = computed(() => {
+    if (cheat && cheat.value) return 1;
     const normalizedDistraction = distractionScore.value / CONFIG.DISTRACTION_MAX;
     return Math.max(0, 1 - normalizedDistraction);
   });

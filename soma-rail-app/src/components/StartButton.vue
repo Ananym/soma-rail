@@ -25,24 +25,19 @@ const emit = defineEmits(['started']);
 const visible = ref(true);
 
 function handleStart() {
-  // Start the radio and the train window, both inside this click
-  const promises = [];
-
+  if (!visible.value) return;
+  // Everything that needs the click (the radio, the audio context, the train window) is asked for
+  // here, and then the overlay goes at once. It used to wait for the radio to be audible, which
+  // takes a second or two of buffering and looked as if the click had not registered; and if the
+  // stream was not ready yet the first click was simply lost. The player now starts by itself as
+  // soon as its stream can play (see AudioPlayer's `resume`).
   if (props.audioElement) {
-    promises.push(props.audioElement.play());
+    const p = props.audioElement.play();
+    if (p && p.catch) p.catch((err) => console.warn('Radio not playing yet, will start when the stream is ready:', err && err.name));
   }
-
-  if (props.view) {
-    props.view.play();
-  }
-
-  // Hide overlay when audio starts
-  Promise.all(promises).then(() => {
-    visible.value = false;
-    emit('started');
-  }).catch(err => {
-    console.error('Failed to start playback:', err);
-  });
+  if (props.view) props.view.play();
+  visible.value = false;
+  emit('started');
 }
 </script>
 

@@ -11,6 +11,7 @@ export function useSomaFM() {
   const error = ref(null);
 
   let metadataInterval = null;
+  let songSeenAt = Date.now();   // when the current track was first seen
 
   const currentChannel = computed(() => {
     return channels.value.find(ch => ch.id === currentChannelId.value) || null;
@@ -54,8 +55,8 @@ export function useSomaFM() {
     currentChannelId.value = channelId;
 
     // Stop existing metadata polling
-    if (metadataInterval) {
-      clearInterval(metadataInterval);
+    if (metadataInterval !== null) {
+      clearTimeout(metadataInterval);
       metadataInterval = null;
     }
 
@@ -117,6 +118,8 @@ export function useSomaFM() {
       const data = await response.json();
       if (data.songs && data.songs.length > 0) {
         const song = data.songs[0];
+        const changed = (song.title || '') !== currentSong.value.title || (song.artist || '') !== currentSong.value.artist;
+        if (changed) songSeenAt = Date.now();
         currentSong.value = {
           title: song.title || '',
           artist: song.artist || '',
@@ -133,17 +136,23 @@ export function useSomaFM() {
    * Start polling for song metadata updates
    */
   function startMetadataPolling() {
-    metadataInterval = setInterval(() => {
-      fetchMetadata();
-    }, CONFIG.METADATA_POLL_INTERVAL);
+    stopMetadataPolling();
+    // Ask again sooner once the track has been on for a while: the next one is due, and its
+    // change of scenery should follow the music closely.
+    const again = () => {
+      const age = Date.now() - songSeenAt;
+      const wait = age > CONFIG.METADATA_FAST_AFTER ? CONFIG.METADATA_POLL_FAST : CONFIG.METADATA_POLL_INTERVAL;
+      metadataInterval = setTimeout(async () => { await fetchMetadata(); if (metadataInterval !== null) again(); }, wait);
+    };
+    again();
   }
 
   /**
    * Stop metadata polling
    */
   function stopMetadataPolling() {
-    if (metadataInterval) {
-      clearInterval(metadataInterval);
+    if (metadataInterval !== null) {
+      clearTimeout(metadataInterval);
       metadataInterval = null;
     }
   }

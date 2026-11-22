@@ -15,6 +15,12 @@ export const LEVELS = [
 export const SLOTS = { dawn: [6.1, 6.8], day: [9, 16.5], dusk: [19.15, 19.85], night: [21.5, 3] };
 const SLOT_WEIGHTS = { dawn: 0.22, day: 0.46, dusk: 0.32, night: 0 };
 
+// Kinds of scenery close enough in character to stand in for one another now and then.
+const NEIGHBOURS = {
+  downs: ['pinewood', 'karst'], pinewood: ['downs', 'himalaya'], saltflat: ['dunes', 'himalaya'],
+  nightcity: ['motorway'], motorway: ['nightcity'], karst: ['downs', 'pinewood'],
+  dunes: ['saltflat'], himalaya: ['pinewood', 'saltflat'],
+};
 const TUNNEL_LEAD = 70;        // metres ahead that a tunnel mouth appears
 const TUNNEL_MIN_SECONDS = 5;  // shortest time spent inside one
 
@@ -46,6 +52,8 @@ export function createDirector({ params, reducedMotion = false }) {
     time: 0,
   };
   const listeners = { swap: [] };
+  const recent = [];   // the kinds of scenery shown lately, newest last (see chooseBiome)
+  const seen = (b) => { if (recent[recent.length - 1] !== b) { recent.push(b); if (recent.length > 4) recent.shift(); } };
   let hourDir = 1;   // which way the clock runs for a biome that holds it inside its hours
 
   // Each change of scenery arrives at a time of day drawn from these slots, so journeys spend real
@@ -71,21 +79,42 @@ export function createDirector({ params, reducedMotion = false }) {
     state.hour = (from + ((to - from + 24) % 24) * roll2) % 24;
   }
   placeHour();
+  seen(state.biome);
 
-  function chooseBiome(seed) {
-    const pool = (state.profile && state.profile.biomes && state.profile.biomes.filter((b) => BIOMES[b])) || [];
-    const names = pool.length ? pool : Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1);
+  // Which scenery next. The channel's profile lists the kinds that suit its music, best fit first
+  // (weights 3, 2, 1, 1). Kinds close in character to those (NEIGHBOURS) join at weight 1, so that
+  // even a channel with one kind has somewhere else to go. With `fresh`, anything seen in the last
+  // few changes is left out, as far as the list allows: the last three, else two, else one.
+  function chooseBiome(seed, fresh = false) {
     if (params.biome && BIOMES[params.biome]) return params.biome;
-    // Profiles list biomes best fit first: weight them 3, 2, 1 so the best fit shows most often.
-    const weights = names.map((_, i) => Math.max(1, 3 - i));
-    let pick = seed % weights.reduce((x, y) => x + y, 0);
-    for (let i = 0; i < names.length; i++) { if (pick < weights[i]) return names[i]; pick -= weights[i]; }
+    const pool = (state.profile && state.profile.biomes && state.profile.biomes.filter((b) => BIOMES[b])) || [];
+    let names, weights;
+    if (pool.length) {
+      names = [...pool]; weights = pool.map((_, i) => Math.max(1, 3 - i));
+      for (const b of pool) for (const n of NEIGHBOURS[b] || []) if (BIOMES[n] && !names.includes(n)) { names.push(n); weights.push(1); }
+    } else {
+      names = Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1);
+      weights = names.map(() => 1);
+    }
+    let keep = names.map(() => true);
+    if (fresh) {
+      for (let back = Math.min(3, recent.length); back >= 1; back--) {
+        const avoid = recent.slice(-back);
+        const k = names.map((n) => !avoid.includes(n));
+        if (k.some(Boolean)) { keep = k; break; }
+      }
+    }
+    const total = weights.reduce((x, w, i) => x + (keep[i] ? w : 0), 0);
+    let pick = seed % total;
+    for (let i = 0; i < names.length; i++) { if (!keep[i]) continue; if (pick < weights[i]) return names[i]; pick -= weights[i]; }
     return names[0];
   }
 
   // Ask for a change of scenery. It happens out of sight, inside a tunnel.
   function queueTransition(next) {
-    if (state.tunnel) { state.queued = next; return; }
+    // A tunnel whose mouth has not been reached yet simply takes the newer destination; one we are
+    // already inside finishes first, and the change follows in a tunnel of its own.
+    if (state.tunnel) { if (state.tunnel.phase === 'approach') state.tunnel.next = next; else state.queued = next; return; }
     const x0 = state.travelled + TUNNEL_LEAD;
     const len = Math.max(180, state.cruise * TUNNEL_MIN_SECONDS);
     state.tunnel = { x0, x1: x0 + len, phase: 'approach', next, ready: false };
@@ -100,15 +129,16 @@ export function createDirector({ params, reducedMotion = false }) {
     setProfile(profile, { immediate = false } = {}) {
       state.profile = profile || null;
       const seed = hashInts(baseSeed, hashString(JSON.stringify(profile || {})));
-      const next = { seed, biome: chooseBiome(seed), level: params.levelFixed ? state.level : (profile && profile.level != null ? profile.level : state.level) };
-      if (immediate) { state.seed = next.seed; state.biome = next.biome; state.level = next.level; state.dials = { ...LEVELS[next.level] }; placeHour(); } else queueTransition(next);
+      const next = { seed, biome: chooseBiome(seed, !immediate), level: params.levelFixed ? state.level : (profile && profile.level != null ? profile.level : state.level) };
+      if (immediate) { state.seed = next.seed; state.biome = next.biome; state.level = next.level; state.dials = { ...LEVELS[next.level] }; placeHour(); recent.length = 0; seen(state.biome); } else queueTransition(next);
     },
 
-    // A new track: the same track always brings the same scenery.
+    // A new track brings new scenery: a kind not seen in the last few changes, where the channel
+    // has that many to offer.
     onTrack(song) {
       if (!song || (!song.title && !song.artist)) return;
       const seed = hashInts(baseSeed & 0xffff, hashString(`${song.artist}|${song.title}`));
-      queueTransition({ seed, biome: chooseBiome(seed), level: state.level });
+      queueTransition({ seed, biome: chooseBiome(seed, true), level: state.level });
     },
 
     // Per-frame audio features, or null when there is no signal. See audio.js.
@@ -174,6 +204,7 @@ export function createDirector({ params, reducedMotion = false }) {
         if (t.phase === 'approach' && state.travelled > t.x0 + 12) {
           t.phase = 'inside';
           state.seed = t.next.seed; state.biome = t.next.biome; state.level = t.next.level;
+          seen(state.biome);
           state.dials = { ...LEVELS[state.level] };
           placeHour();
           for (const fn of listeners.swap) fn(t.next);

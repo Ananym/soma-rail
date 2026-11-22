@@ -17,6 +17,7 @@ import { hashInts, noise1, noise2 } from '../rng.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, blob, stick, wires, rock,
   house, monolith, lamp, detail, jitter, mul3, mix3, shade, smooth, clamp, lerp, quatYaw, quatRoll, quatUpTo, norm3,
+  strut, quatXTo,
 } from './kit.js';
 
 const PAL = {
@@ -339,70 +340,119 @@ function* lathe(ctx, out, x, y0, d, H, rad, col, o = {}) {
   const rng = o.rng || ctx.rng;
   const p = Math.max(0.12, detail(out, d, o.k || 1.6));
   const Rm = Math.max(rad(0), rad(0.5), rad(1));
-  const nh = clamp(Math.round(H / p), 3, 60), na = clamp(Math.round(Math.PI * Rm / p), 4, 40);
+  // o.full draws it all the way round, for things the train passes close enough to see behind
+  const turn = o.full ? 2 * Math.PI : Math.PI;
+  const nh = clamp(Math.round(H / p), 3, 60), na = clamp(Math.round(turn * Rm / p), o.full ? 8 : 4, o.full ? 64 : 40);
   for (let j = 0; j < nh; j++) {
     const t = (j + 0.5) / nh, R = rad(t);
     if (R < 0.02) continue;
     const ribs = o.ribs ? (Math.floor(t * H / 0.55) % 2 ? 0.93 : 1.04) : 1;
     for (let i = 0; i < na; i++) {
-      const a = ((i + 0.5) / na - 0.5) * Math.PI;
+      const a = ((i + 0.5) / na - 0.5) * turn;
       const c = jitter(mul3(shade(col, Math.sin(a), 0.1, Math.cos(a), 0.55, 0.55), ribs), rng, 0.07);
-      const arc = Math.PI * R / na;
+      const arc = turn * R / na;
       out(x + R * Math.sin(a), y0 + t * H, -(d - R * Math.cos(a)), Math.max(arc, 0.05) * 0.75, H / nh * 0.62, Math.max(arc, 0.05) * 0.75, c[0], c[1], c[2], 1, 0, 0, 0, 1, o.kind != null ? o.kind : KIND.BUILDING);
     }
     if (out.due()) yield;
   }
 }
 
-// Water tower on legs. wrong (0..1) makes it a little off: used by the logic dial's repeats.
+// The two tall things on the flat are open frames, so both are drawn the way the pinewood pylon is:
+// every member a thin strut lying along the member, its thickness taken from the distance, with
+// bracing on all four faces. (Stacked round blobs and rows of beads turned to fuzz on a real GPU.)
+const frameR = (d, k = 1) => Math.max(0.055, 0.00065 * d) * k;
+
+// Water tower: a wooden tank with iron hoops and a conical roof on four splayed, cross-braced legs,
+// with a ladder and a spout. wrong (0..1) makes it a little off: used by the logic dial's repeats.
 export function* waterTower(ctx, out, x, d, rng, wrong = 0, scale = 1) {
   const y0 = groundY(ctx, x, d) - 0.2;
-  const legH = (8.5 + 2.2 * wrong) * scale, R = (2.3 + 0.35 * wrong) * scale, TH = 3.2 * scale;
-  const wood = [0.38, 0.3, 0.23];
+  const legH = (8.5 + 2.2 * wrong) * scale, R = (2.5 + 0.35 * wrong) * scale, TH = 3.6 * scale;
+  const wood = [0.36, 0.28, 0.21];
   const tankCol = mix3([0.55, 0.42, 0.32], [0.42, 0.55, 0.62], wrong * 0.7);
-  const legs = wrong > 0.85 ? 3 : 4;
-  const sp = 0.5 + 0.1 * wrong;
-  for (let i = 0; i < legs; i++) {
-    const sx = i % 2 ? 1 : -1, sd = i < 2 ? -1 : 1;
-    const fx = 1.9 * scale * sx, fd = 1.3 * scale * sd;
-    yield* stick(ctx, out, x + fx, y0, d + fd, legH, 0.17 * scale, { color: wood, lean: [-sx * 0.09 * scale + wrong * 0.03, -sd * 0.06 * scale], n: Math.ceil(legH / 0.5), kind: KIND.BUILDING });
-  }
-  // cross braces on the front
-  for (const f of [0.35, 0.68]) {
-    for (let t = -1.4; t <= 1.4; t += 0.25) out(x + t * scale, y0 + legH * f, -(d - 1.1 * scale), 0.14, 0.09, 0.07, wood[0] * 0.9, wood[1] * 0.9, wood[2] * 0.9, 1, 0, 0, 0, 1, KIND.BUILDING);
-  }
-  const ty = y0 + legH + wrong * 1.4;    // the wrong one floats a little above its legs
-  yield* lathe(ctx, out, x, ty, d, TH, () => R, tankCol, { rng, ribs: true });
-  yield* lathe(ctx, out, x, ty + TH, d, 1.3 * scale, (t) => R * (1 - t) * 1.04, mul3(tankCol, 0.8), { rng });
-  void sp;
-}
-
-// Windmill pump: lattice tower, wheel of blades, tail vane and a small tank.
-function* windmill(ctx, out, x, d, rng) {
-  const y0 = groundY(ctx, x, d) - 0.1;
-  const H = 9 + 2 * rng();
-  const dark = [0.34, 0.3, 0.27];
-  for (const [sx, sd] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    yield* stick(ctx, out, x + sx * 0.9, y0, d + sd * 0.9, H, 0.06, { color: dark, lean: [-sx * 0.075, -sd * 0.075], n: Math.ceil(H / 0.3), kind: KIND.BUILDING });
-  }
-  for (let t = 1.2; t < H - 0.8; t += 1.8) {
-    const hw = 0.9 * (1 - t / H * 0.85);
-    for (let u = -hw; u <= hw; u += 0.14) out(x + u, y0 + t, -(d - hw), 0.1, 0.035, 0.035, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, KIND.BUILDING);
-  }
-  const hy = y0 + H + 0.5, R = 1.7;
-  const blades = 18;
-  for (let b = 0; b < blades; b++) {
-    const th = (b / blades) * Math.PI * 2 + 0.2;
-    const q = quatRoll(th);
-    for (let r = 0.3; r < R; r += 0.28) {
-      const c = jitter([0.58, 0.55, 0.5], rng, 0.1);
-      out(x + Math.cos(th) * r, hy + Math.sin(th) * r, -(d - 1.0), 0.17, 0.07, 0.03, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.BUILDING);
+  const r = frameR(d, 1.25 * scale);
+  const tone = (k) => mul3(wood, k);
+  // corners: sx, sd (-1 = towards the track), light. A very wrong tower stands on three legs.
+  const C = [[-1, -1, 1.12], [1, -1, 0.92], [1, 1, 0.7], [-1, 1, 0.88]].slice(0, wrong > 0.85 ? 3 : 4);
+  const foot = 2.7 * scale, top = 1.9 * scale;
+  const at = (c, t) => { const hw = foot + (top - foot) * t; return [x + c[0] * hw + wrong * 0.035 * t * legH, y0 + t * legH, -(d + c[1] * hw)]; };
+  for (const c of C) strut(out, ...at(c, 0), ...at(c, 1), r, tone(c[2]), 7, 1, KIND.BUILDING);
+  const tiers = [0.04, 0.37, 0.69, 0.98];
+  for (let f = 0; f < C.length; f++) {
+    const a = C[f], b = C[(f + 1) % C.length], k = (a[2] + b[2]) * 0.47;
+    for (let i = 0; i + 1 < tiers.length; i++) {
+      strut(out, ...at(a, tiers[i + 1]), ...at(b, tiers[i + 1]), r * 0.75, tone(k), 3, 1, KIND.BUILDING);
+      strut(out, ...at(a, tiers[i]), ...at(b, tiers[i + 1]), r * 0.55, tone(k * 0.95), 4, 1, KIND.BUILDING);
+      strut(out, ...at(b, tiers[i]), ...at(a, tiers[i + 1]), r * 0.55, tone(k * 0.95), 4, 1, KIND.BUILDING);
     }
   }
-  for (let a = 0; a < 40; a++) { const th = a / 40 * Math.PI * 2; out(x + Math.cos(th) * R, hy + Math.sin(th) * R, -(d - 1.0), 0.07, 0.07, 0.03, 0.45, 0.42, 0.38, 0.9, 0, 0, 0, 1, KIND.BUILDING); }
-  for (let t = 0; t < 2.6; t += 0.25) out(x + 0.3 + t, hy, -(d - 0.2), 0.14, 0.06, 0.04, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, KIND.BUILDING);
-  out(x + 3.1, hy + 0.1, -(d - 0.2), 0.45, 0.5, 0.03, 0.55, 0.45, 0.35, 1, 0, 0, 0, 1, KIND.BUILDING);
-  yield* lathe(ctx, out, x + 4.5, y0, d + 2, 1.4, () => 1.1, [0.5, 0.4, 0.32], { rng, ribs: true });
+  if (out.due()) yield;
+  const ty = y0 + legH + wrong * 1.4;    // the wrong one floats a little above its legs
+  // the deck the tank sits on, the tank all the way round, its hoops, the roof and a finial
+  out(x, ty - 0.12, -d, R * 0.62, 0.09 * scale, R * 0.62, wood[0] * 0.7, wood[1] * 0.7, wood[2] * 0.7, 1, 0, 0, 0, 1, KIND.BUILDING);
+  yield* lathe(ctx, out, x, ty, d, TH, () => R, tankCol, { rng, ribs: true, full: true, k: 1.2 });
+  for (const f of [0.14, 0.5, 0.86]) {
+    const n = 18;
+    for (let i = 0; i < n; i++) {
+      const a0 = (i / n) * 2 * Math.PI, a1 = ((i + 1) / n) * 2 * Math.PI, Rh = R * 1.015;
+      strut(out, x + Rh * Math.sin(a0), ty + f * TH, -(d - Rh * Math.cos(a0)), x + Rh * Math.sin(a1), ty + f * TH, -(d - Rh * Math.cos(a1)), r * 0.5, [0.2, 0.17, 0.15], 1, 1, KIND.BUILDING);
+    }
+  }
+  yield* lathe(ctx, out, x, ty + TH, d, 1.5 * scale, (t) => R * (1 - t) * 1.08, mul3(tankCol, 0.72), { rng, full: true, k: 1.2 });
+  strut(out, x, ty + TH + 1.4 * scale, -d, x, ty + TH + 2.3 * scale, -d, r * 0.6, [0.2, 0.17, 0.15], 1, 1, KIND.BUILDING);
+  // ladder up the near left leg, and the spout hanging out towards the track
+  const la = at(C[0], 0), lb = at(C[0], 1);
+  for (const o of [-0.22, 0.22]) strut(out, la[0] + o - 0.5, la[1], la[2] + 0.25, lb[0] + o - 0.3, ty + 0.4, lb[2] + 0.25, r * 0.4, tone(1.15), 6, 1, KIND.BUILDING);
+  strut(out, x + R * 0.5, ty + 0.3, -(d - R), x + R * 0.9, ty - 2.2 * scale, -(d - R - 2.4 * scale), r * 0.9, [0.24, 0.2, 0.17], 3, 1, KIND.BUILDING);
+  if (out.due()) yield;
+}
+
+// Windmill pump: a braced steel lattice tower, a many-bladed wheel inside two rims turned a little
+// away from the window so it reads as a wheel, a tail boom with its vane, and a stock tank.
+function* windmill(ctx, out, x, d, rng) {
+  const y0 = groundY(ctx, x, d) - 0.1;
+  const H = 10 + 2 * rng();
+  const steel = [0.33, 0.3, 0.28];
+  const r = frameR(d);
+  const tone = (k) => mul3(steel, k);
+  const C = [[-1, -1, 1.12], [1, -1, 0.92], [1, 1, 0.7], [-1, 1, 0.88]];
+  const foot = 1.35, top = 0.2;
+  const at = (c, t) => { const hw = foot + (top - foot) * t; return [x + c[0] * hw, y0 + t * H, -(d + c[1] * hw)]; };
+  for (const c of C) strut(out, ...at(c, 0), ...at(c, 1), r, tone(c[2]), 8, 1, KIND.BUILDING);
+  const tiers = [0.03, 0.27, 0.48, 0.66, 0.82, 0.96];
+  for (let f = 0; f < 4; f++) {
+    const a = C[f], b = C[(f + 1) % 4], k = (a[2] + b[2]) * 0.47;
+    for (let i = 0; i + 1 < tiers.length; i++) {
+      strut(out, ...at(a, tiers[i + 1]), ...at(b, tiers[i + 1]), r * 0.6, tone(k), 2, 1, KIND.BUILDING);
+      if ((i + f) % 2) strut(out, ...at(a, tiers[i]), ...at(b, tiers[i + 1]), r * 0.5, tone(k), 3, 1, KIND.BUILDING);
+      else strut(out, ...at(b, tiers[i]), ...at(a, tiers[i + 1]), r * 0.5, tone(k), 3, 1, KIND.BUILDING);
+    }
+  }
+  if (out.due()) yield;
+  // The wheel faces the wind, which here blows from ahead and a little towards the window: axis n.
+  const R = 2.1, hy = y0 + H + 0.35;
+  const n = [0.78, 0, 0.62], u = [0.62, 0, -0.78];          // axis, and the level direction in the wheel's plane
+  const cx = x + n[0] * 0.55, cz = -d + n[2] * 0.55;
+  const P = (th, rho) => [cx + u[0] * rho * Math.cos(th), hy + rho * Math.sin(th), cz + u[2] * rho * Math.cos(th)];
+  const blades = 16;
+  for (let b = 0; b < blades; b++) {
+    const th = (b / blades) * Math.PI * 2 + 0.2;
+    const c = jitter([0.6, 0.58, 0.54], rng, 0.1);
+    strut(out, ...P(th, 0.42), ...P(th, R * 0.97), Math.max(r * 1.5, 0.11), c, 2, 1, KIND.BUILDING);   // a sail: wider than a rod
+  }
+  for (const [rho, k] of [[R, 0.6], [R * 0.45, 0.5]]) {
+    const seg = rho > 1 ? 24 : 14;
+    for (let i = 0; i < seg; i++) strut(out, ...P((i / seg) * 2 * Math.PI, rho), ...P(((i + 1) / seg) * 2 * Math.PI, rho), r * k, tone(1.2), 1, 1, KIND.BUILDING);
+  }
+  out(cx, hy, cz, 0.16, 0.16, 0.16, steel[0] * 0.8, steel[1] * 0.8, steel[2] * 0.8, 1, 0, 0, 0, 1, KIND.BUILDING);   // hub
+  // tail boom downwind of the tower head, and the vane: a flat sheet in the plane of boom and sky
+  const tb = [x - n[0] * 3.1, hy, -d - n[2] * 3.1];
+  strut(out, x, hy, -d, tb[0], tb[1], tb[2], r * 0.8, tone(1), 3, 1, KIND.BUILDING);
+  const q = quatXTo(-n[0], 0, -n[2]);
+  out(tb[0], hy + 0.05, tb[2], 0.42, 0.36, 0.035, 0.6, 0.47, 0.33, 1, q[0], q[1], q[2], q[3], KIND.BUILDING);
+  // the pump rod down the middle, the pipe to the stock tank and the tank itself
+  strut(out, x, y0 + 0.2, -d, x, hy, -d, r * 0.45, tone(0.8), 4, 1, KIND.BUILDING);
+  strut(out, x + 0.6, y0 + 0.5, -(d + 0.4), x + 3.6, y0 + 0.9, -(d + 1.6), r * 0.7, tone(0.9), 2, 1, KIND.BUILDING);
+  yield* lathe(ctx, out, x + 4.6, y0, d + 2, 1.3, () => 1.5, [0.5, 0.4, 0.32], { rng, ribs: true, full: true, k: 1.2 });
 }
 
 function* shack(ctx, out, x, d, rng, night) {
@@ -762,8 +812,8 @@ function* near(ctx, emit) {
     const present = r(), type = r(), dd = r(), xx = r();
     if (present > 0.5 * (0.3 + smooth(0.2, 0.6, noise1(wx0 / 5000, wsd + 51)) * 1.4)) continue;
     const wx = wx0 + 100 + xx * 600, x = wx - ctx.x0;
-    if (type < 0.2) yield* waterTower(ctx, out, x, 60 + 140 * dd, r);
-    else if (type < 0.4) yield* windmill(ctx, out, x, 55 + 140 * dd, r);
+    if (type < 0.2) yield* waterTower(ctx, out, x, 55 + 95 * dd, r);
+    else if (type < 0.4) yield* windmill(ctx, out, x, 48 + 90 * dd, r);
     else if (type < 0.58) yield* shack(ctx, out, x, 60 + 150 * dd, r, night(ctx));
     else if (type < 0.74) yield* oldCar(ctx, out, x, 45 + 130 * dd, r);
     else if (type < 0.84) yield* siding(ctx, out, x, 33.5, 70 + 90 * dd, r);

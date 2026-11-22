@@ -266,7 +266,9 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   function adapt(dt) {
     frames++; acc += dt;
     if (acc >= 0.5) { fps = frames / acc; frames = 0; acc = 0; }
-    if (dt > 1 / 45) { slowFor += dt; fastFor = 0; } else if (dt < 1 / 58) { fastFor += dt; slowFor = 0; }
+    // "slow" and "fast" are judged against the frame-rate cap when it is below the display's rate
+    const slowAt = fpsCap ? Math.max(1 / 45, 1.35 / fpsCap) : 1 / 45, fastAt = fpsCap ? Math.max(1 / 58, 1.05 / fpsCap) : 1 / 58;
+    if (dt > slowAt) { slowFor += dt; fastFor = 0; } else if (dt < fastAt) { fastFor += dt; slowFor = 0; }
     if (slowFor > 2 && resScale > 0.4) { resScale = Math.max(0.4, resScale * 0.85); slowFor = 0; resize(); }
     if (fastFor > 8 && resScale < Math.min(1, params.scale)) { resScale = Math.min(params.scale, resScale / 0.9); fastFor = 0; resize(); }
   }
@@ -275,16 +277,24 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   let last = performance.now(), running = false, disposed = false, readyResolve;
   const ready = new Promise((r) => { readyResolve = r; });
   let audioProvider = null;
+  let fpsCap = params.fps > 0 ? params.fps : 0, nextFrameAt = 0;   // 0 = every display refresh
 
   function tick() {
     if (disposed) return;
     const now = performance.now();
+    // Frame-rate cap: skip this display refresh if the next frame is not due. The schedule keeps the
+    // average rate exact where the cap does not divide the display's rate.
+    if (fpsCap) {
+      if (now < nextFrameAt - 1.5) return;
+      const T = 1000 / fpsCap;
+      nextFrameAt = Math.max(nextFrameAt + T, now - T);
+    }
     const interval = now - last;
     const dt = Math.min(0.1, interval / 1000); last = now;
     const wasIdle = isIdle || !!idleSince;   // the gap before this frame was chosen, not suffered
     // Hitch meter: the gap since the last frame is blamed on what the last frame did.
     if (running) {
-      if (interval > 25 && !wasIdle) hitchTimes.push(now);
+      if (interval > Math.max(25, fpsCap ? 1500 / fpsCap : 0) && !wasIdle) hitchTimes.push(now);
       while (hitchTimes.length && now - hitchTimes[0] > 10000) hitchTimes.shift();
       if (!wasIdle && (interval > worst.ms || now - worst.at > 4000)) worst = { ms: interval, at: now, ...prevWork };
     }
@@ -393,6 +403,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     kitInstances() { return kit ? kit.instances() : []; },   // for the harness and tuning
     biomeNames() { return Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1); },
     setAudioProvider(fn) { audioProvider = fn; },
+    setFpsCap(n) { fpsCap = n > 0 ? n : 0; nextFrameAt = 0; slowFor = 0; fastFor = 0; },
     sky,   // for scripts (sky._debug)
     stats() {
       let splats = 0, pending = 0;
@@ -403,7 +414,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
         audio: !!audioProvider,
         // the slowest frame of the last few seconds, and what the frame before it spent its time on
         worst: { ms: Math.round(worst.ms), gen: Math.round(worst.gen), render: Math.round(worst.render), cpu: Math.round(worst.cpu), note: worst.note },
-        hitches: hitchTimes.length, idle: isIdle, moveT: +moveT.toFixed(2) };
+        hitches: hitchTimes.length, idle: isIdle, moveT: +moveT.toFixed(2), fpsCap };
     },
     dispose() {
       disposed = true;
