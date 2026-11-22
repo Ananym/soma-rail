@@ -17,7 +17,7 @@
 // the lakes, the river's channel and levees, gentle swells in the mid band, foothills in the far band
 // and the Fujis themselves.
 //
-// Fuji: one cone every 40 km or so of line (cell FCELL), its summit about 11 km out, 3.3-3.6 km high
+// Fuji: one cone every 21 km or so of line (cell FCELL), its summit about 11 km out, 3.3-3.6 km high
 // and 16-18 km across at the foot, so it stays in the window for some 20 km of travel and drifts back
 // slowly while the country slides past. It is drawn by every far chunk it reaches, piecewise, on a
 // lattice anchored to the mountain (rows up its profile spaced by how fast they climb the window,
@@ -209,15 +209,15 @@ function world(ctx) {
 function local(ctx) { const W = world(ctx); return [{ ...ctx, terrain: W.terr }, W]; }
 
 // --- Fuji: one per FCELL of line (most cells) ---
-const FCELL = 40000;
+const FCELL = 21000;   // its summit is in the window for about 18 km of travel: so one is nearly always in view
 const AM = 2.3;          // the lattice goes this far round the cone each way from the side facing the line
 function fujiSite(W, i) {
   return cget(W.fujis, i, () => {
     const r = makeRng(hashInts(W.ws, 3001, i));
-    if (r() < 0.12) return null;
+    if (r() < 0) return null;
     const H = 3300 + 300 * r();
     return makeCone({
-      i, wx: (i + 0.36 + 0.28 * r()) * FCELL, d: 10700 + 700 * r(), H, R: H * (2.35 + 0.2 * r()),
+      i, wx: (i + 0.42 + 0.16 * r()) * FCELL, d: 10700 + 700 * r(), H, R: H * (2.35 + 0.2 * r()),
       p: 1.6 + 0.15 * r(), u0: 0.03 + 0.008 * r(), s: hashInts(W.ws, 3002, i),
       snow: 0.52 + 0.18 * r(), osawa: (r() - 0.5) * 1.4,
       belt: r() < 0.4, cap: r() < 0.22, bank: r() < 0.16,

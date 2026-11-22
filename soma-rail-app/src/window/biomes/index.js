@@ -11,6 +11,8 @@
 //             everything above eye level does, which suits flat country but not a biome whose
 //             high ground is the scenery (towers, dunes): there, name the things that should
 //             answer the music (trees, buildings, tents, boats). MOVE.BEAT tags single splats.
+//   gold      optional 0..1: how much of the warm dawn and dusk grade this biome takes (default 1;
+//             snow country takes less, or its snow turns the colour of sand)
 //   horizon   optional 0..0.6: lowers the horizon in the frame to give the sky more room
 //   sky       optional night-sky hint { stars, deep, milkyWay, clear }: brighter stars, a second field
 //             of faint ones, the Milky Way, fewer clouds (see sky.js update)

@@ -3317,6 +3317,7 @@ export const himalayaBiome = {
   // the shape numbers are unused: the valley comes from heightAt() through local()
   terrain: TERRAIN,
   hazeDist: 12000,
+  gold: 0.6,
   // The trackside lies almost wholly below the window here, while the wall (mid) and the range (far)
   // fill it: the budget goes where the picture is.
   shares: { trackside: 0.06, near: 0.32, mid: 0.42, far: 0.2 },

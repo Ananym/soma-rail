@@ -333,9 +333,16 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
       // Golden hour: with the sun low but up, push the land's light warm and a little brighter, as a
       // camera exposing for the scene would see it. The sky's own tint only dims at these hours.
       const y = sky.sunDir.y, ss = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
-      const low = ss(0.32, 0.1, y) * ss(-0.06, 0.03, y) * params.gold;
+      // (a biome may scale it: snow under the full grade turns the colour of sand)
+      const low = ss(0.32, 0.1, y) * ss(-0.06, 0.03, y) * params.gold * (biome.gold != null ? biome.gold : 1);
       const t = uniforms.uLightTint.value;
       t.r *= 1 + 0.42 * low; t.g *= 1 + 0.12 * low; t.b *= 1 - 0.22 * low;
+      // ... and with the sun low, a biome that takes less gold also takes less of the sky's own
+      // orange: its light is pulled part of the way to neutral, so snow at dusk stays snow.
+      if (biome.gold != null && biome.gold < 1) {
+        const k = 0.6 * (1 - biome.gold) * ss(0.32, 0.1, y) * ss(-0.2, -0.02, y), lum = 0.3 * t.r + 0.59 * t.g + 0.11 * t.b;
+        t.r += (lum - t.r) * k; t.g += (lum - t.g) * k; t.b += (lum * 1.08 - t.b) * k;
+      }
     }
     uniforms.uHazeDist.value = biome.hazeDist || 3000;
     uniforms.uDissolve.value = S.dissolve;

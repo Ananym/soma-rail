@@ -2536,6 +2536,7 @@ export const winterBiome = {
   palette: PAL,
   terrain: TERRAIN,
   hazeDist: 7000,
+  gold: 0.3,   // dusk on snow is rose and blue, not tan
   shares: { trackside: 0.14, near: 0.42, mid: 0.28, far: 0.16 },
   // low light suits it best: dawn and dusk most of the time, night often, plain day least
   slots: { dawn: 0.28, day: 0.2, dusk: 0.32, night: 0.2 },
