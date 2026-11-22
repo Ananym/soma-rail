@@ -9,7 +9,11 @@
 //     sea, far ranks), each a set of world-hashed ridge segments with a gentle windward slope, a
 //     sharp brink and a steep slip face, on top of the shared terrain;
 //   - oases, dry wadis, black gravel plateaus (hamada) and, in some stretches, a far rock range
-//     (jebel), which flatten, cut or replace the sand where they are.
+//     (jebel), which flatten, cut or replace the sand where they are;
+//   - the places (caravans, camps, herds, forts, towns, tracks: placesIn), the animals (wildIn)
+//     and the cacti (cactiIn), each a layer of world cells of its own.
+// People, animals and what they build are drawn larger than life (BIG) and stand near the line:
+// at life size and 170 m a camel was 16 px tall beside a 15 m palm.
 // `surface()` gives height, slope and material at any world point, so the ground fill of every
 // band draws the dunes, and props stand on the dunes rather than on the bare terrain. Only the
 // ground fill uses the chunk's own rng; everything that must line up uses world hashes.
@@ -30,6 +34,7 @@ import { makeRng } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, strut, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, wires, lamp, detail, treeSplats,
+  flightCell, flyBody, flyWing,
   jitter, mul3, mix3, shade, smooth, clamp, lerp, quatYaw, quatRoll, quatPitch, quatMul, quatUpTo, norm3, rotY, Q_ID, SUN,
 } from './kit.js';
 import { telegraphPole } from './saltflat.js';
@@ -216,7 +221,7 @@ function world(ctx) {
     }
     if (same) base = fast;
   }
-  W = { ws, T: ctx.terrain, base, fams, oases: new Map(), wadis: new Map(), stars: new Map(), places: new Map(), mSea: memo(), mJeb: memo(), mHam: memos(2), mJ1: memos(3), mJ2: memos(2), mJ3: memos(2), mEsc: memo(), mEsc2: memo(), mEsc3: memo() };
+  W = { ws, T: ctx.terrain, base, fams, oases: new Map(), wadis: new Map(), stars: new Map(), places: new Map(), cacti: new Map(), wild: new Map(), mSea: memo(), mJeb: memo(), mHam: memos(2), mJ1: memos(3), mJ2: memos(2), mJ3: memos(2), mEsc: memo(), mEsc2: memo(), mEsc3: memo() };
   worlds.set(ws, W);
   if (worlds.size > 6) worlds.delete(worlds.keys().next().value);
   return W;
@@ -801,13 +806,16 @@ export function palmSplats(out, d, H) {
 // the roof edge, small dark window openings, a door and the ends of the roof beams, so its corners
 // read from either side in motion. At night some windows glow.
 //   opts: { w (along the track), depth, h, wall, yaw, rng, s, y, windows (true/false/'slits'),
-//           door (true/false/'gate'), parapet (m), beams, lit (0..1 share of lit windows), kind }
+//           door (true/false/'gate'), parapet (m), beams, lit (0..1 share of lit windows), kind,
+//           mag (the whole house, doors and windows too, drawn this many times life size about
+//           the middle of its base; w, depth, h and s (the final splat size) stay as given) }
 export function* mudHouse(ctx, out, x, d, opts = {}) {
   const rng = opts.rng || ctx.rng;
   const w = opts.w || 8, dep = opts.depth || 6, h = opts.h || 3.6;
   const yaw = opts.yaw || 0, q = quatYaw(yaw);
   const wall = opts.wall || C.mud[0];
-  const s = opts.s || Math.max(0.1, detail(out, d, 1.0));
+  const mag = opts.mag || 1;
+  const s = (opts.s || Math.max(0.1, detail(out, d, 1.0))) / mag;
   const kind = opts.kind != null ? opts.kind : KIND.BUILDING;
   const par = opts.parapet != null ? opts.parapet : 0.45;
   const lit = opts.lit || 0;
@@ -815,11 +823,12 @@ export function* mudHouse(ctx, out, x, d, opts = {}) {
   if (base == null) {
     base = Infinity;
     for (const [cx, cd] of [[-w / 2, -dep / 2], [w / 2, -dep / 2], [-w / 2, dep / 2], [w / 2, dep / 2], [0, 0]]) {
-      const [rx, rz] = rotY(cx, cd, yaw);
+      const [rx, rz] = rotY(cx * mag, cd * mag, yaw);
       base = Math.min(base, gy(ctx, x + rx, d - rz));
     }
     base -= 0.3;
   }
+  if (mag !== 1) out = magOut(out, x, base, -d, mag);
   const [ex, ez] = rotY(1, 0, yaw), [fx, fz] = rotY(0, 1, yaw);
   const P = (lx, ly, lz) => [x + ex * lx + fx * lz, base + ly, -d + ez * lx + fz * lz];
   const H = h + 0.3;              // wall height above the (lowered) base
@@ -911,17 +920,18 @@ export function* mudHouse(ctx, out, x, d, opts = {}) {
 export function* mudTower(ctx, out, x, d, opts = {}) {
   const rng = opts.rng || ctx.rng;
   const h = opts.h || 14, w = opts.w || 3;
-  const y = opts.y != null ? opts.y : gy(ctx, x, d) - 0.3;
-  const wall = opts.wall || C.mud[1];
-  yield* mudHouse(ctx, out, x, d, { w, depth: w, h, wall, rng, y, windows: 'slits', door: false, parapet: 0.5, beams: false, lit: opts.lit, s: opts.s, kind: opts.kind });
-  yield* mudHouse(ctx, out, x, d, { w: w * 0.62, depth: w * 0.62, h: 2.0, wall: mul3(wall, 1.03), rng, y: y + h + 0.6, windows: false, door: false, parapet: 0.2, beams: false, s: opts.s, kind: opts.kind });
+  const wall = opts.wall || C.mud[1], mag = opts.mag || 1;
+  const y = opts.y != null ? opts.y : lowGround(ctx, x, d, w * mag / 2) - 0.3;
+  yield* mudHouse(ctx, out, x, d, { w, depth: w, h, wall, rng, y, windows: 'slits', door: false, parapet: 0.5, beams: false, lit: opts.lit, s: opts.s, kind: opts.kind, mag });
+  yield* mudHouse(ctx, out, x, d, { w: w * 0.62, depth: w * 0.62, h: 2.0, wall: mul3(wall, 1.03), rng, y: y + (h + 0.6) * mag, windows: false, door: false, parapet: 0.2, beams: false, s: opts.s, kind: opts.kind, mag });
 }
 
 // A walled compound: a mud wall round a yard with a gateway, houses inside along the back wall.
 function* compound(ctx, out, x, d, rng, opts = {}) {
-  const w = 22 + 14 * rng(), dep = 16 + 10 * rng();
+  const w = 22 + 14 * rng(), dep = 16 + 10 * rng(), mag = opts.mag || 1;
   const wall = mul3(C.mud[Math.floor(rng() * C.mud.length)], 0.97);
-  const y = Math.min(gy(ctx, x - w / 2, d), gy(ctx, x + w / 2, d), gy(ctx, x, d + dep)) - 0.3;
+  const y = lowGround(ctx, x, d + mag * dep / 2, mag * w / 2, mag * dep / 2 + 0.5) - 0.3;     // the lowest ground under the yard
+  if (mag !== 1) out = magOut(out, x, y, -d, mag);
   const nh = 1 + Math.floor(rng() * 3);
   for (let k = 0; k < nh; k++) {
     yield* mudHouse(ctx, out, x - w / 2 + (k + 0.5) * w / nh, d + dep * 0.75, { w: w / nh - 1.5, depth: 5, h: 3.4 + 2.5 * rng(), wall: C.mud[Math.floor(rng() * C.mud.length)], rng, y, lit: opts.lit, s: opts.s });
@@ -939,6 +949,93 @@ function withMove(out, move) {
   Object.defineProperty(m, 'n', { get: () => out.n });
   Object.defineProperty(m, 'limit', { get: () => out.limit, set: (v) => { out.limit = v; } });
   return m;
+}
+// An `out` that magnifies whatever is drawn through it by k about the fixed point (ax, ay, az):
+// positions move out from the point and every splat grows by k, so a prop written in life-size
+// metres comes out larger than life with its proportions kept. detail() through it gives splats k
+// times finer, so the magnified prop is drawn at the same grain as its neighbours. `move`, if
+// given, tags every splat that does not bring a motion class of its own.
+function magOut(out, ax, ay, az, k, move) {
+  const m = (x, y, z, sx, sy, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = KIND.OTHER, mv) =>
+    out(ax + (x - ax) * k, ay + (y - ay) * k, az + (z - az) * k, sx * k, sy * k, sz * k, r, g, b, o, qx, qy, qz, qw, kind, mv != null ? mv : move);
+  m.q = (x, y, z, sx, sy, sz, c, o, q, kind) => m(x, y, z, sx, sy, sz, c[0], c[1], c[2], o, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, c.light ? KIND.LIGHT : kind);
+  m.due = out.due; m.left = out.left; m.density = out.density; m.detailK = out.detailK / k; m.ctx = out.ctx;
+  m.mag = (out.mag || 1) * k;
+  Object.defineProperty(m, 'n', { get: () => out.n });
+  Object.defineProperty(m, 'limit', { get: () => out.limit, set: (v) => { out.limit = v; } });
+  return m;
+}
+// How much larger than life things are drawn. A camel at life size is 16 px tall at the 170 m the
+// caravans used to pass at, a person 12 px: lost beside a 15 m palm. People, animals and what
+// they build are drawn this much larger (and stand nearer the line, see placesIn), so they read.
+const BIG = { camel: 1.75, person: 1.75, goat: 2.4, tent: 1.6, well: 1.7, hut: 1.6, lorry: 1.7, house: 1.3, fort: 1.8, town: 1.6, fire: 1.5, oryx: 1.9, ostrich: 1.75, vulture: 2.6, fox: 2.8 };
+// For scripts that look for things: globalThis.__dunesLog, if set, is called with (kind, world x,
+// distance, height in metres) for every person, animal, cactus and small structure drawn.
+function note(kind, wx, d, h) { const log = globalThis.__dunesLog; if (log) log(kind, wx, d, h); }
+// Can the window see something h metres tall standing at (wx, d), looking straight out? False
+// where a dune nearer the line stands in the way.
+function seen(W, wx, d, h = 1.5) {
+  const y = heightAt(W, wx, d) + h;
+  for (let k = 1; k <= 6; k++) {
+    const t = k / 7, dd = d * t;
+    if (dd > 8 && heightAt(W, wx, dd) > 2.6 + (y - 2.6) * t) return false;
+  }
+  return true;
+}
+// The lowest and highest ground under a footprint: world x within hw of wx, distance d0 to d1.
+function footprint(W, wx, hw, d0, d1) {
+  let lo = Infinity, hi = -Infinity;
+  for (const u of [-1, 0, 1]) for (const v of [0, 0.5, 1]) { const y = heightAt(W, wx + u * hw, d0 + (d1 - d0) * v); if (y < lo) lo = y; if (y > hi) hi = y; }
+  return [lo, hi];
+}
+// The lowest ground under a rectangle about chunk-local (x, d), half-sizes hw along the line and
+// hd across it: where a building must stand if none of its walls is to end in the air.
+function lowGround(ctx, x, d, hw, hd = hw) {
+  let y = gy(ctx, x, d);
+  for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [-1, 0], [1, 0]]) y = Math.min(y, gy(ctx, x + a * hw, d + b * hd));
+  return y;
+}
+// A rock plinth under a building: rock faces along the front and both ends of a rectangle (world x
+// from xa to xb, distance da to db), every column of each face starting at the ground where it
+// stands and rising to `top`, and a ledge of rock along the top inside them. Whatever is built on
+// it at `top` can then never hang in the air, however the ground falls away beneath: the walls go
+// down to the sand at every point, from any angle of a pass. s is the splat size.
+function* plinth(ctx, out, W, xa, xb, da, db, top, s, ledge, salt) {
+  const faces = [[xa, da, xb, da, 0.5], [xa, db, xa, da, 0.9], [xb, da, xb, db, 0.12]];      // front; sun-side end; far end, in shade
+  for (const [x0, d0, x1, d1, lit] of faces) {
+    const L = Math.hypot(x1 - x0, d1 - d0), nu = Math.max(2, Math.round(L / (s * 1.5)));
+    const ex = (x1 - x0) / L, ed = (d1 - d0) / L, q = quatBasis(ex, 0, -ed, 0, 1, 0);
+    for (let i = 0; i < nu; i++) {
+      const t = (i + 0.5) / nu, wx = x0 + (x1 - x0) * t, d = d0 + (d1 - d0) * t;
+      if (wx < ctx.x0 - 3 * s || wx > ctx.x0 + ctx.length + 3 * s) continue;
+      const g = heightAt(W, wx, d) - 0.8, Hc = top - g;
+      if (Hc < 0.3) continue;                               // the ground stands above the plinth here
+      const nv = Math.max(1, Math.round(Hc / (s * 1.5)));
+      const jag = 0.82 + 0.36 * noise1(t * L / (s * 4) + 3, salt);
+      for (let j = 0; j < nv; j++) {
+        const y = g + (j + 0.5) * Hc / nv;
+        const band = 0.84 + 0.3 * noise1((y + 0.15 * t * L) / (s * 2.2), salt + 2);
+        const kk = (0.6 + 0.95 * lit) * band * jag * (0.8 + 0.3 * (y - g) / Hc);
+        out(wx - ctx.x0, y, -d, (L / nu) * 0.62, (Hc / nv) * 0.62, s * 0.3, C.rockDark[0] * kk, C.rockDark[1] * kk, C.rockDark[2] * kk, 1, q[0], q[1], q[2], q[3], KIND.ROCK);
+      }
+      const kt = 0.8 + 0.5 * lit;
+      out(wx - ctx.x0, top - s * 0.1, -d, (L / nu) * 0.62, s * 0.22, s * 0.5, C.rock[0] * kt, C.rock[1] * kt, C.rock[2] * kt, 1, q[0], q[1], q[2], q[3], KIND.ROCK);   // the lit top edge
+      if (out.due()) yield;
+    }
+  }
+  // the ledge on top, between the faces and the walls
+  const nl = Math.max(1, Math.round(ledge / (s * 1.5))), lc = mul3(C.rock, 1.05);
+  for (const [x0, d0, x1, d1, ix, id] of [[xa, da, xb, da, 0, 1], [xa, da, xa, db, 1, 0], [xb, da, xb, db, -1, 0]]) {
+    const L = Math.hypot(x1 - x0, d1 - d0), nu = Math.max(2, Math.round(L / (s * 1.5)));
+    for (let i = 0; i < nu; i++) {
+      const t = (i + 0.5) / nu;
+      for (let j = 0; j < nl; j++) {
+        const o = (j + 0.5) / nl * ledge;
+        out(x0 + (x1 - x0) * t + ix * o - ctx.x0, top, -(d0 + (d1 - d0) * t + id * o), Math.max(L / nu, ledge / nl) * 0.62, s * 0.12, Math.max(L / nu, ledge / nl) * 0.62, lc[0], lc[1], lc[2], 1, 0, 0, 0, 1, KIND.ROCK);
+      }
+      if (out.due()) yield;
+    }
+  }
 }
 // Thickness for a limb or pole seen at distance d: never thinner than about a pixel at 1080p.
 const limb = (r, d) => Math.max(r, 0.0007 * d);
@@ -959,6 +1056,7 @@ function* camel(ctx, out, x, y0, d, dir, rng, col = C.camel, kind = KIND.OTHER, 
   const rl = limb(0.055, d);
   const couched = !!opts.couched;
   const by = couched ? 0.75 : 1.72;          // body centre height
+  note(couched ? 'camel (couched)' : 'camel', ctx.x0 + x, d, (by + (opts.rider ? 1.2 : 0.66)) * (out.mag || 1));
   // legs: far pair darker, set back a little; a walking stride swings them
   const st = opts.stride != null ? opts.stride : rng();
   for (const [lx, side] of [[0.5, -1], [-0.55, -1], [0.55, 1], [-0.5, 1]]) {
@@ -972,8 +1070,11 @@ function* camel(ctx, out, x, y0, d, dir, rng, col = C.camel, kind = KIND.OTHER, 
     strut(out, X(lx), y0 + by - 0.25, lz, X(kx), y0 + 0.75, lz, rl * 1.25, lc, 2, 1, kind);
     strut(out, X(kx), y0 + 0.75, lz, X(fx), y0 + 0.04, lz, rl, lc, 2, 1, kind);
   }
-  ell(out, X(0), y0 + by, z, 0.78, 0.4, 0.36, 1, 0.04 * dir, 0, c, kind);                  // body
-  ell(out, X(-0.08), y0 + by + 0.36, z, 0.36, 0.3, 0.28, 1, 0, 0, cl, kind);              // hump
+  // body: chest and rump as two tighter ellipsoids (one big soft one melted into the sand once the
+  // camel was drawn large), and the hump standing clear above them
+  ell(out, X(0.3), y0 + by + 0.02, z, 0.5, 0.33, 0.31, 1, 0.1 * dir, 0, c, kind);
+  ell(out, X(-0.3), y0 + by, z, 0.5, 0.32, 0.31, 1, -0.06 * dir, 0, c, kind);
+  ell(out, X(-0.06), y0 + by + 0.42, z, 0.3, 0.25, 0.24, 1, 0, 0, cl, kind);              // hump
   ell(out, X(0.1), y0 + by - 0.28, z + 0.02, 0.6, 0.14, 0.3, 1, 0, 0, cs, kind);         // belly in shade
   // neck: down and forward from the shoulder, then up to the head
   const g = opts.graze ? -1 : 1;
@@ -1018,6 +1119,7 @@ function goat(out, x, y0, d, dir, col, kind, graze, scale = 1, ears = false) {
 // herder's stick.
 function person(out, x, y0, d, robe, head, kind, opts = {}) {
   const z = -d, hgt = opts.h || 1.72;
+  note('person', out.ctx.x0 + x, d, hgt * (out.mag || 1));
   ell(out, x, y0 + hgt * 0.3, z, hgt * 0.3, 0.24, 0.2, 0, 1, 0, mul3(robe, 0.86), kind);    // skirt of the robe
   ell(out, x, y0 + hgt * 0.66, z, hgt * 0.17, 0.21, 0.15, 0, 1, 0, robe, kind);             // shoulders
   ell(out, x, y0 + hgt * 0.92, z, 0.11, 0.12, 0.11, 0, 1, 0, head, kind);
@@ -1052,20 +1154,26 @@ function* box(out, x, yb, d, ex, ed, L, Wd, Hh, col, s, kind, rng) {
 }
 
 // A black goat-hair tent: low, dark and wide, its roof sagging between the poles, the front open.
-function* tent(ctx, out, x, d, rng, night) {
-  const w = 8 + 5 * rng(), dep = 4 + 1.5 * rng(), H = 1.7 + 0.5 * rng();
+//   k: how many times life size (width, depth and height alike)
+function* tent(ctx, out, x, d, rng, night, k = 1) {
+  const w = (8 + 5 * rng()) * k, dep = (4 + 1.5 * rng()) * k, H = (1.7 + 0.5 * rng()) * k;
   const y0 = gy(ctx, x, d);
+  note('tent', ctx.x0 + x, d, H);
   const s = Math.max(0.12, detail(out, d, 1.1));
   const nu = Math.max(3, Math.round(w / (s * 1.4))), nv = Math.max(2, Math.round(dep / (s * 1.4)));
   const poles = 2 + Math.floor(rng() * 3);
+  // (the ground under each part of the tent: a tent 20 m long pitched across a slope would have one
+  // end in the air and the other in the sand if it were drawn level)
+  const gAt = (u) => Math.min(y0 + 0.6 * k, gy(ctx, x - w / 2 + u * w, d));
   for (let i = 0; i < nu; i++) {
+    const yc = gAt((i + 0.5) / nu) - 0.08 * k;
     for (let j = 0; j < nv; j++) {
       const u = (i + 0.5) / nu, v = (j + 0.5) / nv;
       const ridge = 1 - 0.28 * Math.pow(Math.abs(Math.sin(u * poles * Math.PI)), 0.6);     // sags between poles
       const fall = 1 - Math.pow(Math.abs(v - 0.5) * 2, 1.6) * 0.6;
-      const y = y0 + H * ridge * fall;
+      const y = yc + H * ridge * fall;
       const c = jitter(mul3(C.tent, 0.85 + 0.35 * (1 - v) + 0.15 * (1 - u)), rng, 0.1);
-      out(x - w / 2 + u * w, y, -(d - dep / 2 + v * dep), w / nu * 0.65, 0.22, dep / nv * 0.65, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING);   // a cloth with body: level discs seen from rail level were near edge-on slivers
+      out(x - w / 2 + u * w, y, -(d - dep / 2 + v * dep), w / nu * 0.65, 0.22 * k, dep / nv * 0.65, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING);   // a cloth with body: level discs seen from rail level were near edge-on slivers
     }
     if (out.due()) yield;
   }
@@ -1075,23 +1183,24 @@ function* tent(ctx, out, x, d, rng, night) {
     const u = (i + 0.5) / nf;
     const ridge = 1 - 0.28 * Math.pow(Math.abs(Math.sin(u * poles * Math.PI)), 0.6);
     const hh = H * ridge * 0.4;
-    out(x - w / 2 + u * w, y0 + hh * 0.55, -(d - dep / 2 + 0.3), w / nf * 0.62, hh * 0.55, 0.1, 0.06, 0.05, 0.05, 1, 0, 0, 0, 1, KIND.BUILDING);
+    out(x - w / 2 + u * w, gAt(u) + hh * 0.55, -(d - dep / 2 + 0.3 * k), w / nf * 0.62, hh * 0.55, 0.1 * k, 0.06, 0.05, 0.05, 1, 0, 0, 0, 1, KIND.BUILDING);
   }
-  for (const sg of [-1, 1]) out(x + sg * w / 2, y0 + H * 0.3, -d, 0.12, H * 0.3, dep * 0.45, 0.13, 0.1, 0.09, 1, 0, 0, 0, 1, KIND.BUILDING);
+  for (const sg of [-1, 1]) out(x + sg * w / 2, gAt(sg < 0 ? 0 : 1) + H * 0.3, -d, 0.12 * k, H * 0.3, dep * 0.45, 0.13, 0.1, 0.09, 1, 0, 0, 0, 1, KIND.BUILDING);
   // at night, a fire in front of the tent
   if (night) {
-    const fx = x + (rng() - 0.5) * w * 0.6, fd = d - dep / 2 - 3 - 2 * rng();
-    const fy = gy(ctx, fx, fd);
-    out(fx, fy + 0.25, -fd, 0.22, 0.3, 0.22, 1.0, 0.55, 0.18, 1, 0, 0, 0, 1, KIND.LIGHT);
-    out(fx, fy + 0.5, -fd, 0.12, 0.22, 0.12, 1.0, 0.82, 0.45, 1, 0, 0, 0, 1, KIND.LIGHT);
-    out(fx, fy + 0.4, -(fd + 0.1), 1.6, 1.1, 0.6, 1.0, 0.5, 0.2, 0.16, 0, 0, 0, 1, KIND.LIGHT);
-    out(fx, fy + 0.05, -fd, 2.4, 0.05, 2.0, 1.0, 0.55, 0.25, 0.22, 0, 0, 0, 1, KIND.LIGHT);   // light on the sand
+    const fx = x + (rng() - 0.5) * w * 0.6, fd = d - dep / 2 - (3 + 2 * rng()) * k;
+    const fy = gy(ctx, fx, fd), fo = magOut(out, fx, fy, -fd, k);
+    fo(fx, fy + 0.25, -fd, 0.22, 0.3, 0.22, 1.0, 0.55, 0.18, 1, 0, 0, 0, 1, KIND.LIGHT);
+    fo(fx, fy + 0.5, -fd, 0.12, 0.22, 0.12, 1.0, 0.82, 0.45, 1, 0, 0, 0, 1, KIND.LIGHT);
+    fo(fx, fy + 0.4, -(fd + 0.1), 1.6, 1.1, 0.6, 1.0, 0.5, 0.2, 0.16, 0, 0, 0, 1, KIND.LIGHT);
+    fo(fx, fy + 0.05, -fd, 2.4, 0.05, 2.0, 1.0, 0.55, 0.25, 0.22, 0, 0, 0, 1, KIND.LIGHT);   // light on the sand
   }
 }
 
 // A well: a low stone ring, a pulley frame of two posts and a beam with a wheel, a trough.
 function* well(ctx, out, x, d, rng) {
   const y0 = gy(ctx, x, d);
+  note('well', ctx.x0 + x, d, 2.95 * (out.mag || 1));
   const stoneC = [0.52, 0.45, 0.38];
   for (let a = 0; a < 14; a++) {
     const th = (a / 14) * Math.PI * 2, c = shade(stoneC, Math.cos(th), 0.3, Math.sin(th), 0.6, 0.5);
@@ -1158,9 +1267,10 @@ function stone(out, x, y0, d, r, rng, col) {
 // A dark rock outcrop: a low, jagged ridge of black rock breaking out of the sand, drawn as a
 // curtain facing the line with a second, offset curtain behind for depth. Faces turned toward the
 // sun (left) are lit, the others dark; the top edge is a crisp, broken skyline.
-export function* outcrop(ctx, out, x, d, R, rng) {
+//   hMax: no higher than this
+export function* outcrop(ctx, out, x, d, R, rng, hMax = Infinity) {
   const s = Math.max(0.3, detail(out, d, 1.2));
-  const w = R * (2 + 1.5 * rng()), h = R * (0.35 + 0.35 * rng());
+  const w = R * (2 + 1.5 * rng()), h = Math.min(R * (0.35 + 0.35 * rng()), hMax);
   const salt = Math.floor(rng() * 1e4);
   const prof = (u) => {
     const e = Math.max(0, 1 - Math.pow(Math.abs(2 * u / w), 2.2));
@@ -1191,16 +1301,17 @@ export function* outcrop(ctx, out, x, d, R, rng) {
   }
 }
 // A small stone hut half buried by a dune: walls up to the drift.
-function* buriedHut(ctx, out, x, d, rng) {
+function* buriedHut(ctx, out, x, d, rng, k = 1) {
   const y0 = gy(ctx, x, d);
-  const sink = 0.8 + 0.8 * rng();
-  yield* mudHouse(ctx, out, x, d, { w: 5 + 2 * rng(), depth: 4, h: 2.6, wall: [0.5, 0.44, 0.38], rng, y: y0 - sink, parapet: 0.2, beams: false, door: false });
+  const sink = (0.8 + 0.8 * rng()) * k;
+  note('hut', ctx.x0 + x, d, 3.1 * k - sink);
+  yield* mudHouse(ctx, out, x, d, { w: 5 + 2 * rng(), depth: 4, h: 2.6, wall: [0.5, 0.44, 0.38], rng, y: y0 - sink, parapet: 0.2, beams: false, door: false, mag: k });
   // the drift banked against the windward end
   const s = Math.max(0.15, detail(out, d, 1.2));
   for (let i = 0; i < 40; i++) {
     const u = rng(), v = rng();
-    const px = x - 2 - u * 4, pd = d + (v - 0.5) * 5;
-    const hh = (1 - u) * (2.6 - sink + 0.8) * (1 - Math.abs(v - 0.5));
+    const px = x - (2 + u * 4) * k, pd = d + (v - 0.5) * 5 * k;
+    const hh = (1 - u) * (2.6 * k - sink + 0.8 * k) * (1 - Math.abs(v - 0.5));
     const c = jitter(mix3(C.sandMid, C.sandLit, 0.6), rng, 0.05);
     out(px, y0 + hh * 0.6, -pd, s * 2.5, s * 0.6, s * 2, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
   }
@@ -1518,7 +1629,7 @@ function* culverts(ctx, out, W) {
 // ---------------------------------------------------------------------------------------------
 function villageOf(o) {
   if (!o.village) return null;
-  return { x: o.cx + o.vSide * o.Rx * 0.42, d: o.dc - o.Rd * 0.38, R: 26 + 0.14 * o.Rx };
+  return { x: o.cx + o.vSide * o.Rx * 0.42, d: o.dc - o.Rd * 0.38, R: (26 + 0.14 * o.Rx) * 1.15 };
 }
 function inVillage(v, wx, d) { return v && Math.hypot((wx - v.x) / v.R, (d - v.d) / (v.R * 0.75)) < 1; }
 function inPool(o, wx, d) {
@@ -1540,7 +1651,7 @@ function* oases(ctx, out, W, dLo, dHi, lod, cap) {
     const v = villageOf(o);
     // the village: houses on a world-aligned jittered grid, then a compound and a tower
     if (v) {
-      const sp = 12.5;
+      const sp = 12.5 * BIG.house;
       const gx0 = Math.floor((Math.max(v.x - v.R, ctx.x0 - 15)) / sp), gx1 = Math.floor((Math.min(v.x + v.R, ctx.x0 + ctx.length + 15)) / sp);
       const gd0 = Math.floor((v.d - v.R) / sp), gd1 = Math.floor((v.d + v.R) / sp);
       for (let gd = gd1; gd >= gd0; gd--) {          // back rows first does not matter for splats, but keeps the cap fair
@@ -1552,17 +1663,17 @@ function* oases(ctx, out, W, dLo, dHi, lod, cap) {
           const tall = hr() < 0.25;
           yield* mudHouse(sc, out, wx - ctx.x0, d, {
             w: 6 + 5 * hr(), depth: 5 + 3 * hr(), h: tall ? 5.6 + 1.5 * hr() : 3 + 1.4 * hr(),
-            wall: jitter(C.mud[Math.floor(hr() * C.mud.length)], hr, 0.04), yaw: (hr() - 0.5) * 0.12, rng: hr, lit,
+            wall: jitter(C.mud[Math.floor(hr() * C.mud.length)], hr, 0.04), yaw: (hr() - 0.5) * 0.12, rng: hr, lit, mag: BIG.house,
           });
           if (out.n > cap) return;
         }
       }
       const cr = worldRng(ctx, 862, i);
       const cxw = v.x - o.vSide * v.R * 0.95, cd = v.d + v.R * 0.15;
-      if (cd >= dLo && cd < dHi && cxw > ctx.x0 - 40 && cxw < ctx.x0 + ctx.length + 40) yield* compound(sc, out, cxw - ctx.x0, cd, cr, { lit });
+      if (cd >= dLo && cd < dHi && cxw > ctx.x0 - 40 && cxw < ctx.x0 + ctx.length + 40) yield* compound(sc, out, cxw - ctx.x0, cd, cr, { lit, mag: BIG.house });
       if (o.tower) {
         const tx = v.x + (cr() - 0.5) * v.R * 0.6, td = v.d + v.R * 0.5;
-        if (td >= dLo && td < dHi) yield* mudTower(sc, out, tx - ctx.x0, td, { h: 14 + 8 * cr(), w: 2.8 + cr(), wall: C.mud[3], rng: cr, lit });
+        if (td >= dLo && td < dHi) yield* mudTower(sc, out, tx - ctx.x0, td, { h: 14 + 8 * cr(), w: 2.8 + cr(), wall: C.mud[3], rng: cr, lit, mag: BIG.house });
       }
     }
     // the palm grove: a jittered world grid inside the oasis, outside the village and the pool
@@ -1597,10 +1708,12 @@ function* hollows(ctx, out, W, dLo, dHi, cap, wadiOnly = false) {
     const r = worldRng(ctx, 881, i);
     for (let k = 0; k < 8; k++) {
       const wx = wx0 + r() * cell, d = dLo + (dHi - dLo) * Math.pow(r(), 1.4), u = r(), sz = r();
+      const open = d < 300 && (nearWild(W, wx, d, 200) || busy(W, wx, d, 0, 30));      // (asked before surface(): these work the surface out themselves)
       const s = surface(W, wx, d, 0.5);
       if (s.oasis > 0.1 || s.dune > 1.2 || s.ham > 0.3) continue;
       const x = wx - ctx.x0;
       const green = s.wadi > 0 ? 0.6 : 0.08;
+      if (open && (u < green * 0.3 || u >= 0.45)) continue;                       // no tree or bush in front of the animals or a camp
       if (u < green * 0.3) yield* (sz < 0.5 ? acacia(sc, out, x, d, r, 0.9 + 0.5 * sz) : tamarisk(sc, out, x, d, r, 0.8 + 0.5 * sz));
       else if (u < 0.45) tussock(out, x, s.y, d, r, 1 + 1.5 * sz + d / 80);
       else if (u < 0.5 + green) yield* thornBush(sc, out, x, d, r, 1 + sz + d / 120);
@@ -1618,7 +1731,7 @@ function* hollows(ctx, out, W, dLo, dHi, cap, wadiOnly = false) {
       const r = worldRng(ctx, 883, i, Math.floor(d / step));
       if (r() > w.green * 0.8) continue;
       const wx = wadiX(w, d) + (r() - 0.5) * wadiW(w, d) * 2.2;
-      if (wx < ctx.x0 - 10 || wx > ctx.x0 + ctx.length + 10) continue;
+      if (wx < ctx.x0 - 10 || wx > ctx.x0 + ctx.length + 10 || (d < 300 && nearWild(W, wx, d, 200))) continue;
       yield* (r() < 0.4 ? acacia(sc, out, wx - ctx.x0, d, r, 1 + 0.4 * r()) : tamarisk(sc, out, wx - ctx.x0, d, r, 1 + 0.4 * r()));
       if (out.n > cap) return;
     }
@@ -1638,38 +1751,38 @@ function* rareNear(ctx, out, W, dLo, dHi) {
     // candidate spots: the highest for a caravan, the lowest for the rest
     let best = null, bv = type < 0.3 ? -1 : 1e9;
     for (let k = 0; k < 14; k++) {
-      const wx = wx0 + 100 + r() * 500, d = 60 + 200 * r();
+      const wx = wx0 + 100 + r() * 500, d = 45 + 115 * r();
       const s = surface(W, wx, d, 0.5);
       if (s.oasis > 0 || s.wadi > 0.2) continue;
-      const v = s.dune;
+      const v = s.dune + (type < 0.3 || seen(W, wx, d, 2) ? 0 : 30);      // (not behind a dune)
       if (type < 0.3 ? v > bv : v < bv) { bv = v; best = [wx, d, s.fam]; }
     }
     if (!best) continue;
     const [wx, d] = best;
-    if (d < dLo || d >= dHi) continue;
+    if (d < dLo || d >= dHi || busy(W, wx, d, 25) || nearWild(W, wx, d) || (type >= 0.3 && nearCactus(W, wx, d, 16, 9))) continue;
     const x = wx - ctx.x0;
     if (type < 0.3) {
       if (bv < 3) continue;
       yield* caravan(ctx, out, W, wx, d, r, 5 + Math.floor(r() * 5));
-    } else if (type < 0.55) yield* tent(sc, out, x, d, r, night);
-    else if (type < 0.8) yield* well(sc, out, x, d, r);
-    else yield* buriedHut(sc, out, x, d, r);
+    } else if (type < 0.55) yield* tent(sc, out, x, d, r, night, BIG.tent);
+    else if (type < 0.8) yield* well(sc, magOut(out, x, gy(sc, x, d), -d, BIG.well), x, d, r);
+    else yield* buriedHut(sc, out, x, d, r, BIG.hut);
   }
 }
 // A caravan of camels in single file along the crest of a near dune.
 function* caravan(ctx, out, W, wx, d, r, n, opts = {}) {
   const F = W.fams[1];
-  const cx = -F.sa, cd = F.ca;                   // along the crests
-  const dir = cx >= 0 ? 1 : -1;
+  const cd = Math.abs(F.ca), cx = F.ca >= 0 ? -F.sa : F.sa;      // along the crests, away from the line
+  const dir = cx >= 0 ? -1 : 1, k = BIG.camel;                   // (the first camel leads, toward the line)
   for (let c = 0; c < n; c++) {
-    let px = wx - dir * cx * c * 3.6, pd = d - dir * cd * c * 3.6;
+    let px = wx + cx * c * 3.6 * k, pd = d + cd * c * 3.6 * k;
     // keep to the top: step toward the higher neighbour a few times
     for (let it = 0; it < 3; it++) {
       const h0 = heightAt(W, px, pd), h1 = heightAt(W, px + F.ca * 2, pd + F.sa * 2), h2 = heightAt(W, px - F.ca * 2, pd - F.sa * 2);
       if (h1 > h0 && h1 >= h2) { px += F.ca * 2; pd += F.sa * 2; } else if (h2 > h0) { px -= F.ca * 2; pd -= F.sa * 2; } else break;
     }
     const y = heightAt(W, px, pd) - 0.15;
-    yield* camel(ctx, withMove(out, MOVE.BEAT), px - ctx.x0, y, pd, dir * (opts.flipOne === c ? -1 : 1), r, opts.color, opts.kind, { load: c % 2 ? LOADS[c % LOADS.length] : null, rider: c === 1 ? ROBES[1] : null, stride: (c * 0.37) % 1 });
+    yield* camel(ctx, magOut(out, px - ctx.x0, y, -pd, k, MOVE.BEAT), px - ctx.x0, y, pd, dir * (opts.flipOne === c ? -1 : 1), r, opts.color, opts.kind, { load: c % 2 ? LOADS[c % LOADS.length] : null, rider: c === 1 ? ROBES[1] : null, stride: (c * 0.37) % 1 });
   }
 }
 
@@ -1736,14 +1849,18 @@ function placesIn(W, i) {
     const k = pickW(r, [0.8 + 2.2 * sea, 1.6, 1.0 + 1.6 * (1 - sea), 0.5 + 1.8 * (1 - sea), 0.3 + 1.4 * (1 - sea)]);
     const kind = NEAR_KINDS[slot && P.length && P[0].kind === NEAR_KINDS[k] ? (k + 1) % NEAR_KINDS.length : k];
     const x = (i + 0.12 + 0.76 * r()) * PC;
-    const dLo = (kind === 'herd' ? 45 : kind === 'caravan' ? 70 : 55) + slot * 50, dHi = (kind === 'herd' ? 120 : kind === 'rocks' ? 250 : 215) + slot * 35;
+    // (near enough to read: a camel drawn 4 m tall is 55 px at 85 m, and was 16 px at the 170 m
+    // the caravans used to keep)
+    const dLo = (kind === 'herd' ? 42 : kind === 'caravan' ? 46 : kind === 'camp' ? 64 : 55) + slot * 28;
+    const dHi = (kind === 'herd' ? 84 : kind === 'caravan' ? 125 : kind === 'camp' ? 135 : kind === 'rocks' ? 250 : 180) + slot * 25;
     // the lowest of a few spots (a hollow, a dune foot), clear of oases and wadis
     let best = null, bv = 1e9;
     for (let c = 0; c < 7; c++) {
       const d = dLo + (dHi - dLo) * r(), wx = x + (r() - 0.5) * 60;
       const sf = surface(W, wx, d, 0.6);
       if (sf.oasis > 0 || sf.wadi > 0.3) continue;
-      const v = sf.dune + 3 * Math.hypot(sf.gx, sf.gd);
+      let v = sf.dune + 3 * Math.hypot(sf.gx, sf.gd);
+      if (kind !== 'rocks' && !seen(W, wx, d, 2)) v += 40;          // hidden from the line behind a dune
       if (v < bv) { bv = v; best = [wx, d]; }
     }
     if (best && clearOfOasis(W, best[0], best[1])) P.push({ kind, x: best[0], d: best[1], seed: hashInts(W.ws, 1102 + slot * 10, i), band: 'near' });
@@ -1759,16 +1876,29 @@ function placesIn(W, i) {
       // the lorry stands where the track is clear of sand (if there is such a place in view)
       let bv = 1e9;
       for (let c = 0; c < 6; c++) {
-        const td = 95 + 150 * r(), sf = surface(W, trackX(p, td), td, 1);
+        const td = 60 + 95 * r(), sf = surface(W, trackX(p, td), td, 1);
         const v = sf.dune + 4 * Math.hypot(sf.gx, sf.gd);
         if (v < bv) { bv = v; p.truck = td; }
       }
       if (bv > 1.5) p.truck = -1;
       P.push(p);
     } else {
-      const d = kind === 'town' ? 420 + 330 * r() : 330 + 250 * r();
-      const sf = surface(W, x, d, 2);
-      if (sf.dune < 25 && sf.ham < 0.5 && clearOfOasis(W, x, d, 1.6)) P.push({ kind, x, d, seed: hashInts(W.ws, 1105, i), band: 'mid', ruin: r() < 0.45 });
+      const d = kind === 'town' ? 325 + 190 * r() : 312 + 130 * r();        // as near as the mid band reaches
+      const ruin = r() < 0.45;
+      // The flattest of a few sites round about: a fort or a town covers a hundred metres and more,
+      // and across a dune's flank one side of it would be buried or stand high on its footing.
+      const hw = kind === 'town' ? 150 : 55, deep = kind === 'town' ? 140 : 105, dMin = kind === 'town' ? 325 : 312, dMax = kind === 'town' ? 515 : 442;
+      let best = null, bv = 1e9;
+      for (let c = 0; c < 7; c++) {
+        const cx = c ? x + (r() - 0.5) * 320 : x, cd = c ? clamp(d + (r() - 0.5) * 120, dMin, dMax) : d;
+        const sf = surface(W, cx, cd, 2);
+        if (!(sf.dune < 25 && sf.ham < 0.5) || !clearOfOasis(W, cx, cd, 1.6)) continue;
+        const [lo, hi] = footprint(W, cx, hw, cd, cd + deep);
+        // (the first site, unless another is clearly flatter; and one the line can see, if there is one)
+        const v = hi - lo + (c ? 1 : 0) + (seen(W, cx, cd + 10, 12) ? 0 : 6);
+        if (v < bv) { bv = v; best = [cx, cd]; }
+      }
+      if (best && bv < (kind === 'town' ? 24 : 13)) P.push({ kind, x: best[0], d: best[1], seed: hashInts(W.ws, 1105, i), band: 'mid', ruin });
     }
   }
   if (W.places.size > 4000) W.places.clear();
@@ -1787,7 +1917,7 @@ function* places(ctx, out, W) {
     for (const p of placesIn(W, i)) {
       if (p.kind === 'track') { yield* trackPlace(ctx, out, W, p, beat); continue; }
       if (p.d < ctx.zNear || p.d >= ctx.zFar) continue;
-      if (p.x < ctx.x0 - 160 || p.x > ctx.x0 + ctx.length + 160) continue;
+      if (p.x < ctx.x0 - 240 || p.x > ctx.x0 + ctx.length + 240) continue;
       const r = makeRng(p.seed);
       if (p.kind === 'caravan') yield* caravanPlace(sc, out, W, p, r, beat);
       else if (p.kind === 'camp') yield* campPlace(sc, out, W, p, r, beat, night);
@@ -1805,19 +1935,19 @@ function* places(ctx, out, W) {
 function* caravanPlace(ctx, out, W, p, r, beat) {
   const n = 5 + Math.floor(r() * 8), dir = r() < 0.5 ? 1 : -1;
   const drift = (r() - 0.5) * 0.25;                          // the file runs a little across the view
-  const kind = KIND.OTHER;
-  const lead = p.x + dir * 2.6;
-  person(beat, lead - ctx.x0, heightAt(W, lead, p.d) - 0.05, p.d - 0.3, ROBES[1 + Math.floor(r() * 2)], HEADS[Math.floor(r() * 3)], kind, { staff: true });
+  const kind = KIND.OTHER, k = BIG.camel;
+  const lead = p.x + dir * 2.6 * k, ly = heightAt(W, lead, p.d) - 0.05;
+  person(magOut(beat, lead - ctx.x0, ly, -(p.d - 0.3), BIG.person), lead - ctx.x0, ly, p.d - 0.3, ROBES[1 + Math.floor(r() * 2)], HEADS[Math.floor(r() * 3)], kind, { staff: true });
   for (let c = 0; c < n; c++) {
-    const wx = p.x - dir * c * (3.3 + 0.4 * r()), d = p.d + c * 3.3 * drift + (r() - 0.5) * 0.6;
+    const wx = p.x - dir * c * (3.3 + 0.4 * r()) * k, d = p.d + (c * 3.3 * drift + (r() - 0.5) * 0.6) * k;
     const y = heightAt(W, wx, d) - 0.08;
     const rider = r() < 0.25 ? ROBES[Math.floor(r() * ROBES.length)] : null;
     const load = !rider && r() < 0.8 ? LOADS[Math.floor(r() * LOADS.length)] : null;
-    const col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.6);
+    const col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.35);
     const calf = c === n - 1 && r() < 0.4;
     const stride = (c * 0.37 + r() * 0.2) % 1, turban = HEADS[Math.floor(r() * HEADS.length)];
-    if (calf) { goat(beat, wx - ctx.x0, y, d, dir, col, kind, false, 2.2, true); continue; }
-    yield* camel(ctx, beat, wx - ctx.x0, y, d, dir, r, col, kind, { rider, load, stride, turban });
+    if (calf) { goat(beat, wx - ctx.x0, y, d, dir, col, kind, false, 2.2 * k, true); continue; }
+    yield* camel(ctx, magOut(beat, wx - ctx.x0, y, -d, k), wx - ctx.x0, y, d, dir, r, col, kind, { rider, load, stride, turban });
   }
 }
 
@@ -1827,14 +1957,23 @@ function* campPlace(ctx, out, W, p, r, beat, night) {
   const nt = 2 + Math.floor(r() * 3);
   const tents = [];
   for (let t = 0; t < nt; t++) {
-    const tx = p.x + (t - (nt - 1) / 2) * (13 + 6 * r()) + (r() - 0.5) * 4, td = p.d - 10 * r();     // in front of the hollow's back slope
+    const off = ((t - (nt - 1) / 2) * (13 + 6 * r()) + (r() - 0.5) * 4) * 1.5, td = p.d - 10 * r();     // in front of the hollow's back slope
+    // a tent stands on level sand: if its place in the row is on the flank of the next dune, it
+    // moves in toward the middle of the camp until the ground under it is level
+    let tx = p.x + off;
+    for (const f of [1, 0.7, 0.45, 0.2]) {
+      tx = p.x + off * f;
+      const g0 = heightAt(W, tx, td), ga = heightAt(W, tx - 8, td), gb = heightAt(W, tx + 8, td);
+      if (Math.max(g0, ga, gb) - Math.min(g0, ga, gb) < 1.3) break;
+    }
     tents.push([tx, td]);
-    yield* tent(ctx, out, tx - ctx.x0, td, makeRng(p.seed + 17 * t), false);
+    yield* tent(ctx, out, tx - ctx.x0, td, makeRng(p.seed + 17 * t), false, BIG.tent);
   }
   // the fire, in front of the first tent: always burning, smoke drifting up
-  const [fx0, fd0] = tents[0];
-  const fx = fx0 + (r() - 0.5) * 4, fd = fd0 - 6 - 2 * r();
+  const [fx0, fd0] = tents[0], out0 = out;
+  const fx = fx0 + (r() - 0.5) * 4, fd = fd0 - (6 + 2 * r()) * 1.45;
   const fy = heightAt(W, fx, fd), X = fx - ctx.x0;
+  out = magOut(out0, X, fy, -fd, BIG.fire);                     // the fire and its smoke, larger than life
   for (let k = 0; k < 6; k++) { const a = k / 6 * 6.283; out(X + Math.cos(a) * 0.5, fy + 0.1, -(fd + Math.sin(a) * 0.4), 0.14, 0.1, 0.12, 0.2, 0.18, 0.16, 1, 0, 0, 0, 1, KIND.ROCK); }
   out(X, fy + 0.25, -fd, 0.2, 0.28, 0.2, 1.0, 0.5, 0.15, 1, 0, 0, 0, 1, KIND.LIGHT);
   out(X, fy + 0.55, -fd, 0.1, 0.22, 0.1, 1.0, 0.8, 0.4, 1, 0, 0, 0, 1, KIND.LIGHT);
@@ -1848,39 +1987,43 @@ function* campPlace(ctx, out, W, p, r, beat, night) {
     out(X + 2.2 * t * t, fy + 0.9 + 7 * t, -(fd + 0.5 * t), rad, rad * 0.9, rad * 0.8, g, g * 0.98, g * 0.96, 0.32 * (1 - t * 0.8), 0, 0, 0, 1, KIND.OTHER, MOVE.VAPOUR);
   }
   // a pennant on a pole beside the first tent
-  const px = fx0 + 6, pd = fd0 - 1.5, py = heightAt(W, px, pd);
+  const px = fx0 + 6 * BIG.tent, pd = fd0 - 1.5, py = heightAt(W, px, pd);
+  out = magOut(out0, px - ctx.x0, py, -pd, BIG.tent);
   strut(out, px - ctx.x0, py - 0.2, -pd, px - ctx.x0, py + 4.6, -pd, limb(0.04, pd), [0.32, 0.25, 0.18], 3, 1, KIND.BUILDING);
   const pc = r() < 0.5 ? [0.72, 0.14, 0.1] : [0.12, 0.42, 0.2];
   for (let k = 0; k < 3; k++) out(px - ctx.x0 + 0.35 + k * 0.38, py + 4.35 - k * 0.04, -pd, 0.22, 0.2 - k * 0.05, 0.02, pc[0], pc[1], pc[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.FLAG);
   // couched camels and people about the camp
   const nc = 2 + Math.floor(r() * 3);
   for (let c = 0; c < nc; c++) {
-    const cx = p.x + (r() - 0.5) * 40, cd = p.d - 14 - r() * 8;
-    const dir = r() < 0.5 ? 1 : -1, col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.5), couched = r() < 0.7, graze = r() < 0.3;
-    yield* camel(ctx, beat, cx - ctx.x0, heightAt(W, cx, cd) - 0.05, cd, dir, r, col, KIND.OTHER, { couched, graze });
+    const cx = p.x + (r() - 0.5) * 62, cd = p.d - 17 - r() * 10;
+    const dir = r() < 0.5 ? 1 : -1, col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.3), couched = r() < 0.7, graze = r() < 0.3;
+    const cy = heightAt(W, cx, cd) - 0.05;
+    yield* camel(ctx, magOut(beat, cx - ctx.x0, cy, -cd, BIG.camel), cx - ctx.x0, cy, cd, dir, r, col, KIND.OTHER, { couched, graze });
   }
   const np = 1 + Math.floor(r() * 4);
   for (let k = 0; k < np; k++) {
-    const hx = fx + (r() - 0.5) * 9, hd = fd + (r() - 0.5) * 3;
-    person(beat, hx - ctx.x0, heightAt(W, hx, hd) - 0.05, hd, ROBES[Math.floor(r() * ROBES.length)], HEADS[Math.floor(r() * HEADS.length)], KIND.OTHER, { h: 1.6 + 0.2 * r() });
+    const hx = fx + (r() - 0.5) * 15, hd = fd + (r() - 0.5) * 4.5;
+    const hy = heightAt(W, hx, hd) - 0.05;
+    person(magOut(beat, hx - ctx.x0, hy, -hd, BIG.person), hx - ctx.x0, hy, hd, ROBES[Math.floor(r() * ROBES.length)], HEADS[Math.floor(r() * HEADS.length)], KIND.OTHER, { h: 1.6 + 0.2 * r() });
   }
 }
 
 // A well with a herd of goats about it, their herder, perhaps a donkey.
 const GOATS = [[0.08, 0.07, 0.07], [0.1, 0.08, 0.07], [0.36, 0.23, 0.13], [0.74, 0.71, 0.64], [0.5, 0.36, 0.22]];
 function* herdPlace(ctx, out, W, p, r, beat) {
-  yield* well(ctx, out, p.x - ctx.x0, p.d, makeRng(p.seed + 5));
+  yield* well(ctx, magOut(out, p.x - ctx.x0, gy(ctx, p.x - ctx.x0, p.d), -p.d, BIG.well), p.x - ctx.x0, p.d, makeRng(p.seed + 5));
   const ng = 9 + Math.floor(r() * 16);
-  const cx = p.x + (r() < 0.5 ? -1 : 1) * (6 + 6 * r()), cd = p.d + 3 * r();
+  const cx = p.x + (r() < 0.5 ? -1 : 1) * (6 + 6 * r()) * 1.7, cd = p.d + 3 * r();
   for (let g = 0; g < ng; g++) {
     const a = r() * 6.283, rr = Math.sqrt(r());
-    const gx = cx + Math.cos(a) * rr * 14, gd = cd + Math.sin(a) * rr * 6;
+    const gx = cx + Math.cos(a) * rr * 22, gd = cd + Math.sin(a) * rr * 8;
     const dir = r() < 0.5 ? 1 : -1, col = jitter(GOATS[Math.floor(r() * GOATS.length)], r, 0.1), graze = r() < 0.6;
-    goat(beat, gx - ctx.x0, heightAt(W, gx, gd) - 0.03, gd, dir, col, KIND.OTHER, graze);
+    note('goat', gx, gd, (graze ? 0.75 : 1.05) * BIG.goat);
+    goat(beat, gx - ctx.x0, heightAt(W, gx, gd) - 0.03, gd, dir, col, KIND.OTHER, graze, BIG.goat);
   }
-  const hx = cx + 10 * (r() - 0.5), hd = cd - 5;
-  person(beat, hx - ctx.x0, heightAt(W, hx, hd) - 0.05, hd, ROBES[Math.floor(r() * ROBES.length)], HEADS[Math.floor(r() * HEADS.length)], KIND.OTHER, { staff: true });
-  if (r() < 0.6) { const dx = p.x + 3.5, dd = p.d - 2.5; goat(beat, dx - ctx.x0, heightAt(W, dx, dd), dd, -1, [0.42, 0.4, 0.38], KIND.OTHER, false, 1.7, true); }
+  const hx = cx + 16 * (r() - 0.5), hd = cd - 8.5, hy = heightAt(W, hx, hd) - 0.05;
+  person(magOut(beat, hx - ctx.x0, hy, -hd, BIG.person), hx - ctx.x0, hy, hd, ROBES[Math.floor(r() * ROBES.length)], HEADS[Math.floor(r() * HEADS.length)], KIND.OTHER, { staff: true });
+  if (r() < 0.6) { const dx = p.x + 3.5 * BIG.well, dd = p.d - 2.5 * BIG.well; goat(beat, dx - ctx.x0, heightAt(W, dx, dd), dd, -1, [0.42, 0.4, 0.38], KIND.OTHER, false, 1.7 * BIG.camel, true); }
   if (out.due()) yield;
 }
 
@@ -1905,8 +2048,9 @@ function* acaciaPlace(ctx, out, W, p, r, beat) {
     const nc = 2 + Math.floor(r() * 3);
     for (let c = 0; c < nc; c++) {
       const wx = p.x + (r() - 0.5) * 120, d = p.d + (r() - 0.5) * 16;
-      const dir = r() < 0.5 ? 1 : -1, col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.6), graze = r() < 0.6;
-      yield* camel(ctx, beat, wx - ctx.x0, heightAt(W, wx, d) - 0.05, d, dir, r, col, KIND.OTHER, { graze });
+      const dir = r() < 0.5 ? 1 : -1, col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.35), graze = r() < 0.6;
+      const y = heightAt(W, wx, d) - 0.05;
+      yield* camel(ctx, magOut(beat, wx - ctx.x0, y, -d, BIG.camel), wx - ctx.x0, y, d, dir, r, col, KIND.OTHER, { graze });
     }
   }
 }
@@ -1929,18 +2073,28 @@ function* rockPlace(ctx, out, W, p, r) {
 // A kasbah on a rock: a mud-brick fort with corner towers and a keep, standing on a dark outcrop;
 // or the ruin of one, its walls broken down to jagged stumps.
 function* fortPlace(ctx, out, W, p, r, night) {
-  const R = 16 + 14 * r();
-  const rr = makeRng(p.seed + 3);
-  rr();                                    // outcrop() draws from the same rng: w first, then h
-  const rockH = R * (0.35 + 0.35 * rr());
-  yield* outcrop(ctx, out, p.x - ctx.x0, p.d, R, makeRng(p.seed + 3));
+  const k = BIG.fort;                      // the whole kasbah and its rock, larger than life
+  const R = (16 + 14 * r()) * k;
   const F = 34 + 22 * r(), H = 9 + 4 * r();
-  const base = heightAt(W, p.x, p.d) - 0.5 + rockH * 0.75;
-  const d0 = p.d + 2, x = p.x - ctx.x0;
+  const x = p.x - ctx.x0, m = 3.4 * k;     // m: the plinth stands this far out from the walls (the corner towers stand out 2.6)
+  // The fort stands on a table of rock. The table's top is level, a little above the highest ground
+  // under the FRONT of the fort (the part the line sees), and its faces go down to the ground
+  // wherever that is; further back, where the land rises, the fort is simply dug into it. It used
+  // to be set at one height from the ground at its middle, and where the land fell away under its
+  // front or its corners the walls ended in the air.
+  const d0 = p.d + m + 2, xa = p.x - F * k / 2 - m, xb = p.x + F * k / 2 + m, da = d0 - m, db = d0 + F * k + m;
+  const [gLo, gHi] = footprint(W, p.x, F * k / 2 + m, da, d0 + 0.35 * F * k);
+  const lift = 1.5 + 2 * (hashInts(p.seed, 77) / 4294967296);
+  const base = gHi + lift;
   const wall = jitter(C.mud[Math.floor(r() * C.mud.length)], r, 0.05);
   const ruin = p.ruin ? 0.45 + 0.4 * r() : 0;
-  const s = Math.max(0.3, detail(out, p.d, 0.5));
+  const s = Math.max(0.3, detail(out, p.d, 0.6));       // (before magnifying: the walls are plain, and as many splats draw them large as small)
   const lit = night && !ruin ? 0.3 : 0;
+  note('fort', p.x, p.d, (H + 5) * k + base - gLo);
+  yield* plinth(ctx, out, W, xa, xb, da, db, base + 0.2, s * k * 0.8, m, p.seed & 0xffff);
+  // black crags in front of it and at its foot, no higher than the table
+  yield* outcrop(ctx, out, x, da - 3, R, makeRng(p.seed + 3), Math.max(2.5, base - heightAt(W, p.x, da - 3) + 1.5));
+  out = magOut(out, x, base, -d0, k);
   const o = { rng: r, y: base, s, beams: false, wall, ruin, lit };
   const kh = H + 6 + 3 * r();
   yield* mudHouse(ctx, out, x, d0 + F * 0.45, { ...o, w: 12, depth: 10, h: kh, windows: 'slits', door: false, ruinSalt: 1, merlons: true });   // the keep
@@ -1955,31 +2109,40 @@ function* fortPlace(ctx, out, W, p, r, night) {
 
 // A walled town far off: close-packed flat-roofed houses, a minaret, a white dome, palms round it.
 function* townPlace(ctx, out, W, p, r, night) {
-  const span = 90 + 120 * r(), deep = 50 + 50 * r();
-  const s = Math.max(0.3, detail(out, p.d, 0.5));
+  const mag = BIG.town;                    // every house, the wall, the minaret and the dome, larger than life
+  const span0 = 90 + 120 * r(), deep0 = 50 + 50 * r(), span = span0 * mag, deep = deep0 * mag;
+  const s = Math.max(0.3, detail(out, p.d, 0.6)) * mag;   // (as many splats to a house as at life size)
   const lit = night ? 0.45 : 0;
   const yAt = (wx, d) => heightAt(W, wx, d);
-  const sp = 10.5;
-  const nx = Math.floor(span / sp), nd = Math.floor(deep / sp);
+  const sp = 10.5 * mag;
+  const nx = Math.floor(span0 / 10.5), nd = Math.floor(deep0 / 10.5);
+  note('town', p.x, p.d, 6 * mag);
   for (let j = nd - 1; j >= 0; j--) {
     for (let k = 0; k < nx; k++) {
       const u = (k + 0.5) / nx - 0.5;
       const jx = r(), jd = r(), hr = r(), wr = r(), cr = r(), skip = r() < 0.18;
       if (skip || Math.abs(u) > 0.5 - 0.25 * Math.pow(j / nd, 2)) continue;
-      const wx = p.x + u * span + (jx - 0.5) * 3, d = p.d + j * sp + 4 + (jd - 0.5) * 3;
+      const wx = p.x + u * span + (jx - 0.5) * 3 * mag, d = p.d + j * sp + (4 + (jd - 0.5) * 3) * mag;
       const hh = 3.2 + 4 * hr * hr + (j > nd / 2 ? 1.5 : 0);
-      yield* mudHouse(ctx, out, wx - ctx.x0, d, { w: 6 + 4 * wr, depth: 7, h: hh, wall: C.mud[Math.floor(cr * C.mud.length)], rng: makeRng(p.seed + 1000 + j * 97 + k), s, lit, beams: false, y: yAt(wx, d) - 0.4 });
+      yield* mudHouse(ctx, out, wx - ctx.x0, d, { w: 6 + 4 * wr, depth: 7, h: hh, wall: C.mud[Math.floor(cr * C.mud.length)], rng: makeRng(p.seed + 1000 + j * 97 + k), s, lit, beams: false, mag });    // (on the lowest ground under its corners)
     }
   }
   // the town wall along the front, with a gate
-  yield* mudHouse(ctx, out, p.x - ctx.x0, p.d, { w: span + 8, depth: 0.9, h: 4.2, wall: mul3(C.mud[2], 0.97), rng: makeRng(p.seed + 1), s, windows: false, door: 'gate', parapet: 0.4, beams: false, y: yAt(p.x, p.d) - 0.5, merlons: true });
+  // (in lengths, each standing on the lowest ground under it, so the wall steps with the land: one
+  // level wall 300 m long hung in the air wherever the ground dipped)
+  const segs = Math.max(1, Math.round((span0 + 8) / 8)), sw = (span0 + 8) / segs, wc = mul3(C.mud[2], 0.97);
+  for (let g = 0; g < segs; g++) {
+    const wx = p.x + ((g + 0.5) / segs - 0.5) * (span0 + 8) * mag;
+    if (wx < ctx.x0 - 30 || wx > ctx.x0 + ctx.length + 30) continue;
+    yield* mudHouse(ctx, out, wx - ctx.x0, p.d, { w: sw + 0.4, depth: 0.9, h: 5, wall: wc, rng: makeRng(p.seed + 1 + 13 * g), s, windows: false, door: g === (segs >> 1) ? 'gate' : false, parapet: 0.4, beams: false, merlons: true, mag });
+  }
   // minaret and dome
   const mx = p.x + (r() - 0.5) * span * 0.5, md = p.d + deep * 0.4, mh = 22 + 10 * r();
-  yield* mudTower(ctx, out, mx - ctx.x0, md, { h: mh, w: 3.6, wall: C.mud[3], rng: makeRng(p.seed + 2), lit, s, y: yAt(mx, md) - 0.4 });
-  const dx = mx + 14 * (r() < 0.5 ? 1 : -1), dd = md + 4;
-  const dy = yAt(dx, dd) - 0.4;
-  yield* mudHouse(ctx, out, dx - ctx.x0, dd, { w: 12, depth: 12, h: 6, wall: [0.74, 0.72, 0.66], rng: makeRng(p.seed + 3), s, windows: false, door: false, beams: false, y: dy });
-  yield* blob(ctx, out, dx - ctx.x0, dy + 6.6, dd, 5, 4.5, 5, { n: 40, color: [0.78, 0.77, 0.72], rng: makeRng(p.seed + 4), kind: KIND.BUILDING, inner: 0.15, clump: 0, amb: 0.7 });
+  yield* mudTower(ctx, out, mx - ctx.x0, md, { h: mh, w: 3.6, wall: C.mud[3], rng: makeRng(p.seed + 2), lit, s, mag });
+  const dx = mx + 14 * mag * (r() < 0.5 ? 1 : -1), dd = md + 4 * mag;
+  const dy = lowGround(ctx, dx - ctx.x0, dd, 6 * mag) - 0.4;
+  yield* mudHouse(ctx, out, dx - ctx.x0, dd, { w: 12, depth: 12, h: 6, wall: [0.74, 0.72, 0.66], rng: makeRng(p.seed + 3), s, windows: false, door: false, beams: false, y: dy, mag });
+  yield* blob(ctx, out, dx - ctx.x0, dy + 6.6 * mag, dd, 5 * mag, 4.5 * mag, 5 * mag, { n: 40, color: [0.78, 0.77, 0.72], rng: makeRng(p.seed + 4), kind: KIND.BUILDING, inner: 0.15, clump: 0, amb: 0.7 });
   // palms round the town
   const np = 6 + Math.floor(r() * 10);
   for (let k = 0; k < np; k++) {
@@ -2074,7 +2237,10 @@ function* trackPlace(ctx, out, W, p, beat) {
       const ex0 = trackX(p, td + 2) - trackX(p, td - 2), ed0 = 4, l = Math.hypot(ex0, ed0), ex = ex0 / l, ed = ed0 / l;
       const y = heightAt(W, wx, td) - 0.1;
       const paint = [[0.62, 0.62, 0.58], [0.2, 0.3, 0.5], [0.55, 0.16, 0.12], [0.3, 0.38, 0.24]][Math.floor(r() * 4)];
-      const sz = Math.max(0.12, detail(out, td, 0.45));
+      const sz = Math.max(0.12, detail(out, td, 0.45)) / BIG.lorry;
+      note('lorry', wx, td, 2.8 * BIG.lorry);
+      beat = magOut(beat, X, y, -td, BIG.lorry);           // the lorry and its dust, larger than life
+      out = magOut(out, X, y, -td, BIG.lorry);
       const at = (a) => [X + ex * a, td + ed * a];
       const L = p.lorry ? 1 : 0.7;
       // cab, then the bed and (on a lorry) its tarpaulined load
@@ -2096,6 +2262,467 @@ function* trackPlace(ctx, out, W, p, beat) {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Cacti
+// ---------------------------------------------------------------------------------------------
+// A recurring part of the scenery, mostly on the firm ground between the dunes: tall branching
+// columns (saguaro-like), stands of plain columns (organ pipe), and low clumps of prickly pear and
+// barrel cactus, singly and in stands, thick in some stretches of the line and sparse in others.
+// All KIND.TREE, so they answer the beat with the palms. They are a layer of their own, placed from
+// world cells (cactiIn), clear of the places, the tracks and the animals.
+const CG = { stem: [0.27, 0.34, 0.19], pad: [0.3, 0.41, 0.23], barrel: [0.22, 0.33, 0.18], bloom: [0.78, 0.74, 0.56], fruit: [0.66, 0.15, 0.2], gold: [0.78, 0.6, 0.15] };
+const SHADOW = [0.36, 0.26, 0.2];
+
+// One stem of a column cactus from a to b (chunk-local), r thick: a fat round column with a lit
+// flank toward the sun and a shaded one away from it, and a rounded tip. (Fat, so overlapping
+// ellipsoids and not a kit strut(), whose pieces are spaced for thin members.)
+function cactusStem(out, ax, ay, az, bx, by, bz, r, col, rng) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 1e-6;
+  const ux = dx / len, uy = dy / len, uz = dz / len;
+  const n = Math.max(1, Math.round(len / (r * 2.4))), hl = (len / n) * 0.72;
+  const q = quatXTo(ux, uy, uz);
+  // the sun's direction made perpendicular to the stem: where the lit flank is
+  const dt = SUN[0] * ux + SUN[1] * uy + SUN[2] * uz;
+  let px = SUN[0] - dt * ux, py = SUN[1] - dt * uy, pz = SUN[2] - dt * uz;
+  const pl = Math.hypot(px, py, pz) || 1; px /= pl; py /= pl; pz /= pl;
+  const o = r * 0.5, K = KIND.TREE;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, cx = ax + dx * t, cy = ay + dy * t, cz = az + dz * t;
+    const j = 0.94 + 0.12 * rng(), l = 1.3 * j, k = 0.58 * j;
+    out(cx, cy, cz, hl, r, r, col[0] * j, col[1] * j, col[2] * j, 1, q[0], q[1], q[2], q[3], K);
+    out(cx + px * o, cy + py * o, cz + pz * o + r * 0.2, hl, r * 0.5, r * 0.5, col[0] * l, col[1] * l, col[2] * l, 1, q[0], q[1], q[2], q[3], K);
+    out(cx - px * o, cy - py * o, cz - pz * o + r * 0.5, hl, r * 0.45, r * 0.45, col[0] * k, col[1] * k, col[2] * k, 1, q[0], q[1], q[2], q[3], K);
+  }
+  out(bx, by, bz, r * 0.95, r * 0.95, r * 0.95, col[0], col[1], col[2], 1, 0, 0, 0, 1, K);
+  out(bx + px * o * 0.7, by + py * o * 0.7 + r * 0.2, bz + pz * o * 0.7 + r * 0.2, r * 0.5, r * 0.5, r * 0.5, col[0] * 1.3, col[1] * 1.3, col[2] * 1.3, 1, 0, 0, 0, 1, K);
+}
+// The shadow a plant throws on the sand, to the right (the sun is on the left).
+function plantShadow(out, x, y0, d, len, wid) {
+  out(x + len * 0.9, y0 + 0.06, -(d + 0.15), len, 0.015, wid, SHADOW[0], SHADOW[1], SHADOW[2], 0.5, 0, 0, 0, 1, KIND.GROUND);
+}
+// A saguaro: one tall fat column and up to four arms, each leaving the trunk sideways and turning
+// straight up. The arms go mostly along the line (so the candelabra shows side on), alternate sides.
+function* saguaro(ctx, out, W, c, r) {
+  const x = c.x - ctx.x0, d = c.d, z = -d, H = c.h, y0 = heightAt(W, c.x, d) - 0.25;
+  const R = Math.max(0.028 * H + 0.08, 0.0011 * d), col = jitter(CG.stem, r, 0.1);
+  note('saguaro', c.x, d, H);
+  plantShadow(out, x, y0 + 0.25, d, H * 0.3, R * 1.4);
+  const lean = (r() - 0.5) * 0.06;
+  const tops = [[x + lean * H, y0 + H, z, R]];
+  cactusStem(out, x, y0, z, x + lean * H, y0 + H, z, R, col, r);
+  const na = H < 5 ? Math.floor(r() * 2) : pickW(r, [0.5, 1.2, 2.2, 1.5, 0.7]);
+  let side = r() < 0.5 ? 1 : -1;
+  for (let a = 0; a < na; a++, side = -side) {
+    const az = (side > 0 ? 0 : Math.PI) + (r() - 0.5) * 1.4, ca = Math.cos(az), sa = Math.sin(az);
+    const h0 = H * (0.3 + 0.28 * r()), reach = R * (3.4 + 2.2 * r()), top = Math.min(H * 1.02, h0 + H * (0.2 + 0.36 * r())), ra = R * (0.66 + 0.1 * r());
+    const bx = x + lean * h0, ex = bx + ca * reach, ez = z + sa * reach, ey = y0 + h0 + reach * 0.4;
+    cactusStem(out, bx, y0 + h0, z, ex, ey, ez, ra, col, r);
+    cactusStem(out, ex, ey, ez, ex + ca * 0.1, y0 + top, ez, ra, col, r);
+    tops.push([ex + ca * 0.1, y0 + top, ez, ra]);
+  }
+  // in flower: a crown of cream blossom on the tips
+  if (d < 140 && r() < 0.45) {
+    for (const [tx, ty, tz, tr] of tops) {
+      for (let k = 0; k < 3; k++) out(tx + (k - 1) * tr * 0.6, ty + tr * (k === 1 ? 0.95 : 0.7), tz + tr * 0.3, tr * 0.36, tr * 0.28, tr * 0.36, CG.bloom[0], CG.bloom[1], CG.bloom[2], 1, 0, 0, 0, 1, KIND.TREE);
+    }
+  }
+  if (out.due()) yield;
+}
+// An organ-pipe cactus: a sheaf of plain columns of different heights rising from one foot.
+function* organPipe(ctx, out, W, c, r) {
+  const x = c.x - ctx.x0, d = c.d, z = -d, H = c.h, y0 = heightAt(W, c.x, d) - 0.2;
+  const R = Math.max(0.022 * H + 0.08, 0.001 * d), col = jitter(CG.stem, r, 0.1);
+  note('organ pipe', c.x, d, H);
+  plantShadow(out, x, y0 + 0.2, d, H * 0.35, R * 3);
+  const n = 5 + Math.floor(r() * 5);
+  for (let k = 0; k < n; k++) {
+    const a = r() * 6.283, o = Math.sqrt(r()), hh = H * (0.45 + 0.55 * r()) * (1 - 0.3 * o), sp = 0.08 + 0.2 * o;
+    const bx = x + Math.cos(a) * o * R * 4.2, bz = z + Math.sin(a) * o * R * 2.6;
+    cactusStem(out, bx, y0, bz, bx + Math.cos(a) * sp * hh, y0 + hh, bz + Math.sin(a) * sp * hh * 0.6, R * (0.8 + 0.3 * r()), jitter(col, r, 0.08), r);
+  }
+  if (out.due()) yield;
+}
+// A prickly pear: flat oval pads growing out of the tops of one another in a spreading clump, each
+// pad with real thickness and its own facing, so the clump holds together from any angle; often
+// with red fruit along the top pads.
+function* pricklyPear(ctx, out, W, c, r) {
+  const x = c.x - ctx.x0, d = c.d, z = -d, size = c.h / 2.3, y0 = heightAt(W, c.x, d) - 0.1;
+  const a0 = 0.47 * size, col = jitter(CG.pad, r, 0.1), fruit = r() < 0.6;
+  note('prickly pear', c.x, d, c.h);
+  plantShadow(out, x, y0 + 0.1, d, 1.3 * size, 0.9 * size);
+  // [base x, y, z, axis, level]
+  const todo = [];
+  const nb = 3 + Math.floor(r() * 3);
+  for (let k = 0; k < nb; k++) todo.push([x + (k - (nb - 1) / 2) * 0.62 * size + (r() - 0.5) * 0.3 * size, y0, z + (r() - 0.5) * 0.9 * size, (r() - 0.5) * 0.7, 1, (r() - 0.5) * 0.4, 0]);
+  for (let k = 0; k < todo.length && k < 22; k++) {
+    let [bx, by, bz, ux, uy, uz, lev] = todo[k];
+    const ul = Math.hypot(ux, uy, uz); ux /= ul; uy /= ul; uz /= ul;
+    const a = a0 * (1 - 0.1 * lev) * (0.85 + 0.3 * r()), b = a * (0.74 + 0.14 * r());
+    const phi = r() * Math.PI, nx = Math.cos(phi), nz = Math.sin(phi);          // the pad's face (turned toward the line)
+    const q = quatBasis(ux, uy, uz, nx, 0, nz);
+    const cc = mul3(shade(col, nx * 0.7, 0.3, nz, 0.66, 0.5), 0.78 + 0.44 * r());     // pads differ in tone, so each shows against the next
+    // (a splat shows to about one and two thirds of its radii: a and b are the pad's half-height and half-width)
+    out(bx + ux * a, by + uy * a, bz + uz * a, a * 0.62, b * 0.26, b * 0.62, cc[0], cc[1], cc[2], 1, q[0], q[1], q[2], q[3], KIND.TREE);
+    const tx = bx + ux * a * 1.9, ty = by + uy * a * 1.9, tz = bz + uz * a * 1.9;
+    const kids = lev >= 3 ? 0 : lev === 0 ? 1 + Math.floor(r() * 2) : Math.floor(r() * 2.4);
+    for (let j = 0; j < kids; j++) todo.push([tx - ux * a * 0.15, ty - uy * a * 0.15, tz, ux + (r() - 0.5) * 1.3, 1, uz + (r() - 0.5) * 0.9, lev + 1]);
+    if (!kids && fruit && d < 160) {
+      for (let j = 0; j < 2; j++) out(tx + (j - 0.5) * b * 0.9, ty + 0.08 * size, tz + 0.05, 0.12 * size, 0.14 * size, 0.12 * size, CG.fruit[0], CG.fruit[1], CG.fruit[2], 1, 0, 0, 0, 1, KIND.TREE);
+    }
+  }
+  if (out.due()) yield;
+}
+// Barrel cacti: a huddle of fat ribbed globes, each with a crown of yellow or red flowers.
+function* barrels(ctx, out, W, c, r) {
+  const x = c.x - ctx.x0, d = c.d, size = c.h / 1.5;
+  const n = 2 + Math.floor(r() * 4), gold = r() < 0.6 ? CG.gold : [0.72, 0.24, 0.14];
+  note('barrel cactus', c.x, d, c.h);
+  for (let k = 0; k < n; k++) {
+    const bx = x + (k - (n - 1) / 2) * 1.05 * size + (r() - 0.5) * 0.4 * size, bd = d + (r() - 0.5) * 1.4 * size;
+    const rr = (0.42 + 0.3 * r()) * size, h = rr * (1.05 + 0.5 * r()), col = jitter(CG.barrel, r, 0.1);
+    const y = heightAt(W, ctx.x0 + bx, bd) - 0.1, z = -bd;
+    plantShadow(out, bx, y + 0.1, bd, rr * 1.1, rr * 0.8);
+    // (rr and h are the globe's half-width and half-height; a splat shows to about 1.6 radii)
+    out(bx, y + h * 0.95, z, rr * 0.62, h * 0.62, rr * 0.58, col[0], col[1], col[2], 1, 0, 0, 0, 1, KIND.TREE);
+    out(bx - rr * 0.3, y + h * 1.12, z + rr * 0.3, rr * 0.34, h * 0.44, rr * 0.3, col[0] * 1.4, col[1] * 1.4, col[2] * 1.4, 1, 0, 0, 0, 1, KIND.TREE);
+    out(bx + rr * 0.42, y + h * 0.85, z + rr * 0.3, rr * 0.3, h * 0.44, rr * 0.3, col[0] * 0.55, col[1] * 0.55, col[2] * 0.55, 1, 0, 0, 0, 1, KIND.TREE);
+    // the ribs, as dark lines down the face (close up only)
+    if (bd < 90) for (const u of [-0.5, 0, 0.5]) strut(out, bx + u * rr * 1.1, y + h * 0.35, z + rr * 0.6, bx + u * rr * 0.7, y + h * 1.6, z + rr * 0.45, limb(0.022 * size, bd), mul3(col, 0.5), 2, 1, KIND.TREE);
+    out(bx, y + h * 1.85, z + rr * 0.1, rr * 0.34, rr * 0.13, rr * 0.3, gold[0], gold[1], gold[2], 1, 0, 0, 0, 1, KIND.TREE);
+  }
+  if (out.due()) yield;
+}
+
+// What stands where, near enough to be in the way: true if (wx, d) is on a caravan's path, in a
+// camp, by a herd's well or on a desert track (a place's own trees and rocks do not count).
+//   pad: metres of extra room all round; front: extra room on the side toward the line
+const PLACE_ROOM = { caravan: [95, 16, 0], camp: [66, 14, 22], herd: [50, 20, 0] };
+function busy(W, wx, d, pad = 0, front = 0) {
+  const i = Math.floor(wx / PC);
+  for (let k = i - 1; k <= i + 1; k++) {
+    for (const p of placesIn(W, k)) {
+      if (p.kind === 'track') { if (d < TRACK_END && Math.abs(wx - trackX(p, d)) < 16 + 0.03 * d + pad) return true; continue; }
+      const room = PLACE_ROOM[p.kind], dd = d - p.d;
+      if (room && Math.abs(wx - p.x) < room[0] + pad && dd < room[1] + pad && dd > -room[1] - room[2] - pad - front) return true;
+    }
+  }
+  return false;
+}
+
+// The cacti of one world cell of CC metres: a pure function of the world seed, cached.
+//   [{ type, x (world), d, h (height in metres), seed }]
+const CC = 36;
+const CACTUS_TYPES = ['saguaro', 'organ', 'pear', 'barrel'];
+function cactiIn(W, i) {
+  let L = W.cacti.get(i);
+  if (L) return L;
+  L = [];
+  const r = makeRng(hashInts(W.ws, 1201, i)), wx0 = i * CC;
+  // cactus country comes and goes along the line; there are fewer in the open sand sea
+  const country = smooth(0.3, 0.6, noise1(wx0 / 1500, W.ws + 1202));
+  const dens = (0.14 + 0.86 * country) * (1 - 0.4 * seaAt(W, wx0));
+  for (let k = 0; k < 5; k++) {
+    const u = r(), wx = wx0 + r() * CC, dr = r(), tr = r(), sz = r(), stand = r(), seed = Math.floor(r() * 4294967296) >>> 0;
+    // the last candidate is the one beside the line, in the trackside band: rare, and only the tall
+    // columns, which hold together in the blur there
+    const close = k === 4;
+    if (u > dens * (close ? 0.07 : 0.42)) continue;
+    const d = close ? 13 + 13 * dr : 33 + 215 * Math.pow(dr, 1.7);
+    const type = CACTUS_TYPES[close ? (tr < 0.75 ? 0 : 1) : tr < 0.46 ? 0 : tr < 0.6 ? 1 : tr < 0.83 ? 2 : 3];
+    const s = surface(W, wx, d, 0.6);
+    const slope = Math.hypot(s.gx, s.gd), sy = s.y;
+    if (s.oasis > 0 || s.wadi > 0.35 || s.ham > 0.3 || slope > 0.17 || (s.dune > 1.6 && sz > 0.3)) continue;   // mostly firm ground
+    if (!clearOfOasis(W, wx, d, 1.12) || !seen(W, wx, d, 3) || busy(W, wx, d, 0, 30) || nearWild(W, wx, d, close ? 200 : 45)) continue;
+    // sizes: generous, and growing a little with distance so the far ones still read
+    const far = 1 + d / 550;
+    const hOf = (t, v) => (t === 'saguaro' ? (6 + 5.5 * v) * (d < 60 && v > 0.5 ? 1.15 : 1) : t === 'organ' ? 4 + 3.5 * v : t === 'pear' ? 2.1 + 1.8 * v : 1.3 + 0.9 * v) * far;
+    L.push({ type, x: wx, d, h: hOf(type, sz), seed });
+    // a stand: more of the same (and a few of the others) round about
+    if (stand < 0.36) {
+      const rs = makeRng(seed ^ 0x5bd1e995), n = close ? 1 + Math.floor(rs() * 2) : 2 + Math.floor(rs() * 5);
+      for (let m = 0; m < n; m++) {
+        const a = rs() * 6.283, rad = 5 + 13 * Math.sqrt(rs()), v = rs(), t2 = rs() < 0.7 ? type : CACTUS_TYPES[Math.floor(rs() * 4)], sd = Math.floor(rs() * 4294967296) >>> 0;
+        const mx = wx + Math.cos(a) * rad * 1.5, md = clamp(d + Math.sin(a) * rad * (close ? 0.3 : 0.8), close ? 13 : 32.5, close ? 27 : 285);
+        const tt = close && (t2 === 'pear' || t2 === 'barrel') ? 'saguaro' : t2;
+        if (Math.abs(heightAt(W, mx, md) - sy) > 1.5 || busy(W, mx, md, 0, 30) || nearWild(W, mx, md, close ? 200 : 45) || !clearOfOasis(W, mx, md, 1.1)) continue;
+        L.push({ type: tt, x: mx, d: md, h: hOf(tt, v) * (0.75 + 0.25 * rs()), seed: sd });
+      }
+    }
+  }
+  if (W.cacti.size > 6000) W.cacti.clear();
+  W.cacti.set(i, L);
+  return L;
+}
+// Is there a cactus within rx metres along the line and rd across it of (wx, d)?
+function nearCactus(W, wx, d, rx, rd) {
+  for (let i = Math.floor((wx - rx - 30) / CC); i <= Math.floor((wx + rx + 30) / CC); i++) {
+    for (const c of cactiIn(W, i)) if (Math.abs(c.x - wx) < rx && Math.abs(c.d - d) < rd) return true;
+  }
+  return false;
+}
+// Every cactus of this chunk and band.
+function* cacti(ctx, out, W) {
+  for (const { i } of cellsAround(ctx, CC, 34)) {
+    for (const c of cactiIn(W, i)) {
+      if (c.d < ctx.zNear || c.d >= ctx.zFar || c.x < ctx.x0 - 12 || c.x > ctx.x0 + ctx.length + 12) continue;
+      const r = makeRng(c.seed);
+      if (c.type === 'saguaro') yield* saguaro(ctx, out, W, c, r);
+      else if (c.type === 'organ') yield* organPipe(ctx, out, W, c, r);
+      else if (c.type === 'pear') yield* pricklyPear(ctx, out, W, c, r);
+      else yield* barrels(ctx, out, W, c, r);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Wildlife
+// ---------------------------------------------------------------------------------------------
+// Herds of white oryx, parties of ostriches, vultures hunched on a dead tree with others wheeling
+// above it, and a pair of big-eared desert foxes at a rock near the line. Each is drawn well over
+// life size (BIG) and stands in the open 33 to 115 m out, where it can be seen; all answer the
+// beat (MOVE.BEAT), except the birds on the wing, which fly (MOVE.FLY). One chance per WLC metres
+// of line, a layer of its own (wildIn), clear of the camps, caravans, herds and tracks.
+const WLC = 560;
+const WILD_KINDS = ['oryx', 'ostrich', 'vultures', 'fox'];
+function wildIn(W, i) {
+  if (W.wild.has(i)) return W.wild.get(i);
+  const r = makeRng(hashInts(W.ws, 1301, i));
+  let w = null;
+  if (r() < 0.85) {
+    const kind = WILD_KINDS[pickW(r, [3, 2.4, 2, 1.8])];
+    const dLo = kind === 'fox' ? 33 : kind === 'vultures' ? 42 : 48, dHi = kind === 'fox' ? 44 : kind === 'vultures' ? 90 : 112;
+    const x = (i + 0.12 + 0.76 * r()) * WLC;
+    // the flattest open spot of a few, in sight of the line and clear of the places
+    let best = null, bv = 1e9;
+    for (let c = 0; c < 9; c++) {
+      const d = dLo + (dHi - dLo) * r(), wx = x + (r() - 0.5) * 90;
+      const sf = surface(W, wx, d, 0.6);
+      if (sf.oasis > 0 || sf.wadi > 0.3) continue;
+      let v = 0.3 * sf.dune + 8 * Math.hypot(sf.gx, sf.gd);
+      if (!seen(W, wx, d, 1.5)) v += 40;
+      if (!clearOfOasis(W, wx, d) || busy(W, wx, d, 22)) v += 40;
+      if (v < bv) { bv = v; best = [wx, d]; }
+    }
+    if (best && bv < 30) w = { kind, x: best[0], d: best[1], seed: hashInts(W.ws, 1302, i) };
+  }
+  if (W.wild.size > 4000) W.wild.clear();
+  W.wild.set(i, w);
+  return w;
+}
+//   front: how far toward the line from the animals the answer is still yes
+function nearWild(W, wx, d, front = 45) {
+  const i = Math.floor(wx / WLC);
+  for (let k = i - 1; k <= i + 1; k++) {
+    const w = wildIn(W, k);
+    if (w && Math.abs(wx - w.x) < 46 && d - w.d < 18 && d - w.d > -front) return true;
+  }
+  return false;
+}
+function* wildlife(ctx, out, W) {
+  for (const { i } of cellsAround(ctx, WLC, 120)) {
+    const w = wildIn(W, i);
+    if (!w || w.d < ctx.zNear || w.d >= ctx.zFar || w.x < ctx.x0 - 80 || w.x > ctx.x0 + ctx.length + 80) continue;
+    const r = makeRng(w.seed);
+    if (w.kind === 'oryx') yield* oryxHerd(ctx, out, W, w, r);
+    else if (w.kind === 'ostrich') yield* ostrichParty(ctx, out, W, w, r);
+    else if (w.kind === 'vultures') yield* vultureTree(ctx, out, W, w, r);
+    else yield* foxRock(ctx, out, W, w, r);
+  }
+}
+
+// A body part given by its half-extents (a along the unit direction, b, c across it): a splat shows
+// out to about one and two thirds of its radii, so the radii are that much smaller.
+function part(out, x, y, z, a, b, c, ux, uy, uz, col, kind) { ell(out, x, y, z, a * 0.6, b * 0.6, c * 0.6, ux, uy, uz, col, kind); }
+// An oryx, side on, in life-size metres (draw it through a magOut): a white antelope with a
+// shoulder hump, dark legs, a dark flank stripe and blaze, and two long straight horns swept back.
+function oryx(o, x, y0, d, dir, r, graze, st) {
+  const z = -d, X = (u) => x + dir * u, K = KIND.OTHER;
+  const w = jitter([0.78, 0.75, 0.68], r, 0.03), sh = mul3(w, 0.7), dk = [0.2, 0.15, 0.12], hn = [0.13, 0.11, 0.1];
+  const rl = limb(0.032, d);
+  for (const [lx, side] of [[0.4, -1], [-0.46, -1], [0.46, 1], [-0.4, 1]]) {
+    const lz = z + side * 0.09, sw = (side < 0 ? st : -st) * (lx > 0 ? 0.24 : -0.24);
+    strut(o, X(lx), y0 + 0.8, lz, X(lx + sw * 0.4), y0 + 0.42, lz, rl * 1.5, side < 0 ? sh : w, 1, 1, K);
+    strut(o, X(lx + sw * 0.4), y0 + 0.42, lz, X(lx + sw), y0 + 0.03, lz, rl, dk, 1, 1, K);
+  }
+  part(o, X(0), y0 + 0.98, z, 0.62, 0.28, 0.24, 1, 0.03 * dir, 0, w, K);                  // body
+  part(o, X(0.36), y0 + 1.1, z, 0.28, 0.25, 0.22, 1, 0, 0, w, K);                        // the shoulder
+  part(o, X(0.02), y0 + 0.8, z + 0.04, 0.5, 0.09, 0.2, 1, 0, 0, [0.32, 0.25, 0.2], K);   // dark flank stripe, belly in shade
+  const n1 = graze ? [0.86, 0.6] : [0.74, 1.38];                                         // the top of the neck
+  strut(o, X(0.5), y0 + 1.08, z, X(n1[0]), y0 + n1[1], z, limb(0.095, d), w, 2, 1, K);
+  const hx = n1[0] + (graze ? 0.08 : 0.14), hy = n1[1] + (graze ? -0.2 : 0.04), hv = graze ? -1.3 : -0.45;
+  part(o, X(hx), y0 + hy, z, 0.2, 0.085, 0.08, dir, hv, 0, w, K);                         // head
+  part(o, X(hx + 0.03), y0 + hy - 0.01, z + 0.05, 0.1, 0.045, 0.04, dir, hv, 0, dk, K);   // its dark blaze
+  const bx0 = n1[0] + 0.04, by0 = n1[1] + 0.09;
+  for (const sg of [-1, 1]) strut(o, X(bx0), y0 + by0, z + sg * 0.04, X(bx0 - (graze ? 0.6 : 0.36)), y0 + by0 + (graze ? 0.4 : 0.68), z + sg * 0.1, limb(0.016, d), hn, 2, 1, K);
+  strut(o, X(-0.6), y0 + 1.05, z, X(-0.7), y0 + 0.6, z, limb(0.018, d), w, 1, 1, K);     // tail
+  part(o, X(-0.71), y0 + 0.5, z, 0.09, 0.035, 0.035, 0.1, 1, 0, dk, K);                   // and its dark tuft
+}
+function* oryxHerd(ctx, out, W, w, r) {
+  const n = 5 + Math.floor(r() * 7), hd = r() < 0.5 ? 1 : -1;
+  for (let k = 0; k < n; k++) {
+    const wx = w.x + (k - (n - 1) / 2) * (4.6 + 1.6 * r()) + (r() - 0.5) * 3, d = Math.max(33, w.d + (r() - 0.5) * 15);
+    const dir = r() < 0.8 ? hd : -hd, graze = r() < 0.45, calf = k > 1 && r() < 0.16, st = r() - 0.5;
+    const y = heightAt(W, wx, d) - 0.04, X = wx - ctx.x0, kk = BIG.oryx * (calf ? 0.6 : 1);
+    note(calf ? 'oryx calf' : 'oryx', wx, d, (graze ? 1.2 : 2.1) * kk);
+    oryx(magOut(out, X, y, -d, kk, MOVE.BEAT), X, y, d, dir, r, graze, graze ? 0 : st);
+  }
+  if (out.due()) yield;
+}
+
+// An ostrich, side on, in life-size metres: a fat body on two long bare legs, a long thin neck and
+// a small head; the cock black with white plumes, the hen grey-brown. `peck`: neck down to the sand.
+function ostrich(o, x, y0, d, dir, r, male, peck) {
+  const z = -d, X = (u) => x + dir * u, K = KIND.OTHER;
+  const body = male ? [0.08, 0.08, 0.09] : jitter([0.3, 0.24, 0.19], r, 0.08), plume = male ? [0.78, 0.77, 0.74] : [0.5, 0.44, 0.36];
+  const skin = male ? [0.66, 0.42, 0.4] : [0.56, 0.45, 0.4];
+  const rl = limb(0.032, d), st = r() - 0.5;
+  for (const side of [-1, 1]) {
+    const lz = z + side * 0.1, sw = side * st * 0.5, ls = side < 0 ? mul3(skin, 0.78) : skin;
+    strut(o, X(0.02 + sw * 0.3), y0 + 1.12, lz, X(-0.1 + sw * 0.5), y0 + 0.62, lz, rl * 2.3, ls, 1, 1, K);       // thigh
+    strut(o, X(-0.1 + sw * 0.5), y0 + 0.62, lz, X(0.04 + sw), y0 + 0.03, lz, rl, ls, 2, 1, K);
+    strut(o, X(0.04 + sw), y0 + 0.03, lz, X(0.2 + sw), y0 + 0.03, lz, rl, ls, 1, 1, K);                         // foot
+  }
+  part(o, X(-0.04), y0 + 1.32, z, 0.56, 0.37, 0.32, 1, 0.14 * dir, 0, body, K);
+  part(o, X(-0.6), y0 + 1.38, z, 0.24, 0.2, 0.2, 1, 0.5 * dir, 0, plume, K);               // tail plumes
+  part(o, X(-0.14), y0 + 1.2, z + 0.26, 0.34, 0.13, 0.08, 1, -0.1 * dir, 0, plume, K);     // wing plumes
+  const n0 = [0.42, 1.5], n1 = peck ? [0.82, 1.02] : [0.5, 1.98], n2 = peck ? [0.94, 0.36] : [0.6, 2.42], rn = limb(0.042, d);
+  strut(o, X(n0[0]), y0 + n0[1], z, X(n1[0]), y0 + n1[1], z, rn * 1.25, skin, 2, 1, K);
+  strut(o, X(n1[0]), y0 + n1[1], z, X(n2[0]), y0 + n2[1], z, rn, skin, 2, 1, K);
+  const hy = n2[1] + (peck ? -0.07 : 0.02), hv = peck ? -0.9 : -0.1;
+  part(o, X(n2[0] + 0.07), y0 + hy, z, 0.11, 0.06, 0.06, dir, hv, 0, mul3(skin, 0.9), K);  // head
+  strut(o, X(n2[0] + 0.14), y0 + hy - (peck ? 0.06 : 0), z, X(n2[0] + 0.25), y0 + hy - (peck ? 0.16 : 0.03), z, limb(0.02, d), [0.6, 0.44, 0.28], 1, 1, K);   // bill
+}
+function* ostrichParty(ctx, out, W, w, r) {
+  const n = 3 + Math.floor(r() * 4), hd = r() < 0.5 ? 1 : -1;
+  for (let k = 0; k < n; k++) {
+    const wx = w.x + (k - (n - 1) / 2) * (5.2 + 2 * r()) + (r() - 0.5) * 3, d = Math.max(33, w.d + (r() - 0.5) * 12);
+    const dir = r() < 0.75 ? hd : -hd, male = k === 0 || r() < 0.35, peck = r() < 0.3;
+    const y = heightAt(W, wx, d) - 0.04, X = wx - ctx.x0;
+    note('ostrich', wx, d, (peck ? 1.7 : 2.5) * BIG.ostrich);
+    ostrich(magOut(out, X, y, -d, BIG.ostrich, MOVE.BEAT), X, y, d, dir, r, male, peck);
+  }
+  if (out.due()) yield;
+}
+
+// A vulture perched (life-size metres, y0 the perch): hunched dark body, pale ruff, bare neck
+// craned forward, hooked bill.
+function vulture(o, x, y0, d, dir, r) {
+  const z = -d, X = (u) => x + dir * u, K = KIND.OTHER;
+  const c = jitter([0.15, 0.12, 0.1], r, 0.1), pale = [0.74, 0.7, 0.62], bare = [0.72, 0.56, 0.5];
+  part(o, X(-0.02), y0 + 0.4, z, 0.36, 0.2, 0.19, -0.3 * dir, 1, 0, c, K);                    // hunched body
+  part(o, X(-0.1), y0 + 0.5, z + 0.09, 0.3, 0.13, 0.1, -0.35 * dir, 1, 0, mul3(c, 1.25), K);  // folded wing
+  part(o, X(-0.16), y0 + 0.02, z, 0.2, 0.07, 0.08, -0.25 * dir, 1, 0, mul3(c, 0.7), K);       // tail, below the perch
+  part(o, X(0.07), y0 + 0.7, z, 0.12, 0.08, 0.11, 1, 0, 0, pale, K);                          // the ruff
+  strut(o, X(0.08), y0 + 0.72, z, X(0.2), y0 + 0.88, z, limb(0.035, d), bare, 1, 1, K);      // bare neck
+  part(o, X(0.25), y0 + 0.89, z, 0.075, 0.055, 0.055, dir, -0.25, 0, bare, K);
+  strut(o, X(0.3), y0 + 0.88, z, X(0.37), y0 + 0.8, z, limb(0.018, d), [0.15, 0.13, 0.12], 1, 1, K);   // bill
+}
+// A vulture soaring: broad wings held in a shallow V (drawn up; the shader flaps them now and
+// then), fan tail, pale head. S is its scale; MOVE.FLY, so it only goes through flyBody / flyWing.
+function soarer(out, x, y, d, dir, S) {
+  const z = -d, c = [0.14, 0.11, 0.1], K = KIND.OTHER;
+  flyBody(out, x, y, z, 0.42 * S, 0.13 * S, c, Q_ID, K);
+  flyBody(out, x + dir * 0.45 * S, y + 0.02 * S, z, 0.1 * S, 0.07 * S, [0.7, 0.62, 0.55], Q_ID, K);
+  flyBody(out, x - dir * 0.5 * S, y, z, 0.22 * S, 0.1 * S, c, Q_ID, K);
+  for (const sg of [-1, 1]) {
+    const mx = x - dir * 0.05 * S, my = y + 0.24 * S, mz = z + sg * 0.7 * S;
+    flyWing(out, x, y, z + sg * 0.08 * S, mx, my, mz, limb(0.15 * S, d), c, 2, y, K);
+    flyWing(out, mx, my, mz, x - dir * 0.12 * S, y + 0.55 * S, z + sg * 1.35 * S, limb(0.12 * S, d), mul3(c, 1.3), 2, y, K);
+  }
+}
+// A dead tree: a pale leaning trunk forking into a few bare crooked boughs. Returns the bough ends.
+function snag(out, x, y0, d, r) {
+  const z = -d, K = KIND.TREE, wood = jitter([0.4, 0.34, 0.28], r, 0.06), dk = mul3(wood, 0.6);
+  const H = 8 + 2.5 * r(), lean = (r() - 0.5) * 0.3, rt = limb(0.26, d);
+  const tx = x + lean * H * 0.55, ty = y0 + H * 0.55;
+  strut(out, x, y0 - 0.3, z, tx, ty, z, rt, wood, 5, 1, K);
+  strut(out, x + rt * 0.55, y0 - 0.3, z + 0.08, tx + rt * 0.5, ty, z + 0.08, rt * 0.5, dk, 5, 1, K);
+  const ends = [];
+  const nb = 3 + Math.floor(r() * 2);
+  for (let b = 0; b < nb; b++) {
+    const side = b % 2 ? 1 : -1, a = 0.45 + 0.6 * r(), L = H * (0.3 + 0.2 * r()), t = b < 2 ? 1 : 0.5 + 0.35 * r(), dz = (r() - 0.5) * 0.9;
+    const bx = x + (tx - x) * t, by = y0 + (ty - y0) * t;
+    const mx = bx + side * Math.sin(a) * L * 0.6, my = by + Math.cos(a) * L * 0.6, mz = z + dz * 0.5;
+    const ex = mx + side * Math.sin(a * 1.5) * L * 0.5, ey = my + Math.cos(a * 1.5) * L * 0.5, ez = z + dz;
+    strut(out, bx, by, z, mx, my, mz, rt * 0.6, wood, 3, 1, K);
+    strut(out, mx, my, mz, ex, ey, ez, rt * 0.4, wood, 2, 1, K);
+    strut(out, mx, my, mz, mx - side * L * 0.12, my + L * 0.3, mz, rt * 0.3, dk, 1, 1, K);      // a broken twig
+    ends.push([ex, ey, ez]);
+  }
+  return ends;
+}
+function* vultureTree(ctx, out, W, w, r) {
+  const X = w.x - ctx.x0, y0 = heightAt(W, w.x, w.d);
+  plantShadow(out, X, y0 + 0.2, w.d, 3, 0.5);
+  const ends = snag(out, X, y0, w.d, r);
+  const k = BIG.vulture;
+  note('vultures', w.x, w.d, 9);
+  for (const [ex, ey, ez] of ends) {
+    if (r() < 0.25) continue;
+    const dir = r() < 0.5 ? 1 : -1, py = ey - 0.12;
+    vulture(magOut(out, ex, py, ez, k, MOVE.BEAT), ex, py, -ez, dir, r);
+  }
+  // one on the sand below, now and then, and a few wheeling above
+  if (r() < 0.5) { const gx = w.x + (r() < 0.5 ? -1 : 1) * (4 + 3 * r()), gd = w.d - 2 * r(), gy0 = heightAt(W, gx, gd); vulture(magOut(out, gx - ctx.x0, gy0, -gd, k, MOVE.BEAT), gx - ctx.x0, gy0, gd, r() < 0.5 ? 1 : -1, r); }
+  const fc = flightCell(w.x), nf = 1 + Math.floor(r() * 3);
+  for (let f = 0; f < nf; f++) {
+    const fx = fc.wx + (r() - 0.5) * 13, fd = Math.max(34, w.d + (r() - 0.5) * 16), fy = y0 + 13 + 9 * r() + 0.08 * w.d;
+    soarer(out, fx - ctx.x0, fy, fd, fc.dir, BIG.vulture * 1.25);
+  }
+  if (out.due()) yield;
+}
+
+// A desert fox (a fennec, drawn several times life size), in life-size metres: a small sandy-red
+// body, a pale chest, a pointed muzzle, a bushy dark-tipped tail and enormous ears.
+function fox(o, x, y0, d, dir, r, sitting) {
+  const z = -d, X = (u) => x + dir * u, K = KIND.OTHER;
+  const c = jitter([0.68, 0.46, 0.26], r, 0.06), cs = mul3(c, 0.72), pale = [0.78, 0.72, 0.6], dk = [0.16, 0.12, 0.1];
+  let hx, hy;
+  if (sitting) {
+    part(o, X(-0.07), y0 + 0.09, z, 0.12, 0.09, 0.09, 1, 0, 0, cs, K);                    // haunches
+    part(o, X(0), y0 + 0.19, z, 0.16, 0.08, 0.08, 0.4 * dir, 1, 0, c, K);                // torso, upright
+    part(o, X(0.05), y0 + 0.2, z + 0.04, 0.1, 0.04, 0.04, 0.3 * dir, 1, 0, pale, K);     // pale chest
+    for (const sg of [-1, 1]) strut(o, X(0.08), y0 + 0.2, z + sg * 0.03, X(0.1), y0 + 0.01, z + sg * 0.03, limb(0.014, d), c, 1, 1, K);
+    strut(o, X(-0.16), y0 + 0.05, z + 0.04, X(-0.38), y0 + 0.05, z + 0.08, limb(0.032, d), c, 2, 1, K);   // tail, laid out behind
+    part(o, X(-0.4), y0 + 0.05, z + 0.08, 0.05, 0.035, 0.035, 1, 0, 0, dk, K);
+    hx = 0.1; hy = 0.37;
+  } else {
+    for (const [lx, sg] of [[0.13, -1], [-0.13, -1], [0.15, 1], [-0.11, 1]]) strut(o, X(lx), y0 + 0.17, z + sg * 0.03, X(lx + 0.01), y0 + 0.01, z + sg * 0.03, limb(0.014, d), sg < 0 ? cs : c, 1, 1, K);
+    part(o, X(0), y0 + 0.21, z, 0.19, 0.075, 0.07, 1, 0.03 * dir, 0, c, K);
+    part(o, X(0.03), y0 + 0.17, z + 0.03, 0.13, 0.03, 0.05, 1, 0, 0, pale, K);
+    strut(o, X(-0.18), y0 + 0.2, z, X(-0.4), y0 + 0.1, z, limb(0.032, d), c, 2, 1, K);   // tail
+    part(o, X(-0.42), y0 + 0.09, z, 0.05, 0.035, 0.035, 1, 0.4 * dir, 0, dk, K);
+    strut(o, X(0.16), y0 + 0.23, z, X(0.23), y0 + 0.3, z, limb(0.04, d), c, 1, 1, K);    // neck
+    hx = 0.25; hy = 0.32;
+  }
+  part(o, X(hx), y0 + hy, z, 0.065, 0.052, 0.05, dir, -0.15, 0, c, K);                    // head
+  part(o, X(hx + 0.065), y0 + hy - 0.015, z, 0.036, 0.02, 0.02, dir, -0.2, 0, pale, K);  // muzzle
+  o(X(hx + 0.1), y0 + hy - 0.02, z, 0.013, 0.013, 0.013, dk[0], dk[1], dk[2], 1, 0, 0, 0, 1, K);
+  o(X(hx + 0.03), y0 + hy + 0.012, z + 0.045, 0.012, 0.012, 0.01, dk[0], dk[1], dk[2], 1, 0, 0, 0, 1, K);   // eye
+  for (const sg of [-1, 1]) {                                                            // the ears: a tall V
+    const ex = X(hx - 0.015) + sg * 0.04, ey = y0 + hy + 0.125, ez = z + sg * 0.02, ax = sg * 0.36 - 0.05 * dir;
+    part(o, ex, ey, ez, 0.1, 0.046, 0.02, ax, 1, sg * 0.2, cs, K);
+    part(o, ex, ey - 0.005, ez + 0.012, 0.072, 0.026, 0.012, ax, 1, sg * 0.2, [0.76, 0.62, 0.52], K);
+  }
+}
+// Two foxes at a low dark rock near the line: one sitting up on a ledge, one standing below.
+function* foxRock(ctx, out, W, w, r) {
+  const X = w.x - ctx.x0, d = w.d, y0 = heightAt(W, w.x, d), k = BIG.fox;
+  note('fox', w.x, d, 0.6 * k);
+  // the rock: dark slabs, lit along the top, behind the foxes so they stand out against it
+  const rc = jitter(C.rockDark, r, 0.1), rt = mul3(C.rock, 1.15);
+  out(X + 2.6, y0 + 0.08, -(d + 1.2), 3.4, 0.02, 1.6, SHADOW[0], SHADOW[1], SHADOW[2], 0.55, 0, 0, 0, 1, KIND.GROUND);
+  for (const [u, h, w, dd, k2] of [[-0.6, 2.9, 2.0, 1.9, 1], [1.6, 2.2, 1.7, 1.7, 0.85], [-2.6, 1.7, 1.3, 1.6, 1.1], [3.4, 1.2, 1.2, 1.4, 0.9]]) {
+    out(X + u, y0 + h * 0.42, -(d + dd), w, h * 0.5, 0.9, rc[0] * k2, rc[1] * k2, rc[2] * k2, 1, 0, 0, 0, 1, KIND.ROCK);
+    out(X + u - w * 0.2, y0 + h * 0.86, -(d + dd), w * 0.6, h * 0.1, 0.7, rt[0] * k2, rt[1] * k2, rt[2] * k2, 1, 0, 0, 0, 1, KIND.ROCK);   // lit along the top
+  }
+  out(X - 2.1, y0 + 0.4, -(d + 0.8), 1.1, 0.34, 0.7, C.rockDark[0] * 1.25, C.rockDark[1] * 1.25, C.rockDark[2] * 1.25, 1, 0, 0, 0, 1, KIND.ROCK);   // the ledge
+  const dir = r() < 0.5 ? 1 : -1;
+  fox(magOut(out, X - 2.1, y0 + 0.72, -(d + 0.5), k, MOVE.BEAT), X - 2.1, y0 + 0.72, d + 0.5, dir, r, true);
+  if (r() < 0.75) { const fx = X + 0.6 + 1.6 * r(), fd = d - 0.4 - r(), fy = heightAt(W, ctx.x0 + fx, fd); fox(magOut(out, fx, fy, -fd, k, MOVE.BEAT), fx, fy, fd, r() < 0.5 ? 1 : -1, r, r() < 0.4); }
+  if (out.due()) yield;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2312,6 +2939,7 @@ function* trackside(ctx, emit) {
   out.limit = N * (0.3 + 0.2 * dk);
   yield* poleLine(ctx, out, W);
   yield* places(ctx, out, W);
+  yield* cacti(ctx, out, W);
   yield* sandFences(ctx, out, W);
   yield* kmPosts(ctx, out);
   yield* culverts(ctx, out, W);
@@ -2339,7 +2967,10 @@ function* near(ctx, emit) {
   const N = ctx.count;
   const dz = dials(ctx);
   out.limit = N * 0.62;
+  // (people, animals and cacti first: they are few splats, and nothing after them may crowd them out)
   yield* places(ctx, out, W);
+  yield* wildlife(ctx, out, W);
+  yield* cacti(ctx, out, W);
   yield* oases(ctx, out, W, ctx.zNear, ctx.zFar, 0, N * 0.45);
   yield* rareNear(ctx, out, W, ctx.zNear, ctx.zFar);
   if ((dz.logic || 0) > 0) { yield* repeatingPalm(ctx, out, W, dz.logic); yield* repeatingCaravan(ctx, out, W, dz.logic); }
@@ -2390,24 +3021,27 @@ export const dunesBiome = {
   // biome (jebelH) so it can be gated to some stretches and carved.
   terrain: { cutting: 0.8, roll: 4, rollScale: 260, rise: 0.02, hills: 70, hillScale: 1800, mountains: 0, mountainScale: 9000, mountainStart: 7000 },
   hazeDist: 9000,
-  // On the beat, the things a viewer can pick out swell and brighten: palms, acacias and tamarisks
-  // (TREE), houses, towers, forts, tents and wells (BUILDING), and, tagged MOVE.BEAT by hand,
-  // camels, goats, people and lorries. The sand itself (the high ground here) stays still: a swell
+  // On the beat, the things a viewer can pick out swell and brighten: palms, acacias, tamarisks and
+  // cacti (TREE), houses, towers, forts, tents and wells (BUILDING), and, tagged MOVE.BEAT by hand,
+  // camels, goats, people, lorries, oryx, ostriches, perched vultures and foxes. The sand itself (the high ground here) stays still: a swell
   // on a mass of overlapping sand splats could not be seen.
   beatKinds: [KIND.TREE, KIND.BUILDING],
   generators: { trackside, near, mid, far },
 };
 
-// layout(seed, x0, x1): the places, oases and wadis between world x0 and x1, for finding things.
+// layout(seed, x0, x1, cactiToo): the places, oases, wadis and animals (and, if asked, every cactus)
+// between world x0 and x1, for finding things.
 // `seed` is the numeric world seed (as the engine's S.seed) or a string (hashed as the previews do).
-function layout(seed, x0, x1) {
+function layout(seed, x0, x1, cactiToo = false) {
   if (typeof seed === 'string') { let h = 2166136261 >>> 0; for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); } seed = h >>> 0; }
   const W = world({ terrain: makeTerrain(seed, dunesBiome.terrain), seed });
   const list = [];
   for (let i = Math.floor(x0 / PC); i <= Math.floor(x1 / PC); i++) for (const p of placesIn(W, i)) if (p.x >= x0 && p.x < x1) list.push({ kind: p.kind + (p.kind === 'fort' && p.ruin ? ' (ruin)' : ''), x: Math.round(p.kind === 'track' ? trackX(p, p.truck) : p.x), d: Math.round(p.kind === 'track' ? p.truck : p.d) });
   for (let i = Math.floor(x0 / OC); i <= Math.floor(x1 / OC); i++) { const o = oasisIn(W, i); if (o && o.cx >= x0 && o.cx < x1) list.push({ kind: 'oasis', x: Math.round(o.cx), d: Math.round(o.dc) }); }
   for (let i = Math.floor(x0 / WC); i <= Math.floor(x1 / WC); i++) { const w = wadiIn(W, i); if (w && w.x0 >= x0 && w.x0 < x1) list.push({ kind: 'wadi', x: Math.round(w.x0), d: 0 }); }
+  for (let i = Math.floor(x0 / WLC); i <= Math.floor(x1 / WLC); i++) { const w = wildIn(W, i); if (w && w.x >= x0 && w.x < x1) list.push({ kind: w.kind, x: Math.round(w.x), d: Math.round(w.d) }); }
+  if (cactiToo) for (let i = Math.floor(x0 / CC); i <= Math.floor(x1 / CC); i++) for (const c of cactiIn(W, i)) if (c.x >= x0 && c.x < x1) list.push({ kind: c.type, x: Math.round(c.x), d: Math.round(c.d), h: +c.h.toFixed(1) });
   return list.sort((a, b) => a.x - b.x);
 }
 
-export const _debug = { world, surface, heightAt, oasisIn, wadiIn, starIn, placesIn, layout, OC, WC, PC };
+export const _debug = { world, surface, heightAt, oasisIn, wadiIn, starIn, placesIn, wildIn, cactiIn, layout, OC, WC, PC, WLC, CC, BIG };
