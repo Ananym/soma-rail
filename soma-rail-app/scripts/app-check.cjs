@@ -98,8 +98,15 @@ const outDir = process.argv[2] || '.';
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
       // a tap on the glass brings the overlay up; another puts it away
       T.hiddenAtFirst = !(await shown());
+      const playing = () => page.evaluate(() => document.querySelector('audio').src);
+      const srcBefore = await playing();
       await page.touchscreen.tap(195, 420);
       T.shownAfterTap = await until(shown, 4000);
+      await page.waitForTimeout(1500);
+      T.tapPressedNothing = (await playing()) === srcBefore;     // the tap that reveals the channels must not choose one
+      // (a slow renderer may have let it fade already: bring it back first, then tap it away)
+      if (!(await shown())) await press('canvas');
+      T.shownBeforeSecondTap = await shown();
       await press('canvas');
       T.hiddenAfterSecondTap = await until(async () => !(await shown()), 3000);
       await press('canvas');
@@ -147,7 +154,7 @@ const outDir = process.argv[2] || '.';
       await page.screenshot({ path: path.join(outDir, 'app-touch-landscape.png'), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
       await page.evaluate(() => clearInterval(window.__keep));
       const lay = (l) => l.inside && l.apart && l.canvas[0] === l.view[0] && l.canvas[1] === l.view[1];
-      T.ok = T.mediaQuery && T.touchClass && T.noDistraction && T.hiddenAtFirst && T.shownAfterTap && T.hiddenAfterSecondTap && T.controlsOk && T.noVolume
+      T.ok = T.mediaQuery && T.touchClass && T.noDistraction && T.hiddenAtFirst && T.shownAfterTap && T.tapPressedNothing && T.hiddenAfterSecondTap && T.controlsOk && T.noVolume
         && T.pausedAudio && T.pausedTrain && T.playsAgain && T.silentInBackground && T.stillSilent && T.resumesOnReturn && T.noResumePrompt
         && lay(T.portrait) && lay(T.landscape) && Math.abs(T.engineAspect - 844 / 390) < 0.05;
       brake = T;

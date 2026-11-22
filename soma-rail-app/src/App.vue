@@ -377,6 +377,7 @@ onMounted(() => {
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;      /* no double-tap zoom on the glass */
+  cursor: pointer;                 /* iOS sends no click for a tap on plain glass otherwise, and a tap is how the overlay is asked for */
 }
 
 /* With a mouse the wrapper does nothing: each panel is fixed in its own corner. */
