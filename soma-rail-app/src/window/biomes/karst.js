@@ -8,9 +8,13 @@
 // nothing jumps at a chunk seam or a band border. Only the ground fill uses the chunk's own rng.
 //
 // The towers are PROPS standing on a flat terrain (karstTower below). Each tower's shape and colour
-// is a pure function of its site hash, and its splat count depends only on its size, distance and
-// the budget density (never on what else is in the chunk), so a tower cut by a chunk border is
-// generated identically by both chunks and the halves meet.
+// is a pure function of its site hash, and its splat count depends only on its size, distance, the
+// budget density and how crowded the world is around it (never on where the chunk borders fall),
+// so a tower cut by a chunk border is generated identically by both chunks and the halves meet.
+//
+// The beat: the towers and hills stay still (beatKinds below); houses, pagodas, trees, boats,
+// buffalo and village lanterns answer it. Mist and kitchen smoke billow (MOVE.VAPOUR), washing and
+// boat pennants flutter (MOVE.FLAG).
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     towers of impossible height and thinness rising into the sky
@@ -20,7 +24,7 @@
 //   logic     the same pagoda on the same mound repeating along the line, each copy slightly wrong
 import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
 import {
-  KIND, makeOut, worldSeed, worldRng, cellsAround, groundY, detail, shade, jitter, mul3, mix3, smooth,
+  KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, groundY, detail, shade, jitter, mul3, mix3, smooth,
   clamp, lerp, norm3, quatYaw, quatPitch, quatMul, quatUpTo, overheadLine, lamp, blob, stick, treeSplats,
 } from './kit.js';
 
@@ -36,7 +40,8 @@ const C = {
   rock: [0.64, 0.63, 0.59],         // grey-white limestone
   rockWarm: [0.62, 0.55, 0.45],     // iron-stained patches
   streak: [0.3, 0.31, 0.3],         // water streaks running down the faces
-  cave: [0.05, 0.05, 0.05],
+  cave: [0.1, 0.09, 0.08],
+
   veg: [0.1, 0.18, 0.08],           // the dark green that clings to every ledge
   vegLit: [0.18, 0.3, 0.12],
   paddyWater: [0.57, 0.63, 0.64],   // flooded paddy: lighter than the land, a little sky in it
@@ -540,20 +545,39 @@ function* fillSurface(ctx, out, W, opts = {}) {
 // terraceHill, pagoda, pavilion, archBridge. All share the kit's shape: function* (ctx, out, x, d, opts).
 // ---------------------------------------------------------------------------------------------
 
-// A limestone tower: steep, near-vertical grey-white faces streaked dark by water, dense dark
-// vegetation on the ledges and capping the round top, a skirt of trees at the foot, now and then a
-// cave mouth. One to three lobes (double summits, shoulders), a superellipse profile with a flared
-// foot, lean, fluting and lumpy azimuth make every tower different. Shape and colour are pure
-// functions of opts.rng, so a tower split by a chunk border matches up.
+// A limestone tower: a solid of steep, near-vertical grey-white cliffs streaked darker by water,
+// a cap of dark growth over the rounded top and shoulders, green ledges crossing the cliffs, growth
+// hanging down the gullies, a skirt of trees at the foot and now and then a cave mouth. One to
+// three lobes (double summits, shoulders), a superellipse profile with a flared foot, lean and a
+// lumpy outline make every tower different.
+//
+// How it is drawn, so that it reads as a crisp solid at any distance and budget:
+// - The visible surface (+-130 degrees round from the camera side) is tiled on a jittered grid of
+//   flat discs lying in the true (bumpy, stepped) surface, each about 0.72 of its cell, so
+//   neighbours overlap into an opaque skin with no see-through gaps. Where the surface turns away
+//   at the outline the discs are seen edge on, and the outline is as thin as a disc is thick: a
+//   clean edge, never a halo. Splat count, not splat size, is what the budget changes.
+// - Behind the skin, a card of larger splats inset well inside the outline (the opaque core).
+// - Towers take their splats by their size on screen (towerSplats, the same K in mid and far), so
+//   their grain does not change at 3000 m; the valley floor behind is a thin strip on screen and
+//   gets what is left.
+// - Colour comes from coherent features laid out in the tower's own metres (cap, ledges, gullies,
+//   vertical streaks), never finer than the grid, and is lit from the surface normal against SUN,
+//   so every tower has a lit (-x) side and a shaded (+x) side.
+// Shape and colour are pure functions of opts.rng and n, so a tower split by a chunk border is
+// generated identically by both chunks and the halves meet.
 //   opts: { height, radius, rng, n, y (base), kind, mist (0..1: mist wrapping the foot), green (0..1),
-//           thin (0..1: level-1 needles), fadeTop (metres: fade into the sky above this) }
+//           thin (0..1: level-1 needles), fadeTop (metres: fade into the sky above this),
+//           aerial (0..1: bake some aerial perspective in), move (motion class for every splat) }
+const AERIAL = [0.6, 0.67, 0.74];
+const PROF_N = 64;
 export function* karstTower(ctx, out, x, d, opts = {}) {
   const rng = opts.rng || ctx.rng;
   const H = opts.height || 180, R = opts.radius || H * 0.35;
   const y0 = opts.y != null ? opts.y : groundY(ctx, x, d) - 1;
   const kind = opts.kind != null ? opts.kind : KIND.ROCK;
   const n = Math.max(6, Math.round(opts.n || 400));
-  // shape
+  // --- shape (the draw order of rng() here is part of the tower's identity) ---
   // three families: rounded domes, tapering sugarloaves, sheer columns
   const fam = rng();
   const p = fam < 0.45 ? 3 + 2 * rng() : fam < 0.7 ? 2.0 + 0.8 * rng() : 6 + 5 * rng();
@@ -562,7 +586,7 @@ export function* karstTower(ctx, out, x, d, opts = {}) {
   const leanX = (rng() - 0.5) * 0.22, leanD = (rng() - 0.5) * 0.12;
   const bulge = (rng() - 0.35) * 0.2;
   const salt = Math.floor(rng() * 60000);
-  const ph1 = rng() * 6.28, ph2 = rng() * 6.28, a1 = 0.05 + 0.1 * rng(), a2 = 0.04 + 0.08 * rng();
+  const ph1 = rng() * 6.28, ph2 = rng() * 6.28, a1 = 0.04 + 0.08 * rng(), a2 = 0.03 + 0.06 * rng();
   const lobes = [{ ox: 0, oz: 0, h: 1, r: 1 }];
   if (rng() < 0.5) {
     const m = rng() < 0.35 ? 2 : 1;
@@ -572,106 +596,218 @@ export function* karstTower(ctx, out, x, d, opts = {}) {
   const warm = rng() * 0.7;
   const caves = [];
   const nc = rng() < 0.55 ? 1 + (rng() < 0.3 ? 1 : 0) : 0;
-  for (let k = 0; k < nc; k++) caves.push({ a: (rng() - 0.5) * 1.4, t: 0.05 + 0.3 * rng(), w: 0.05 + 0.07 * rng(), h: 0.025 + 0.04 * rng() });
-  const mistTop = (opts.mist || 0) * H * 0.25;
-  const fadeTop = opts.fadeTop || 0;
-  const thin = opts.thin || 0;
-  const prof = (t) => {
+  for (let k = 0; k < nc; k++) caves.push({ a: (rng() - 0.5) * 1.4, t: 0.06 + 0.3 * rng(), w: (0.05 + 0.07 * rng()) * Math.min(1, 40 / R), h: (0.025 + 0.04 * rng()) * Math.min(1, 120 / H) });
+  const ledges = [];
+  const nl = 1 + Math.floor(rng() * 3);
+  for (let k = 0; k < nl; k++) ledges.push({ t: 0.22 + 0.55 * rng(), w: 0.012 + 0.022 * rng(), ph: rng() * 6.28, s: salt + 40 + k, k: rng() < 0.7 ? 0.03 + 0.08 * rng() : 0 });
+  const capThr = 0.5 - 0.3 * (green - 0.5);           // how gentle a slope must be to be clothed
+  const gullyThr = 0.7 - 0.12 * green;                  // share of the cliffs cut by hanging gullies
+  const mist = opts.mist || 0, fadeTop = opts.fadeTop || 0, thin = opts.thin || 0;
+  const aerial = opts.aerial || 0, move = opts.move || 0;
+  // --- the profile, tabulated once: radius (fraction of the lobe radius) at height fraction t ---
+  const prof = new Float32Array(PROF_N + 1);
+  for (let i = 0; i <= PROF_N; i++) {
+    const t = Math.min(i / PROF_N, 0.9995);
     const base = Math.pow(Math.max(0, 1 - Math.pow(t, p)), 1 / q);
-    return base * (1 + 0.32 * Math.exp(-t / 0.06)) * (1 + bulge * Math.sin(Math.PI * t)) * (1 - taper * t) * (1 - thin * 0.4 * t);
+    prof[i] = base * (1 + 0.32 * Math.exp(-t / 0.06)) * (1 + bulge * Math.sin(Math.PI * t)) * (1 - taper * t) * (1 - thin * 0.4 * t);
+  }
+  const prAt = (t) => { const f = clamp(t, 0, 1) * PROF_N, i = Math.min(PROF_N - 1, Math.floor(f)), u = f - i; return prof[i] + (prof[i + 1] - prof[i]) * u; };
+  // outline bulges, notches and overhangs: around (metres of arc) and up (metres)
+  // (the cliffs step back above most ledges, so the outline has shoulders and the ledge tops face up)
+  let fineU = 1, fineH = 1;
+  const stepAt = (tt) => { let k = 1; for (const L of ledges) if (L.k) k *= 1 + L.k * smooth(L.t + 0.025, L.t - 0.015, tt); return k; };
+  const radAt = (a, tt, Rl, Hl) => {
+    const u = a * Rl, h = tt * Hl;
+    let k = 1 + a1 * Math.cos(a + ph1) + a2 * Math.cos(2 * a + ph2)
+      + 0.28 * (noise2(u / (Rl * 0.45 + 4), h / (Hl * 0.16 + 3), salt) - 0.5)
+      + 0.1 * (noise2(u / fineU, h / fineH, salt + 15) - 0.5);
+    return Rl * prAt(tt) * k * stepAt(tt);
   };
-  const az = (a, t, Rl) => 1 + a1 * Math.cos(a + ph1) + a2 * Math.cos(2 * a + ph2)
-    + 0.18 * (noise2(a * Rl / 24, t * H / 34, salt) - 0.5) + 0.12 * (noise2(a * Rl / 8, t * H / 70, salt + 1) - 0.5)
-    + 0.3 * (noise2(a * Rl / 50, t * H / 22, salt + 8) - 0.5);      // bulges, notches and overhangs up the outline
-  let wsum = 0;
-  for (const l of lobes) { l.w = l.h * l.r; wsum += l.w; }
-  const AMAX = 2.3;                       // the camera-facing part of the surface, +-130 degrees
-  const pick = () => { let u = rng() * wsum; for (const l of lobes) { u -= l.w; if (u <= 0) return l; } return lobes[0]; };
-  // an opaque core: a few big splats well inside the silhouette, so sky never shows through
-  const nCore = Math.max(1, Math.round(n * 0.05));
-  const coreC = mix3(mix3(C.rock, C.veg, 0.55), C.streak, 0.3);
-  for (let i = 0; i < nCore; i++) {
-    const l = pick(), Hl = H * l.h, Rl = R * l.r;
-    const t = 0.1 + rng() * 0.8, pr = prof(t);
-    const cx = x + l.ox + leanX * Hl * t * t, cd = d + l.oz + leanD * Hl * t * t;
-    const sz = Rl * pr * 0.3 + 0.01;
-    const c = shade(coreC, 0, 0.3, 1, 0.55, 0.4);
-    out(cx, y0 + t * Hl, -(cd + Rl * pr * 0.2), sz, Math.min(sz, Hl * 0.07, t * Hl * 0.4) + 0.01, sz, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
-    if (out.due()) yield;
-  }
-  const nS = n - nCore;
-  const totalA = lobes.reduce((s, l) => s + 2 * AMAX * R * l.r * H * l.h * 0.75, 0);
-  for (let i = 0; i < nS; i++) {
-    const l = pick(), Hl = H * l.h, Rl = R * l.r;
-    const t = 1 - Math.pow(1 - (i + rng()) / nS, 1.12) ;
-    const tt = clamp(t, 0, 0.999);
-    const a = (rng() * 2 - 1) * AMAX;
-    const pr = prof(tt), e = 0.01;
-    const rad = Rl * pr * az(a, tt, Rl);
-    const drdh = (prof(Math.min(0.999, tt + e)) - prof(Math.max(0, tt - e))) / (2 * e) * Rl / Hl;
-    const slant = Math.min(4, Math.sqrt(1 + drdh * drdh));
-    // outward normal: radial, tilted up where the profile closes in (ledges, the dome)
-    let nx = Math.sin(a), nz = Math.cos(a), ny = -drdh;
-    const nl = Math.hypot(nx, ny, nz); nx /= nl; ny /= nl; nz /= nl;
-    const cx = x + l.ox + leanX * Hl * tt * tt, cd = d + l.oz + leanD * Hl * tt * tt;
-    const h = tt * Hl;
-    // splat size from the local area per sample
-    const areaLocal = 2 * AMAX * Math.max(rad, Rl * 0.05) * Hl * slant;
-    let s = Math.sqrt(3.2 * areaLocal / (Math.PI * nS * (l.w / wsum)));
-    // smaller toward the silhouette, where the surface is foreshortened and samples crowd on screen:
-    // the outline stays crisp
-    s *= 0.5 + 0.5 * Math.abs(Math.cos(a));
-    s = clamp(s, 0.02, Math.max(0.3, Rl * 0.3));
-    void totalA;
-    // vegetation or rock?
-    const ledge = noise2(a * Rl / 45, h / 6, salt + 2);
-    const patch = noise2(a * Rl / 55, h / 40, salt + 3);
-    // vertical faces show bare rock, cut by horizontal bands of growth on the ledges; anything less
-    // steep (shoulders, the dome) is covered
-    const steep = smooth(1.0, 0.25, -drdh);
-    // bare cliffs: tall vertical strips of the steep faces; everything else is clothed in growth,
-    // and the cliffs carry thin lines of it on their ledges and hanging down them
-    const cn = 0.65 * noise2(a * Rl / 30, h / 65, salt + 10) + 0.35 * noise2(a * Rl / 11, h / 30, salt + 11);
-    const cliff = smooth(0.52, 0.63, cn + 0.2 * (steep - 0.5) - 0.35 * (green - 0.7));
-    const drape = noise2(a * Rl / 7, h / 45, salt + 9);
-    const vegP = 0.95 + (opts.dark || 0) * 0.5 - 1.1 * cliff + 0.5 * cliff * smooth(0.62, 0.75, ledge) + 0.35 * (patch - 0.5) + 0.3 * (drape - 0.5) - 0.15 * steep
-      + 0.9 * smooth(0.1, 0.02, tt)                         // the skirt of trees at the foot
-      + 0.3 * smooth(0.8, 0.96, tt);
-    const veg = vegP + (rng() - 0.5) * 0.12 > 0.5 - 0.08 * thin;
-    let c;
-    if (veg) {
-      c = mix3(C.veg, C.vegLit, 0.2 + 0.5 * rng() * noise2(a * Rl / 6, h / 6, salt + 5));
-      c = shade(c, nx, ny, nz, 0.5, 0.6);
-    } else {
-      c = mix3(C.rock, C.rockWarm, warm * smooth(0.45, 0.75, noise2(a * Rl / 40, h / 50, salt + 6)));
-      if (opts.dark) c = mul3(c, 1 - opts.dark);
-      // dark streaks running down from the ledges
-      const st = noise2(a * Rl / 6, h / 90, salt + 4);
-      const under = smooth(0.4, 0.7, noise2(a * Rl / 30, (h + 10) / 7, salt + 2));
-      c = mix3(c, C.streak, smooth(0.42, 0.75, st) * (0.55 + 0.4 * under));
-      c = mul3(c, 0.82 + 0.26 * noise2(a * Rl / 3, h / 2.5, salt + 7));      // bedding and texture
-      for (const cv of caves) {
-        if (l !== lobes[0]) break;
-        const da = (a - cv.a) / cv.w, dt = (tt - cv.t) / cv.h;
-        if (da * da + dt * dt < 1) { c = C.cave; break; }
-      }
-      c = shade(c, nx, ny, nz, 0.42, 0.7);
+  const slack = a1 + a2 + 0.2;                          // how far inside the profile the outline can dip
+  // --- grid spacing from the visible surface area of all lobes ---
+  const AMAX = 2.3;                                     // the camera-facing part, +-130 degrees
+  let area = 0;
+  for (const l of lobes) {
+    const Hl = H * l.h, Rl = R * l.r;
+    let A = 0, S = 0;
+    l.cum = new Float32Array(PROF_N + 1);
+    for (let i = 1; i <= PROF_N; i++) {
+      const dr = (prof[i] - prof[i - 1]) * Rl, dh = Hl / PROF_N;
+      const ds = Math.hypot(dr, dh);
+      S += ds; l.cum[i] = S;
+      A += 2 * (AMAX + (Math.PI - AMAX) * smooth(0.25, 0.8, -dr / ds)) * Rl * 0.5 * (prof[i] + prof[i - 1]) * ds;
     }
-    c = jitter(c, rng, 0.06);
-    let o = 1;
-    if (mistTop > 0 && h < mistTop) c = mix3(c, C.mist, 0.75 * (opts.mist || 0) * (1 - h / mistTop));
-    if (fadeTop && y0 + h > fadeTop) { const f = smooth(fadeTop, fadeTop + H * 0.3, y0 + h); c = mix3(c, [0.72, 0.76, 0.8], f); o = 1 - 0.7 * f; }
-    // growth stands proud of the rock where it makes the outline (sides and top) so the silhouette is
-    // bumpy, but barely toward the camera, where it would otherwise paint over every cliff
-    const out_ = veg ? s * (0.1 + 0.9 * rng()) * Math.max(Math.abs(Math.sin(a)), ny, 0.15) : 0;
-    const px = cx + Math.sin(a) * (rad + out_), pd = cd - Math.cos(a) * (rad + out_);
-    const qq = quatUpTo(nx, ny, nz);
-    out(px, y0 + h, -pd, s, s * (veg ? 0.75 : 0.3), s, c[0], c[1], c[2], o, qq[0], qq[1], qq[2], qq[3], kind);
-    if (out.due()) yield;
+    l.S = S; l.A = A; area += A;
   }
+  const nSurf = n * 0.92;
+  const sp = Math.sqrt(area / nSurf);                  // cell size in metres
+  // features are laid out in metres, never finer than a few cells (finer detail would only speckle)
+  const fs = Math.max(sp * 2.2, R * 0.05);
+  const capS = Math.max(fs * 1.5, R * 0.3), gullyS = Math.max(fs, R * 0.16), streakS = Math.max(fs * 0.8, R * 0.05);
+  const ledgeS = Math.max(fs * 1.5, R * 0.35), toneS = Math.max(fs * 2, R * 0.6), facetS = Math.max(fs * 1.6, R * 0.22);
+  // Is (px, h, pd) inside another lobe (so hidden: skip it)?
+  const inside = (li, px, h, pd) => {
+    for (let k = 0; k < lobes.length; k++) {
+      if (k === li) continue;
+      const m = lobes[k], Hm = H * m.h, tm = h / Hm;
+      if (tm >= 0.97) continue;
+      const mx = x + m.ox + leanX * Hm * tm * tm, md = d + m.oz + leanD * Hm * tm * tm;
+      const rr = R * m.r * prAt(tm) * (1 - slack) - sp;
+      if (rr > 0 && (px - mx) ** 2 + (pd - md) ** 2 < rr * rr) return true;
+    }
+    return false;
+  };
+  const coreC = shade(mix3(mix3(C.rock, C.veg, 0.5), C.streak, 0.35), 0, 0.2, 1, 0.5, 0.4);
+  for (let li = 0; li < lobes.length; li++) {
+    const l = lobes[li], Hl = H * l.h, Rl = R * l.r;
+    // the fine bumps of the outline: never finer than three cells, or they would only make it ragged
+    fineU = Math.max(Rl * 0.14, 3 * sp); fineH = Math.max(Hl * 0.06, 3 * sp);
+    const rows = Math.max(2, Math.round(l.S / sp));
+    const dv = l.S / rows;
+    let seg = 0;
+    for (let rI = 0; rI < rows; rI++) {
+      // height fraction of this row: equal steps of arc length up the profile
+      const sTarget = (rI + 0.5) * dv;
+      while (seg < PROF_N - 1 && l.cum[seg + 1] < sTarget) seg++;
+      const t0 = (seg + (sTarget - l.cum[seg]) / Math.max(1e-6, l.cum[seg + 1] - l.cum[seg])) / PROF_N;
+      const prRow = prAt(t0), radRow = Rl * prRow;
+      // the top is seen from below, so its outline lies beyond the summit: where the surface turns
+      // to face the sky the row goes further round, to the full circle on a flat top
+      const slopeRow = (prAt(t0 + 0.01) - prAt(t0 - 0.01)) / 0.02 * Rl / Hl;
+      const am = AMAX + (Math.PI - AMAX) * smooth(0.25, 0.8, -slopeRow / Math.hypot(slopeRow, 1));
+      const cols = Math.max(1, Math.round(2 * am * radRow / sp));
+      const du = 2 * am * Math.max(radRow, sp * 0.3) / cols;
+      for (let cI = 0; cI < cols; cI++) {
+        const tt = clamp(t0 + (rng() - 0.5) * 0.25 * dv / Hl, 0, 0.995);
+        const a = ((cI + 0.5 + (rng() - 0.5) * 0.25) / cols * 2 - 1) * am;
+        const pr = prAt(tt), h = tt * Hl;
+        const drdh = (prAt(tt + 0.01) - prAt(tt - 0.01)) / 0.02 * Rl / Hl;
+        const u = a * Rl;                                 // metres round the lobe
+        const sa = Math.sin(a), ca = Math.cos(a);
+        // the surface and its true normal (from the bumps and steps too), so the discs lie in it and
+        // still tile it where it bulges, and the light picks out every shoulder and ledge
+        const da_ = am / cols, dt_ = Math.max(0.003, 0.5 * dv / (Hl * Math.hypot(drdh, 1)));
+        let rad = radAt(a, tt, Rl, Hl);
+        const ra = (radAt(a + da_, tt, Rl, Hl) - rad) / da_;
+        const rh = (radAt(a, Math.min(0.999, tt + dt_), Rl, Hl) - rad) / (dt_ * Hl);
+        const PA = ra * sa + rad * ca, PB = ra * ca - rad * sa;          // d/da of the surface point: (PA, 0, PB)
+        let nx = -PB, ny = PB * rh * sa - PA * rh * ca, nz = PA;
+        const nl0 = Math.hypot(nx, ny, nz) || 1; nx /= nl0; ny /= nl0; nz /= nl0;
+        const pal = Math.hypot(PA, PB) || 1;
+        // the slope that decides where growth settles: the profile and its steps, not every bump
+        // (the bumps would scatter the cap into speckles)
+        const rhC = (stepAt(Math.min(0.999, tt + dt_)) * prAt(tt + dt_) - stepAt(tt) * pr) * Rl / (dt_ * Hl);
+        const nyC = -rhC / Math.hypot(1, rhC);
+        // what covers it: the cap and shoulders, hanging gullies, ledges, the skirt at the foot
+        const g = noise1(u / gullyS, salt + 2);
+        const gully = smooth(gullyThr - 0.06, gullyThr + 0.02, g);
+        const drip = 0.25 + 0.7 * noise1(u / (gullyS * 0.8), salt + 3);
+        // Where growth clings: each rule gives a signed margin (> 0 inside, in units of its own soft
+        // edge) and the strongest wins, so the masses have clean but anti-aliased borders.
+        // the cap over the gentle top and shoulders, its lower edge ragged
+        let m = Math.max((nyC + 0.35 * (noise2(u / capS, h / capS, salt + 1) - 0.5) - capThr) / 0.06, (tt - 0.96) / 0.01);
+        // growth hanging down the gullies from the cap
+        m = Math.max(m, Math.min((gully - 0.5) / 0.25, (tt - 1 + drip * (0.4 + 0.6 * green)) / 0.025));
+        // clumps clinging to the cliffs: masses drawn out up and down, more of them higher up
+        m = Math.max(m, (noise2(u / (gullyS * 1.3), h / (Hl * 0.22), salt + 4) + 0.18 * (tt - 0.5) - 0.74 + 0.3 * (green - 0.5)) / 0.035);
+        let ledgeV = 0;
+        for (const L of ledges) {
+          const lt = L.t + 0.02 * Math.sin(a * 2.3 + L.ph);
+          const on = (noise1(u / ledgeS, L.s) - 0.38) / 0.04;
+          const lo = lt - L.w * (0.6 + 2.5 * gully), hi = lt + L.w;
+          m = Math.max(m, Math.min(on, (tt - lo) / 0.006, (hi - tt) / 0.006));
+          if (on > 0 && tt < lo && tt > lo - 0.18) ledgeV = Math.max(ledgeV, 0.45 * (1 - (lo - tt) / 0.18) * Math.min(1, on));
+        }
+        // the skirt of trees at the foot
+        m = Math.max(m, (0.045 + 0.06 * noise1(u / fs, salt + 5) - tt) / 0.008);
+        if (thin) m = Math.max(m, (noise2(u / fs, h / (fs * 3), salt + 6) - 0.7 + 0.1 * thin) / 0.05);
+        const vw = smooth(-1, 1, m), veg = vw > 0.5;
+        // gullies are cut back into the rock (notches in the outline); growth stands a little proud
+        rad *= 1 - 0.025 * smooth(gullyThr - 0.2, gullyThr + 0.1, g);
+        rad += vw * sp * 0.25 * noise2(u / (sp * 2), h / (sp * 2), salt + 7);
+        const cx = x + l.ox + leanX * Hl * tt * tt, cd = d + l.oz + leanD * Hl * tt * tt;
+        const px = cx + sa * rad, pd = cd - ca * rad;
+        if (lobes.length > 1 && inside(li, px, h, pd)) continue;
+        // Light: the cliffs break into vertical facets, each a flat face turned a little its own way,
+        // so they catch the sun or fall into shade facet by facet; the rounded cap stays smooth.
+        const fa = u / facetS + 0.7 * noise1(h / (Hl * 0.3), salt + 14);
+        const aN = Math.atan2(nx, nz) - (1 - vw) * 0.7 * (fa - Math.round(fa)) * facetS / Rl;
+        const nh = Math.hypot(nx, nz), lx = Math.sin(aN) * nh, lz = Math.cos(aN) * nh;
+        const tone = 0.9 + 0.2 * noise2(u / toneS, h / toneS, salt + 8);
+        let c;
+        let cv_ = null;
+        if (vw > 0) {
+          cv_ = mix3(C.veg, C.vegLit, 0.15 + 0.5 * noise2(u / fs, h / fs, salt + 9));
+          cv_ = shade(mul3(cv_, tone), nx, ny, nz, 0.42, 0.62);
+        }
+        if (vw < 1) {
+          c = mix3(C.rock, C.rockWarm, warm * smooth(0.55, 0.8, noise1(u / (streakS * 3), salt + 10)));
+          // dark water streaks running down the cliffs, heaviest below the growth that feeds them
+          const st = noise1(u / streakS, salt + 11) * (0.6 + 0.4 * noise1(h / (Hl * 0.3) + u / streakS, salt + 12));
+          c = mix3(c, C.streak, clamp(smooth(0.4, 0.7, st) * 0.8 + ledgeV + 0.3 * smooth(0.45, 0.62, g) * (tt > 1 - drip - 0.15 ? 1 : 0.4), 0, 0.85));
+          c = mul3(c, tone * (1 - 0.18 * smooth(gullyThr - 0.15, gullyThr, g)));   // shadow at the gully's lip
+          c = shade(c, lx, ny, lz, 0.34, 0.82);
+          // a cave mouth: a dark opening under an overhang, its rim in shadow
+          for (const cv of caves) {
+            if (li !== 0) break;
+            const da = (a - cv.a) / cv.w, dt = (tt - cv.t) / cv.h, e = da * da + dt * dt;
+            if (e < 1.6) { c = mix3(c, C.cave, 0.85 * smooth(1.6, 0.8, e)); break; }
+          }
+          if (cv_) c = mix3(c, cv_, vw);
+        } else c = cv_;
+        c = jitter(c, rng, 0.03);
+        let o = 1;
+        if (mist > 0) {
+          const mt = mist * Hl * (0.18 + 0.12 * noise1(u / capS, salt + 13));
+          if (h < mt) c = mix3(c, C.mist, 0.8 * mist * smooth(mt, 0, h));
+        }
+        if (aerial > 0) c = mix3(c, AERIAL, aerial);
+        if (fadeTop && y0 + h > fadeTop) { const f = smooth(fadeTop, fadeTop + H * 0.3, y0 + h); c = mix3(c, [0.72, 0.76, 0.8], f); o = 1 - 0.7 * f; }
+        // the disc: in the surface, about 0.72 of its cell, thin along the normal
+
+        const vl = Math.hypot(drdh, 1);
+        const Tx = PA / pal, Tz = PB / pal;               // round the tower
+        const Zx = -Tz * ny, Zy = Tz * nx - Tx * nz, Zz = Tx * ny;   // Z = T x N: up the surface
+        const qq = quatBasis(Tx, 0, Tz, nx, ny, nz, Zx, Zy, Zz);
+        // the disc spans its cell as laid on the true surface (longer up a step, wider round a bulge);
+        // near a pointed top the cell is wider than the tower, so keep the disc inside the outline
+        const cap_ = rad * 1.1 + 0.1 * sp;
+        const sx = Math.min(0.72 * Math.max(pal, 0.3 * sp) * (2 * am / cols), cap_, du * 1.6);
+        const sz = Math.min(0.72 * (dv / vl) * Math.hypot(1, rh), dv * 2.2, cap_), sy = Math.min(sx, sz) * (veg ? 0.3 : 0.16);
+        out(px, y0 + h, -pd, sx, sy, sz, c[0], c[1], c[2], o, qq[0], qq[1], qq[2], qq[3], kind, move);
+        if (out.due()) yield;
+      }
+      // the opaque core: a card of larger splats on the lobe's axis, facing the window, inset well
+      // inside the narrowest the outline gets, so sky never shows through and nothing pokes out
+      if (rI % 2 === 0 && !fadeTop) {
+        const sc = sp * 1.8;
+        const hc = t0 * Hl, syc = Math.min(sc * 0.75, dv * 1.4);
+        // (inset from above as well: under a dome the card must stop well below the top)
+        const cw = Math.min(radRow, Rl * prAt(t0 + 2.5 * syc / Hl)) * (1 - slack) * 0.8 - sc * 1.2;
+        if (cw > 0 && hc > sc) {
+          const cx = x + l.ox + leanX * Hl * t0 * t0, cd = d + l.oz + leanD * Hl * t0 * t0;
+          const nC = Math.max(1, Math.round(2 * cw / sc));
+          const c = aerial > 0 ? mix3(coreC, AERIAL, aerial) : coreC;
+          for (let k = 0; k < nC; k++) {
+            const ox = nC === 1 ? 0 : (k / (nC - 1) * 2 - 1) * cw;
+            out(cx + ox, y0 + hc, -cd, sc * 0.75, syc, sc * 0.12, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind, move);
+          }
+        }
+      }
+    }
+  }
+}
+// Rotation whose columns are the unit vectors X, Y, Z (local x -> X, y -> Y, z -> Z), as [x, y, z, w].
+function quatBasis(m00, m10, m20, m01, m11, m21, m02, m12, m22) {
+  const tr = m00 + m11 + m22;
+  if (tr > 0) { const s = 0.5 / Math.sqrt(tr + 1); return [(m21 - m12) * s, (m02 - m20) * s, (m10 - m01) * s, 0.25 / s]; }
+  if (m00 > m11 && m00 > m22) { const s = 2 * Math.sqrt(1 + m00 - m11 - m22); return [0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s]; }
+  if (m11 > m22) { const s = 2 * Math.sqrt(1 + m11 - m00 - m22); return [(m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s]; }
+  const s = 2 * Math.sqrt(1 + m22 - m00 - m11); return [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s];
 }
 // Splats a tower of this size at this distance gets: by its size on screen only (never by what else
 // is in the chunk), so both chunks that share a tower draw it identically.
+const TOWER_K = 150000;
 function towerSplats(out, t, K) { return Math.round(clamp(K * out.density * (t.R * t.H) / (t.d * t.d), 8, 14000 * out.density)); }
 
 // Bamboo clump: many thin culms leaning out from the clump and arching over at the top, with
@@ -999,8 +1135,12 @@ export function* terraceHill(ctx, out, x, d, opts = {}) {
   }
   // trees on the crown
   const top = y0 + levels * step;
-  const nT = Math.max(1, Math.round(n * 0.15));
-  yield* blob(ctx, out, x, top + Math.max(2, Hh - levels * step) * 0.5 + 3, d, R * eAt(levels * step) * 0.8 + 6, 5, Rd * 0.3 + 4, { n: nT, color: C.camphor, rng, kind: KIND.TREE, inner: 0.3 });
+  // the wooded crown: splats no bigger than fine detail, so its top is a clean line of tree tops
+  // (a hill's crown is a mass, not a tree: KIND.HEDGE keeps it still on the beat)
+  const crx = R * eAt(levels * step) * 0.8 + 6, crz = Rd * 0.3 + 4, cs = Math.max(0.3, detail(out, d, 0.9));
+  const nT = Math.round(clamp(2.5 * (crx * 5 + 5 * crz + crx * crz) / (cs * cs) * 0.5, 24, 1500 * out.density + 24));
+  yield* blob(ctx, out, x, top + Math.max(2, Hh - levels * step) * 0.5 + 3, d, crx, 5, crz, { n: nT, size: cs, color: C.camphor, rng, kind: KIND.HEDGE, inner: 0.3 });
+
 }
 
 // A pagoda: a slender, tapering tower of 5-7 tiers, each with a small dark eave turned up at the
@@ -1105,13 +1245,124 @@ export function* archBridge(ctx, out, x, d, opts = {}) {
   }
 }
 
-// A water buffalo standing in a paddy: a dark heavy body, head low, swept-back horns.
-function* buffalo(ctx, out, x, y, d, rng) {
-  const c = [0.15, 0.14, 0.14], dir = rng() < 0.5 ? -1 : 1;
-  out(x, y + 0.75, -d, 1.15, 0.5, 0.55, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
-  out(x + dir * 1.25, y + 0.7, -d, 0.35, 0.3, 0.28, c[0] * 0.9, c[1] * 0.9, c[2] * 0.9, 1, 0, 0, 0, 1, KIND.OTHER);
-  out(x + dir * 1.15, y + 1.0, -d, 0.45, 0.06, 0.08, 0.3, 0.28, 0.25, 1, 0, 0, 0, 1, KIND.OTHER);
-  out(x, y + 0.1, -d, 1.5, 0.04, 0.6, 0.35, 0.38, 0.36, 0.8, 0, 0, 0, 1, KIND.OTHER);      // ripple
+// A water buffalo standing in a paddy: a dark heavy body, head low, swept-back horns, now and then
+// a white egret riding on its back. One of the few things that answer the beat (MOVE.BEAT), so it
+// is a handful of splats; the ripple round it in flooded panels does not.
+function* buffalo(ctx, out, x, y, d, rng, wet = true) {
+  const c = [0.15, 0.14, 0.14], dir = rng() < 0.5 ? -1 : 1, B = MOVE.BEAT, K = KIND.OTHER;
+  out(x, y + 0.75, -d, 1.15, 0.5, 0.55, c[0], c[1], c[2], 1, 0, 0, 0, 1, K, B);
+  out(x + dir * 1.25, y + 0.7, -d, 0.35, 0.3, 0.28, c[0] * 0.9, c[1] * 0.9, c[2] * 0.9, 1, 0, 0, 0, 1, K, B);
+  out(x + dir * 1.15, y + 1.0, -d, 0.45, 0.06, 0.08, 0.3, 0.28, 0.25, 1, 0, 0, 0, 1, K, B);
+  if (!wet) for (const lx of [-0.75, 0.75]) out(x + lx, y + 0.25, -d, 0.12, 0.3, 0.12, c[0], c[1], c[2], 1, 0, 0, 0, 1, K, B);
+  if (rng() < 0.3) out(x - dir * 0.3, y + 1.32, -d, 0.17, 0.12, 0.1, 0.78, 0.78, 0.74, 1, 0, 0, 0, 1, K, B);   // egret
+  if (wet) out(x, y + 0.1, -d, 1.5, 0.04, 0.6, 0.35, 0.38, 0.36, 0.8, 0, 0, 0, 1, KIND.GROUND);      // ripple
+  if (out.due()) yield;
+}
+
+// A thin straight member from a to b with a motion class (kit.js strut() has none).
+function strutM(out, ax, ay, az, bx, by, bz, r, c, n, kind, move) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 1e-6;
+  const q = quatXTo(dx, dy, dz), sl = (len / n) * 0.45;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    out(ax + dx * t, ay + dy * t, az + dz * t, sl, r, r, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind, move);
+  }
+}
+
+// A boat on the river, a handful of splats so the beat can pick it out (MOVE.BEAT): a bamboo raft
+// poled by a fisherman in a conical straw hat with his cormorants, or a long-tail boat under an
+// arched cane canopy flying a pennant (MOVE.FLAG). x is chunk-local, y the water level.
+function* boat(ctx, out, x, y, d, r, night) {
+  const B = MOVE.BEAT, K = KIND.OTHER, dir = r() < 0.5 ? -1 : 1;
+  const len = 6 + 3 * r();
+  // the wake and ripple, left still
+  out(x, y + 0.03, -(d - 0.6), len * 0.75, 0.03, 0.5, 0.68, 0.71, 0.72, 0.55, 0, 0, 0, 1, KIND.GROUND);
+  if (r() < 0.55) {
+    // raft: bamboo poles side by side
+    for (const dz of [-0.4, 0, 0.4]) {
+      const k = 0.9 + 0.2 * r();
+      out(x, y + 0.12, -(d + dz), len / 2, 0.1, 0.2, 0.52 * k, 0.46 * k, 0.3 * k, 1, 0, 0, 0, 1, K, B);
+    }
+    const fx = x - dir * len * 0.22;
+    out(fx, y + 0.95, -d, 0.22, 0.5, 0.18, 0.12, 0.13, 0.17, 1, 0, 0, 0, 1, K, B);          // dark clothes
+    out(fx, y + 1.55, -d, 0.12, 0.13, 0.12, 0.42, 0.31, 0.24, 1, 0, 0, 0, 1, K, B);          // head
+    out(fx, y + 1.7, -d, 0.45, 0.07, 0.45, 0.74, 0.65, 0.45, 1, 0, 0, 0, 1, K, B);           // straw hat
+    strutM(out, fx - dir * 0.4, y + 2.9, -d, fx + dir * 1.6, y - 0.4, -(d - 0.3), 0.045, [0.4, 0.36, 0.24], 5, K, B);   // the pole
+    for (let k = 0; k < 1 + Math.floor(r() * 3); k++) {
+      const bx = x + dir * (len * 0.3 + k * 0.7);
+      out(bx, y + 0.5, -d, 0.16, 0.22, 0.14, 0.06, 0.06, 0.07, 1, 0, 0, 0, 1, K, B);        // cormorant
+      out(bx + dir * 0.08, y + 0.82, -d, 0.06, 0.12, 0.06, 0.06, 0.06, 0.07, 1, 0, 0, 0, 1, K, B);
+    }
+    if (night) yield* lamp(ctx, out, x + dir * len * 0.45, y + 1.4, d, [1, 0.62, 0.3], { size: 0.12, halo: 1 });
+  } else {
+    // long-tail boat: dark hull, an arched canopy of cane matting, a pennant at the stern
+    const hc = [0.16, 0.14, 0.12];
+    out(x, y + 0.3, -d, len / 2, 0.28, 0.75, hc[0], hc[1], hc[2], 1, 0, 0, 0, 1, K, B);
+    out(x + dir * len * 0.45, y + 0.55, -d, len * 0.08, 0.2, 0.45, hc[0], hc[1], hc[2], 1, 0, 0, 0, 1, K, B);   // the raised bow
+    const cl = len * (0.3 + 0.15 * r());
+    for (let k = 0; k < 3; k++) {
+      const u = (k / 2 - 0.5) * cl;
+      const c = shade([0.4, 0.32, 0.2], 0, 0.6, 0.8, 0.6, 0.45);
+      out(x + u, y + 1.15, -d, cl / 5, 0.45, 0.8, c[0], c[1], c[2], 1, 0, 0, 0, 1, K, B);
+    }
+    out(x + dir * cl * 0.55, y + 1.15, -(d - 0.75), 0.25, 0.3, 0.05, 0.05, 0.05, 0.05, 1, 0, 0, 0, 1, K, B);   // the open end, dark inside
+    const sx = x - dir * len * 0.46;
+    strutM(out, sx, y + 0.5, -d, sx, y + 2.6, -d, 0.035, [0.3, 0.28, 0.24], 3, K, B);
+    out(sx - dir * 0.4, y + 2.45, -d, 0.38, 0.14, 0.03, 0.74, 0.12, 0.09, 1, 0, 0, 0, 1, K, MOVE.FLAG);
+    if (night) yield* lamp(ctx, out, x, y + 1.7, d - 0.8, [1, 0.8, 0.5], { size: 0.1, halo: 1 });
+  }
+  if (out.due()) yield;
+}
+
+// Mist as a few rounded puffs (no wider than about six times their height) rather than one long
+// smear: the shader billows a vapour splat by an amount in proportion to its size.
+function mistPuffs(out, x, y, d, sx, sy, c, op, r) {
+  const k = Math.max(1, Math.ceil(sx / (6 * sy)));
+  const px = (sx / k) * 1.4;
+  for (let i = 0; i < k; i++) {
+    const f = k === 1 ? 0 : ((i + 0.5) / k) * 2 - 1;
+    out(x + f * sx * 0.8, y + sy * 0.3 * (r() - 0.5), -(d + (r() - 0.5) * px * 0.5), px, sy * (0.85 + 0.3 * r()), px * 0.5, c[0], c[1], c[2], op * 0.85, 0, 0, 0, 1, KIND.OTHER, MOVE.VAPOUR);
+  }
+}
+
+// A string of red lanterns across the front of a house, or a line of washing: small things the
+// beat and the wind pick out. By night the lanterns are lit.
+function* frontLine(ctx, out, W, hs, d, night) {
+  const r = makeRng(hashInts(hs.seed, 31));
+  const span = Math.max(hs.w, hs.dep) + 1.5, xa = hs.wx - span / 2;
+  const yb = W.H(hs.wx, d), washing = r() < 0.4;
+  const top = yb + (washing ? 2.1 : 3.4);
+  const pc = [0.32, 0.28, 0.22];
+  for (const px of [xa, xa + span]) strutM(out, px - ctx.x0, yb - 0.2, -d, px - ctx.x0, top + 0.15, -d, 0.05, pc, 3, KIND.OTHER, 0);
+  const sag = 0.35;
+  const n = Math.max(3, Math.round(span / (washing ? 1.1 : 1.35)));
+  for (let k = 0; k < n; k++) {
+    const u = (k + 0.5) / n, lx = xa + u * span - ctx.x0, ly = top - sag * 4 * u * (1 - u);
+    out(lx, ly, -d, span / n * 0.5, 0.012, 0.012, 0.2, 0.18, 0.16, 1, 0, 0, 0, 1, KIND.OTHER);    // the cord
+    if (washing) {
+      if (r() < 0.25) continue;
+      const c = [[0.72, 0.72, 0.7], [0.2, 0.3, 0.55], [0.62, 0.2, 0.16], [0.55, 0.52, 0.35], [0.3, 0.42, 0.3]][Math.floor(r() * 5)];
+      const hgt = 0.35 + 0.4 * r();
+      out(lx, ly - hgt, -d, 0.3 + 0.12 * r(), hgt, 0.03, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.FLAG);
+    } else {
+      const c = night ? [1, 0.3, 0.14] : [0.78, 0.13, 0.08];
+      const kd = night ? KIND.LIGHT : KIND.OTHER;
+      out(lx, ly - 0.42, -d, 0.21, 0.27, 0.21, c[0], c[1], c[2], 1, 0, 0, 0, 1, kd, MOVE.BEAT);
+      out(lx, ly - 0.75, -d, 0.03, 0.09, 0.03, 0.72, 0.55, 0.2, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);   // tassel
+      if (night) out(lx, ly - 0.42, -(d + 0.05), 0.7, 0.7, 0.3, c[0], c[1], c[2], 0.14, 0, 0, 0, 1, KIND.LIGHT, MOVE.BEAT);
+    }
+  }
+  if (out.due()) yield;
+}
+
+// Smoke from a kitchen fire, rising from the roof and spreading as it goes (MOVE.VAPOUR).
+function* smoke(ctx, out, x, y, d, r) {
+  const n = 5 + Math.floor(r() * 3), drift = 0.4 + 0.5 * r();
+  for (let k = 0; k < n; k++) {
+    const f = k / (n - 1), s = 0.45 + 1.6 * f;
+    const c = mix3([0.62, 0.62, 0.62], [0.74, 0.75, 0.76], f);
+    out(x + drift * f * f * 6, y + 0.4 + f * 9, -(d + 0.3 * f), s, s * 0.8, s * 0.7, c[0], c[1], c[2], 0.3 - 0.2 * f, 0, 0, 0, 1, KIND.OTHER, MOVE.VAPOUR);
+  }
   if (out.due()) yield;
 }
 
@@ -1140,6 +1391,14 @@ function* villages(ctx, out, W, dLo, dHi, opts = {}) {
       const s = Math.max(0.14, detail(out, hs.d, 1.05 * k));
       if (hs.concrete) yield* concreteHouse(ctx, out, hs.wx - ctx.x0, hs.d, { w: hs.w, depth: hs.dep, storeys: hs.storeys, wall: hs.wall, yaw: hs.yaw, rng, s, y, lit, seed: hs.seed });
       else yield* tiledHouse(ctx, out, hs.wx - ctx.x0, hs.d, { w: hs.w, depth: hs.dep, storeys: hs.storeys, wall: hs.wall, yaw: hs.yaw, rng, s, y, lit, court: hs.court && hs.d < 400, seed: hs.seed });
+      if (opts.small && hs.d < 320) {
+        // a string of lanterns or a line of washing in front of some houses, smoke from some kitchens
+        const u = (hashInts(hs.seed, 33) & 1023) / 1023;
+        const fd = hs.d - Math.max(hs.w, hs.dep) / 2 - (hs.court ? 5 : 1.8);
+        if (u < 0.3 && fd >= dLo && fd < dHi && fd > 20) yield* frontLine(ctx, out, W, hs, fd, lit > 0);
+
+        if (!hs.concrete && u > 0.78) yield* smoke(ctx, out, hs.wx - ctx.x0 + hs.w * 0.25, y + hs.storeys * 2.9 + 0.6 + hs.dep * 0.27, hs.d, makeRng(hashInts(hs.seed, 35)));
+      }
     }
     for (const t of v.trees) {
       if (t.d < dLo || t.d >= dHi) continue;
@@ -1257,17 +1516,11 @@ function* riverProps(ctx, out, W, dLo, dHi) {
       const bx = wx0 + r() * Pc;
       yield* bamboo(ctx, out, bx - ctx.x0, bd + r() * 6, { rng: r, height: 9 + 6 * r(), width: 6 + 6 * r(), y: W.H(bx, bd) - 0.2 });
     }
-    // a raft or a boat
-    if (r() < 0.035) {
-      const bx = wx0 + r() * Pc, bd = lerp(rn, rf, 0.2 + 0.6 * r());
-      if (bd >= dLo && bd < dHi) {
-        const y = W.H(bx, bd) - 0.6, len = 6 + 4 * r();
-        const raft = r() < 0.6;
-        const c = raft ? [0.42, 0.38, 0.28] : [0.14, 0.13, 0.12];
-        out(bx - ctx.x0, y + 0.2, -bd, len / 2, 0.15, 0.7, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
-        out(bx - ctx.x0, y + 0.05, -bd + 0.8, len * 0.7, 0.03, 0.4, 0.3, 0.34, 0.33, 0.6, 0, 0, 0, 1, KIND.OTHER);
-        if (!raft) out(bx - ctx.x0 + len * 0.1, y + 0.8, -bd, len * 0.2, 0.45, 0.6, 0.2, 0.19, 0.17, 1, 0, 0, 0, 1, KIND.OTHER);
-      }
+    // a raft or a boat (a separate world rng, so the bamboo above stays where it was)
+    const rb = worldRng(ctx, 634, i);
+    if (rb() < 0.09) {
+      const bx = wx0 + rb() * Pc, bd = lerp(rn, rf, 0.15 + 0.7 * rb());
+      if (bd >= dLo && bd < dHi && bx >= ctx.x0 - 6 && bx < ctx.x0 + ctx.length + 6) yield* boat(ctx, out, bx - ctx.x0, W.H(bx, bd) - 0.7, bd, rb, isNight(ctx));
     }
     if (out.due()) yield;
   }
@@ -1297,16 +1550,17 @@ function* streamProps(ctx, out, W, dLo, dHi) {
       yield* archBridge(ctx, out, bx - ctx.x0, ld, { rng: r, span: s.w + 2.5, y: W.H(bx, ld) - 0.6 });
     }
   }
-  // buffalo
-  for (const { i, wx0 } of cellsAround(ctx, 60, 2)) {
+  // buffalo: wallowing in the flooded panels, grazing the bunds and the dry fields
+  for (const { i, wx0 } of cellsAround(ctx, 60, 6)) {
     const r = worldRng(ctx, 641, i);
-    if (r() > 0.25) continue;
-    const wx = wx0 + r() * 60, d = 35 + r() * Math.min(200, dHi - 35);
+    if (r() > 0.3) continue;
+    const wx = wx0 + r() * 60, d = 40 + r() * 220;
     if (d < dLo || d >= dHi) continue;
     const s = surface(W, wx, d);
-    if (s.t !== T.PADDY || !s.info.buffalo) continue;
+    if (s.t !== T.PADDY && s.t !== T.BANK) continue;
+    const wet = s.t === T.PADDY && (s.info.t === P.WATER || s.info.t === P.YOUNG || s.info.t === P.POND);
     const n = 1 + Math.floor(r() * 3);
-    for (let k = 0; k < n; k++) yield* buffalo(ctx, out, wx - ctx.x0 + k * 4 * (r() - 0.3), s.y - 0.25, d + (r() - 0.5) * 4, r);
+    for (let k = 0; k < n; k++) yield* buffalo(ctx, out, wx - ctx.x0 + k * 4 * (r() - 0.3), s.y - (wet ? 0.25 : 0.05), d + (r() - 0.5) * 4, r, wet);
   }
 }
 
@@ -1325,7 +1579,7 @@ function* mistBands(ctx, out, W, dLo, dHi, cell, size, hMax, op) {
       if (r() > a * 1.4) continue;
       const sx = size * (0.9 + 1.0 * r()), sy = hMax * (0.25 + 0.3 * r());
       const c = jitter(C.mist, r, 0.02);
-      out(wx - ctx.x0, W.H(wx, d) + sy * (0.6 + 0.9 * r()), -d, sx, sy, sx * 0.45, c[0], c[1], c[2], op * (0.5 + 0.5 * r()) * Math.min(1, a * 1.5), 0, 0, 0, 1, KIND.OTHER);
+      mistPuffs(out, wx - ctx.x0, W.H(wx, d) + sy * (0.6 + 0.9 * r()), d, sx, sy, c, op * (0.5 + 0.5 * r()) * Math.min(1, a * 1.5), r);
       if (out.due()) yield;
     }
   }
@@ -1334,33 +1588,46 @@ function* mistBands(ctx, out, W, dLo, dHi, cell, size, hMax, op) {
 // Towers whose centres are in [dLo, dHi): drawn with splat counts from their size on screen, then
 // mist wrapped round their feet (centres just in front of the foot, so they sort in front).
 function* towers(ctx, out, W, dLo, dHi, K, opts = {}) {
-  const list = towersIn(W, ctx.x0 - 10, ctx.x0 + ctx.length + 10, dLo, dHi);
-  // Each tower's count depends only on its own size and distance. Only if a crowded chunk would
-  // overrun its share are they all scaled down (rare; it can then show as a faint seam).
+  const L = ctx.length;
+  const list = towersIn(W, ctx.x0 - 10, ctx.x0 + L + 10, dLo, dHi);
+  // Each tower's count depends only on its own size and distance, and on how crowded the world is
+  // within half a chunk length either side of it (never on where the chunk borders fall), so both
+  // chunks that share a tower draw it with the same splats and the halves meet. (`wide` reaches far
+  // enough for a tower whose centre lies outside the chunk; counts stay local, not on the cached site.)
+  const room = (opts.share || 0.75) * ctx.count;
+  const wide = towersIn(W, ctx.x0 - L * 0.5 - 900, ctx.x0 + L * 1.5 + 900, dLo, dHi);
+  const nOf = new Map();
+  for (const t of wide) nOf.set(t, towerSplats(out, t, K));
+  const draw = [];
   let est = 0;
   for (const t of list) {
-    t.n = towerSplats(out, t, K);
-    const a = Math.max(t.wx - t.R * 1.3, ctx.x0), b = Math.min(t.wx + t.R * 1.3, ctx.x0 + ctx.length);
-    est += t.n * clamp((b - a) / (t.R * 2.6), 0, 1);
+    let crowd = 0;
+    for (const u of wide) if (Math.abs(u.wx - t.wx) < L * 0.5) crowd += nOf.get(u);
+    const n = Math.max(6, Math.round(nOf.get(t) * (crowd > room ? room / crowd : 1)));
+    draw.push([t, n]);
+    const a = Math.max(t.wx - t.R * 1.3, ctx.x0), b = Math.min(t.wx + t.R * 1.3, ctx.x0 + L);
+    est += n * clamp((b - a) / (t.R * 2.6), 0, 1);
   }
-  const room = (opts.share || 0.75) * ctx.count - out.n;
-  const k = est > room ? room / est : 1;
+  // a last resort for a freakishly crowded chunk (it would then show a faint seam)
+  const roomLeft = 0.97 * ctx.count - out.n;
+  const k = est > roomLeft ? roomLeft / est : 1;
   const lim = out.limit;
   out.limit = Infinity;
-  for (const t of list) {
+  for (const [t, n0] of draw) {
     const r = makeRng(t.seed);
     const m = mistAmt(W, t.wx, t.d);
     const y = W.H(t.wx, t.d) - 1.5;
-    // far ranks keep darker rock and more green, so they survive the haze as silhouettes
-    const dark = 0.45 * smooth(2000, 6000, t.d);
-    yield* karstTower(ctx, out, t.wx - ctx.x0, t.d, { height: t.H, radius: t.R, rng: r, n: Math.max(6, Math.round(t.n * k)), y, mist: m * (1 - 0.6 * dark), dark });
+    // a little aerial perspective baked into the far ranks, so each rank is paler than the last
+    const aerial = 0.22 * smooth(2500, 12000, t.d);
+    yield* karstTower(ctx, out, t.wx - ctx.x0, t.d, { height: t.H, radius: t.R, rng: r, n: k < 1 ? Math.max(6, Math.round(n0 * k)) : n0, y, mist: m, aerial });
     if (opts.mist !== false && m > 0.2) {
       const mr = makeRng(t.seed ^ 0x5bd1);
       const nm = 1 + Math.floor(mr() * 3);
       for (let k = 0; k < nm; k++) {
         const sx = t.R * (1.5 + 1.3 * mr()), sy = t.H * (0.025 + 0.025 * mr());
         const c = jitter(C.mist, mr, 0.02);
-        out(t.wx + (mr() - 0.5) * t.R * 1.5 - ctx.x0, y + sy * (0.5 + 0.7 * mr()), -(t.d - t.R * (0.9 + 0.3 * mr())), sx, sy, sx * 0.4, c[0], c[1], c[2], Math.min(0.5, 0.12 + 0.4 * m) * (0.6 + 0.4 * mr()), 0, 0, 0, 1, KIND.OTHER);
+        const mx = t.wx + (mr() - 0.5) * t.R * 1.5 - ctx.x0, my = y + sy * (0.5 + 0.7 * mr());
+        mistPuffs(out, mx, my, t.d - t.R * (0.9 + 0.3 * mr()), sx, sy, c, Math.min(0.5, 0.12 + 0.4 * m) * (0.6 + 0.4 * mr()), mr);
       }
     }
   }
@@ -1384,12 +1651,13 @@ function* mounds(ctx, out, W, dLo, dHi) {
   for (let i = i0; i <= i1; i++) {
     const m = moundSite(W, i);
     if (!m || m.d < dLo || m.d >= dHi) continue;
-    yield* moundWith(ctx, out, W, m.wx, m.d, m.R, m.Hm, makeRng(m.seed), m.pagoda ? 'pagoda' : 'pavilion', 0, KIND.TREE);
+    yield* moundWith(ctx, out, W, m.wx, m.d, m.R, m.Hm, makeRng(m.seed), m.pagoda ? 'pagoda' : 'pavilion', 0, KIND.HEDGE);
   }
 }
 function* moundWith(ctx, out, W, wx, d, R, Hm, r, what, wrong, kind) {
   const y = W.H(wx, d) - 1;
-  const n = Math.max(20, Math.round(treeSplats(out, d, R * 1.4) * 0.7));
+  // enough splats that the wooded dome has a clean top edge, not a soft cloud
+  const n = Math.max(60, Math.round(treeSplats(out, d, R * 1.4) * 2.2));
   yield* blob(ctx, out, wx - ctx.x0, y + Hm * 0.45, d, R, Hm * 0.6, R * 0.6, { n, color: C.camphor, rng: r, kind, inner: 0.3, amb: 0.55 });
   if (what === 'pagoda') {
     const tiers = 5 + Math.floor(r() * 3) + Math.round(wrong * 3);
@@ -1504,8 +1772,8 @@ function* trackside(ctx, emit) {
     const sx = pf.x0 + pf.len * 0.5 - ctx.x0;
     if (sx > -20 && sx < ctx.length + 20) {
       // shelter: posts and a flat canopy
-      for (let u = -6; u <= 6; u += 4) yield* stick(ctx, out, sx + u, 0.6, 7.6, 2.6, 0.08, { color: [0.36, 0.38, 0.4], kind: KIND.BUILDING, n: 4 });
-      for (let u = -7; u <= 7; u += 0.5) for (let dd = 6.8; dd < 9.2; dd += 0.6) out(sx + u, 3.3, -dd, 0.35, 0.08, 0.4, 0.42, 0.44, 0.46, 1, 0, 0, 0, 1, KIND.BUILDING);
+      for (let u = -6; u <= 6; u += 4) yield* stick(ctx, out, sx + u, 0.6, 7.6, 2.6, 0.08, { color: [0.36, 0.38, 0.4], kind: KIND.OTHER, n: 4 });
+      for (let u = -7; u <= 7; u += 0.5) for (let dd = 6.8; dd < 9.2; dd += 0.6) out(sx + u, 3.3, -dd, 0.35, 0.08, 0.4, 0.42, 0.44, 0.46, 1, 0, 0, 0, 1, KIND.OTHER);
     }
   }
 
@@ -1613,7 +1881,7 @@ function* near(ctx, emit) {
   yield* laneProps(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* crossingLanes(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* streamProps(ctx, out, W, ctx.zNear, ctx.zFar);
-  yield* villages(ctx, out, W, ctx.zNear, ctx.zFar);
+  yield* villages(ctx, out, W, ctx.zNear, ctx.zFar, { small: true });
   yield* riverProps(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* terraces(ctx, out, W, ctx.zNear, ctx.zFar, 40000);
   // scattered field trees and bamboo clumps by the paddies
@@ -1635,9 +1903,10 @@ function* mid(ctx, emit) {
   const out = makeOut(ctx, emit, { detailK: 1.7, zMargin: 260 });
   const W = world(ctx);
   const dz = ctx.dials || {};
-  out.limit = ctx.count * 0.86;
-  // mist behind the towers' feet first (sorted by centre anyway), then the towers
-  yield* towers(ctx, out, W, ctx.zNear, ctx.zFar, 90000, { share: 0.68 });
+  out.limit = ctx.count * 0.9;
+  // the towers take most of the band: the valley floor from 300 m out is a thin strip on screen.
+  // (the same K in the far band, so towers keep their grain across 3000 m)
+  yield* towers(ctx, out, W, ctx.zNear, ctx.zFar, TOWER_K, { share: 0.8 });
   yield* terraces(ctx, out, W, ctx.zNear, ctx.zFar, 30000);
   yield* mounds(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* villages(ctx, out, W, ctx.zNear, ctx.zFar, { coarse: 1.3 });
@@ -1649,8 +1918,11 @@ function* mid(ctx, emit) {
       const wx = wx0 + r() * 90, d = 300 + Math.pow(r(), 1.6) * 1700;
       const s = surface(W, wx, d);
       if (s.t === T.RIVER || s.t === T.GRAVEL) continue;
-      const Wd = 20 + 40 * r();
-      yield* blob(ctx, out, wx - ctx.x0, s.y + 6, d, Wd, 6 + 3 * r(), Wd * 0.3, { n: Math.max(4, Math.round(treeSplats(out, d, Wd) * 0.4)), color: r() < 0.3 ? C.bambooLeaf : C.camphor, rng: r, kind: KIND.TREE, inner: 0.3, amb: 0.55 });
+      const Wd = 20 + 40 * r(), gh = 6 + 3 * r();
+      // enough splats, each no bigger than fine detail here, that the grove's top is a clean line
+      const gs = detail(out, d, 0.9);
+      yield* blob(ctx, out, wx - ctx.x0, s.y + 6, d, Wd, gh, Wd * 0.3, { n: Math.round(clamp(Wd * gh * 3 / (gs * gs), 24, 600)), color: r() < 0.3 ? C.bambooLeaf : C.camphor, rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.55 });
+
     }
   }
   if ((dz.logic || 0) > 0) yield* repeatingPagoda(ctx, out, W, dz.logic);
@@ -1666,8 +1938,8 @@ function* far(ctx, emit) {
   const out = makeOut(ctx, emit, { zMargin: 600 });
   const W = world(ctx);
   const dz = ctx.dials || {};
-  out.limit = ctx.count * 0.86;
-  yield* towers(ctx, out, W, ctx.zNear, ctx.zFar, 120000, { share: 0.8 });
+  out.limit = ctx.count * 0.88;
+  yield* towers(ctx, out, W, ctx.zNear, ctx.zFar, TOWER_K, { share: 0.82 });
   if ((dz.topology || 0) > 0) yield* floatingTowers(ctx, out, W, 5000, 3500, 8000, dz.topology, 3);
   if ((dz.scale || 0) > 0) yield* needles(ctx, out, W, 5200, 3500, 9000, dz.scale, 2);
   yield* mistBands(ctx, out, W, ctx.zNear, 9000, 700, 650, 70, 0.22);
@@ -1770,6 +2042,15 @@ export const karstBiome = {
   // A flat valley floor below an embankment, with relief only far off: the towers are props.
   terrain: TERRAIN,
   hazeDist: 5000,
+  // a little less to the trackside (mostly ground under motion blur), more to the towers
+  shares: { trackside: 0.15, near: 0.39, mid: 0.27, far: 0.19 },
+  // The towers and hills are the scenery, so they stay still on the beat. What answers it: houses,
+  // pagodas and pavilions (BUILDING), trees and bamboo clumps (TREE; hill crowns, groves and mounds
+  // are HEDGE), and, tagged MOVE.BEAT by hand, boats and fishermen on the river, buffalo in the
+  // paddies and the lanterns strung in the villages. Lights always do.
+  beatKinds: [KIND.BUILDING, KIND.TREE],
+
+
   generators: { trackside, near, mid, far },
 };
 

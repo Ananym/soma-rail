@@ -12,7 +12,7 @@
 //   - level 0 emits nothing tagged KIND.SURREAL (the dials are all 0 there)
 // Exits non-zero on any failure. The ctx construction mirrors engine.js startChunk(); keep in step.
 import { BIOMES } from '../src/window/biomes/index.js';
-import { LAYERS, expectedActive } from '../src/window/layers.js';
+import { LAYERS, expectedActive, shareOf } from '../src/window/layers.js';
 import { makeTerrain } from '../src/window/terrain.js';
 import { hashInts, hashString, makeRng } from '../src/window/rng.js';
 import { LEVELS } from '../src/window/director.js';
@@ -21,7 +21,7 @@ import { KIND } from '../src/window/biomes/kit.js';
 const verbose = process.argv.includes('-v');
 const LEAD = 60;                                            // engine.js
 const TAN_H = Math.tan((50 * Math.PI) / 360) * (16 / 9);    // 50° vertical FOV at 16:9
-const countFor = (layer, budget) => Math.max(200, Math.round((budget * layer.share) / expectedActive(layer, TAN_H, LEAD)));
+const countFor = (layer, budget, biome) => Math.max(200, Math.round((budget * shareOf(layer, biome)) / expectedActive(layer, TAN_H, LEAD)));
 
 const ALLOWED_HIGH = new Set([KIND.MAST, KIND.WIRE, KIND.TREE]);
 const SEEDS = ['7', 'downs-check'];
@@ -40,7 +40,7 @@ function run(biome, layer, seedStr, level, index, budget, beatMetres = 56, hour 
   const ctx = {
     rng: makeRng(hashInts(seed, layer.name.length * 131 + layer.name.charCodeAt(0), index)),
     x0: index * layer.chunkLen, length: layer.chunkLen, zNear: layer.zNear, zFar: layer.zFar,
-    count: countFor(layer, budget), index, terrain, palette: biome.palette, dials: { ...LEVELS[level] },
+    count: countFor(layer, budget, biome), index, terrain, palette: biome.palette, dials: { ...LEVELS[level] },
     level, beatMetres, layer: layer.name, seed, hour,
   };
   const gen = (biome.generators[layer.name] || biome.generators.near)(ctx, emit);

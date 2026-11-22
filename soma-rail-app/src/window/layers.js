@@ -10,6 +10,11 @@ export const LAYERS = [
   { name: 'far', zNear: 3000, zFar: 14000, chunkLen: 8000, share: 0.15 },
 ];
 
+// A band's share of the splat budget. A biome may shift it with { shares: { trackside, near, mid,
+// far } } (they should sum to 1): one whose trackside lies mostly below the window, or whose far
+// wall fills it, is better served by other proportions than flat country is.
+export function shareOf(layer, biome) { return (biome && biome.shares && biome.shares[layer.name]) || layer.share; }
+
 // Half-width of track visible at a given distance, for a camera with this horizontal half-angle.
 export function halfWidthAt(dist, tanHalfHfov) { return dist * tanHalfHfov; }
 

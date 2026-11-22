@@ -9,7 +9,7 @@ import fs from 'fs';
 import zlib from 'zlib';
 const APP = new URL('../src/window', import.meta.url).href;
 const { getBiome } = await import(`${APP}/biomes/index.js?${Date.now()}`);
-const { LAYERS, CAMERA_HEIGHT, neededChunks, expectedActive } = await import(`${APP}/layers.js`);
+const { LAYERS, CAMERA_HEIGHT, neededChunks, expectedActive, shareOf } = await import(`${APP}/layers.js`);
 const { makeTerrain } = await import(`${APP}/terrain.js`);
 const { hashInts, hashString, makeRng } = await import(`${APP}/rng.js`);
 const { LEVELS } = await import(`${APP}/director.js`);
@@ -40,7 +40,7 @@ const only = q.get('layers') ? q.get('layers').split(',') : null;
 for (const layer of LAYERS) {
   if (only && !only.includes(layer.name)) continue;
   const { first, last } = neededChunks(layer, travelled, tanH, LEAD);
-  const count = Math.max(200, Math.round((budget * layer.share) / expectedActive(layer, tanH, LEAD)));
+  const count = Math.max(200, Math.round((budget * shareOf(layer, biome)) / expectedActive(layer, tanH, LEAD)));
   for (let index = first; index <= last; index++) {
     const x0 = index * layer.chunkLen;
     const ctx = {

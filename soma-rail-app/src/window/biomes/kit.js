@@ -50,6 +50,19 @@ export const NOMINAL = { trackside: 49000, near: 57000, mid: 33000, far: 20000 }
 
 // What a splat is, for checks (and possible future per-kind effects).
 export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 5, FENCE: 6, ROCK: 7, LIGHT: 8, SURREAL: 9, OTHER: 10 };
+// Motion classes: an optional 16th emit argument. The shader moves a tagged splat (sparkPatch.js):
+//   FLAG      flutters, by an amount in proportion to its own size (flags, banners, pennants)
+//   TRAFFIC_n a continuous line of small light splats over lane n (0 = fast lane, 2 = lorries).
+//             The shader lights only the splats under a vehicle's lamps, and the vehicles run
+//             along the line. A red line runs the train's way, any other colour against it.
+//             Must be KIND.LIGHT, about 1.2 m apart, with no gaps (a gap swallows vehicles).
+//   VAPOUR    billows slowly (plumes, mist, cloud streamers, smoke)
+//   BEAT      does not move, but swells and brightens on each beat of the music. By default
+//             everything above eye level answers the beat; a biome that sets beatKinds (a list
+//             of KINDs, e.g. [KIND.TREE, KIND.BUILDING]) switches that off and has those kinds,
+//             plus anything tagged BEAT by hand, answer it instead. Lights always do.
+// Leave it out and the splat stays still.
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, VAPOUR: 5, BEAT: 6 };
 
 // Direction toward the sun for baked shading: high, to the left (-x) and on the camera's side
 // (+z), so the faces the window sees are lit and tops are brightest.
@@ -116,7 +129,7 @@ export function rotY(x, z, a) { const c = Math.cos(a), s = Math.sin(a); return [
 // ---------------------------------------------------------------------------------------------
 
 // Wraps the engine's emit: clips to the chunk and band, caps colours, counts, and paces yields.
-//   out(x, y, z, sx, sy, sz, r, g, b, opacity, qx, qy, qz, qw, kind) -> true if kept
+//   out(x, y, z, sx, sy, sz, r, g, b, opacity, qx, qy, qz, qw, kind, move) -> true if kept
 //   out.n        splats emitted so far          out.due()   true every ~400 splats (then yield)
 //   out.density  ctx.count / default count      out.left()  splats still wanted to reach ctx.count
 //   out.limit    splats beyond this are dropped (default Infinity)
@@ -127,12 +140,12 @@ export function makeOut(ctx, emit, opts = {}) {
   const m = opts.zMargin != null ? opts.zMargin : 0.04 * ctx.zFar;
   const dLo = Math.max(2.4, ctx.zNear - m), dHi = ctx.zFar + m;
   let since = 0;
-  const out = (x, y, z, sx, sy, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = KIND.OTHER) => {
+  const out = (x, y, z, sx, sy, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = KIND.OTHER, move = 0) => {
     if (out.n >= out.limit || !(x >= 0 && x < L)) return false;
     const d = -z;
     if (!(d >= dLo && d <= dHi)) return false;
     const cap = kind === KIND.LIGHT ? 1 : NAT_MAX;
-    emit(x, y, z, sx, sy, sz, clamp(r, 0, cap), clamp(g, 0, cap), clamp(b, 0, cap), clamp(o, 0, 1), qx, qy, qz, qw, kind);
+    emit(x, y, z, sx, sy, sz, clamp(r, 0, cap), clamp(g, 0, cap), clamp(b, 0, cap), clamp(o, 0, 1), qx, qy, qz, qw, kind, move);
     out.n++; since++;
     return true;
   };

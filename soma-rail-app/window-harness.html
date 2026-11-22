@@ -16,7 +16,7 @@
       import { createEngine } from '/src/window/engine.js';
       const q = new URLSearchParams(location.search);
       const params = readParams();
-      window.harness = { ready: false, error: null, frames: 0 };
+      window.harness = { ready: false, error: null, frames: 0, params };
       try {
         const engine = createEngine({ canvas: document.getElementById('c'), params, reducedMotion: q.get('reduced') === '1' });
         window.harness.engine = engine;

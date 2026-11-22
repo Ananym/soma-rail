@@ -116,7 +116,10 @@ uniform vec3 uMoonDir, uMoonLow, uMoonHigh, uMoonDirect;
 uniform vec3 uSun2Dir, uSun2Col;                           // level-1 second sun (uSun2Col = 0 when off)
 uniform vec3 uNightGlow, uAmbient;                         // airglow; average sky light for clouds
 uniform float uSunDisc, uMoonDisc, uMoonRadius, uSun2Disc, uStars;
-uniform float uStarThresh, uDeep, uMilky;                   // a biome's night-sky hint (see update)
+uniform float uStarThresh, uDeep, uMilky;
+uniform float uTwinkle, uTwT, uStarBeat, uBeatSeq;          // scintillation and the beat pulse (see update)
+uniform vec3 uMeteorA, uMeteorB;
+uniform float uMeteorT;                                     // 0..1 along the meteor's path, < 0 for none                   // a biome's night-sky hint (see update)
 uniform vec2 uCloudOffLo, uCloudOffHi;
 uniform float uCoverLo, uCoverHi, uCloudGain;
 uniform float uTopo, uAurora, uLandOff;
@@ -289,7 +292,12 @@ void main() {
         float b = pow(hash12(ci + 13.0), 9.0) * 1.8 + 0.035;
         float tint = hash12(ci + 29.0);
         vec3 sc = mix(vec3(1.0, 0.82, 0.65), vec3(0.75, 0.85, 1.0), tint);
-        col += sc * b * exp(-dd * dd * 2.2) * uStars * ext.g * moonMask;
+        // Each star scintillates at its own rate, more so low in the sky. On every beat a different
+        // third of them flares: a bright star is already at full white, so the flare also widens
+        // its dot, which is what shows.
+        float tw = 1.0 + uTwinkle * (0.3 + 0.35 * (1.0 - smoothstep(0.05, 0.35, dir.y))) * sin(uTwT * (2.0 + 7.0 * hash12(ci + 41.0)) + 6.2832 * hash12(ci + 43.0));
+        float flare = uStarBeat * step(0.66, fract(hash12(ci + 47.0) + uBeatSeq * 0.382));
+        col += sc * b * tw * (1.0 + 2.6 * flare) * exp(-dd * dd * 2.2 / (1.0 + 0.6 * flare)) * uStars * ext.g * moonMask;
       }
       // a second, finer field of faint stars for a dark-sky site, thicker in the Milky Way
       if (uDeep > 0.003) {
@@ -300,9 +308,22 @@ void main() {
           vec2 sp = c2 + 0.2 + 0.6 * vec2(hash12(c2 + 5.0), hash12(c2 + 11.0));
           float dd = length((g2 - sp) * CELL2) / max(px, 1e-5);
           float b = 0.012 + 0.07 * pow(hash12(c2 + 17.0), 3.0);
-          col += vec3(0.85, 0.9, 1.0) * b * exp(-dd * dd * 2.6) * uStars * uDeep * ext.g * moonMask;
+          float tw2 = 1.0 + uTwinkle * 0.45 * sin(uTwT * (3.0 + 8.0 * hash12(c2 + 23.0)) + 6.2832 * hash12(c2 + 31.0));
+          float fl2 = uStarBeat * step(0.6, fract(hash12(c2 + 37.0) + uBeatSeq * 0.382));
+          col += vec3(0.85, 0.9, 1.0) * b * tw2 * (1.0 + 2.5 * fl2) * exp(-dd * dd * 2.6) * uStars * uDeep * ext.g * moonMask;
         }
       }
+    }
+
+    // ---- a meteor: a short bright streak along a path the CPU picks now and then, head brightest
+    if (uMeteorT >= 0.0 && uMeteorT < 1.0 && uStars > 0.003) {
+      vec3 hd = normalize(mix(uMeteorA, uMeteorB, uMeteorT));
+      vec3 tl = normalize(mix(uMeteorA, uMeteorB, max(0.0, uMeteorT - 0.4)));
+      vec3 ab = hd - tl;
+      float tt = clamp(dot(dir - tl, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
+      float dist = length(dir - (tl + ab * tt));
+      float w = max(px * 1.3, 0.0007);
+      col += vec3(0.9, 0.95, 1.0) * exp(-dist * dist / (w * w)) * tt * tt * sin(3.14159 * uMeteorT) * 1.8 * uStars * ext.g;
     }
 
     // ---- aurora (level 1, topology dial, night): curtains with a sharp lower edge and rays
@@ -407,6 +428,8 @@ export function createSky(THREE) {
     uNightGlow: { value: C3() }, uAmbient: { value: C3() },
     uSunDisc: { value: 0 }, uMoonDisc: { value: 0 }, uMoonRadius: { value: 0.005 }, uSun2Disc: { value: 0 }, uStars: { value: 0 },
     uStarThresh: { value: 0.86 }, uDeep: { value: 0 }, uMilky: { value: 0 },
+    uTwinkle: { value: 0 }, uTwT: { value: 0 }, uStarBeat: { value: 0 }, uBeatSeq: { value: 0 },
+    uMeteorA: { value: new THREE.Vector3(0, 0.3, -1) }, uMeteorB: { value: new THREE.Vector3(0.2, 0.2, -1) }, uMeteorT: { value: -1 },
     uCloudOffLo: { value: new THREE.Vector2(17.3, 5.1) }, uCloudOffHi: { value: new THREE.Vector2(3.7, 40.2) },
     uCoverLo: { value: 0.52 }, uCoverHi: { value: 0.58 }, uCloudGain: { value: 1 },
     uTopo: { value: 0 }, uAurora: { value: 0 }, uLandOff: { value: 0 }, uLandCol: { value: C3() },
@@ -452,6 +475,16 @@ export function createSky(THREE) {
 
   const AMB = 2.5;         // weight of sky light against direct light on the land
   let lastTravelled = null;
+  let lastBeat = 0, beatSeq = 0, meteorT = -1, meteorWait = 0, meteorPin = null;
+  // A meteor starts somewhere in the upper part of the window and falls 10 to 18 degrees on a slant.
+  function startMeteor(aspect, shift) {
+    const th = U.uTanHalf.value, r = Math.random;
+    const dirOf = (u, v) => new THREE.Vector3(u * th * aspect, (v + shift) * th, -1).normalize();   // u, v in -1..1 of the window
+    const u0 = -0.8 + 1.6 * r(), v0 = 0.35 + 0.55 * r(), ang = (r() < 0.5 ? -1 : 1) * (0.5 + 0.7 * r()), len = 0.45 + 0.4 * r();
+    U.uMeteorA.value.copy(dirOf(u0, v0));
+    U.uMeteorB.value.copy(dirOf(u0 + Math.sin(ang) * len / aspect, v0 - Math.cos(ang) * len));
+    meteorT = 0; meteorWait = 8;
+  }
   let noonRef = null;     // reference daylight for normalising the land tint
   let exposureSmooth = null;
   let paths = makePaths(39.7), pathsKey = 0;
@@ -491,7 +524,7 @@ export function createSky(THREE) {
   }
 
   function update(state) {
-    const { hour = 12, level = 0, dials = {}, time = 0, dt = 0, aspect = 16 / 9, fovDeg = 50, travelled = 0, energy = 0, beat = 0, sparkle = 0, sky: hint = null, shift = 0 } = state;
+    const { hour = 12, level = 0, dials = {}, time = 0, dt = 0, aspect = 16 / 9, fovDeg = 50, travelled = 0, energy = 0, beat = 0, sparkle = 0, sky: hint = null, shift = 0, motionT = 0, moving = true, twinkle = 1 } = state;
     U.uShift.value = shift;
     // A biome may ask for a richer night sky: { stars: brightness x, deep: 0..1 extra faint stars,
     // milkyWay: 0..1, clear: 0..1 fewer clouds }. All default to the plain sky.
@@ -527,6 +560,20 @@ export function createSky(THREE) {
     // the stars brighten with the treble, so hi-hats make the night sky glitter
     U.uStars.value = smoothstep(-0.07, -0.2, sy) * (1 - 0.35 * smoothstep(0, 0.3, moonDir.y)) * (1 + 0.4 * L1) * (1 + 0.9 * sparkle) * (skyHint.stars || 1);
     U.uDeep.value = skyHint.deep || 0;
+    // The stars live a little: they scintillate on a clock that stops with the train (motionT), a
+    // different third of them flares on each beat, and now and then a meteor crosses the window,
+    // most often on a hard hit. twinkle = 0 (reduced motion) holds all of it still.
+    U.uTwinkle.value = twinkle;
+    U.uTwT.value = motionT % 3600;
+    if (beat > lastBeat + 0.25) { beatSeq = (beatSeq + 1) % 1024; if (twinkle > 0 && moving && meteorT < 0 && meteorWait <= 0 && beat > 0.7 && Math.random() < 0.3) startMeteor(aspect, shift); }
+    lastBeat = beat;
+    U.uBeatSeq.value = beatSeq;
+    U.uStarBeat.value = twinkle * beat;
+    meteorWait -= dt;
+    if (twinkle > 0 && moving && meteorT < 0 && meteorWait <= -40 && Math.random() < dt / 30) startMeteor(aspect, shift);   // and without music, one every minute or so
+    if (meteorT >= 0) { meteorT += dt / 0.75; if (meteorT >= 1) meteorT = -1; }
+    if (meteorPin != null) meteorT = meteorPin;   // screenshots only
+    U.uMeteorT.value = meteorT;
     U.uStarThresh.value = 0.86 - 0.05 * (skyHint.deep || 0);
     U.uMilky.value = skyHint.milkyWay || 0;
     U.uCoverLo.value = 0.52 + 0.16 * (skyHint.clear || 0);
@@ -597,6 +644,7 @@ export function createSky(THREE) {
   update({ hour: 12, level: 0, dials: {}, time: 0, dt: 0, aspect: 16 / 9, fovDeg: 50, travelled: 0, energy: 0 });
   const sky = { object3d, update, horizonColor, hazeHighColor, lightTint, sunDir };
   // for scripts/check-sky.mjs only; not enumerable, so the interface stays the five fields above
-  Object.defineProperty(sky, '_debug', { value: { skyBaseJS, uniforms }, enumerable: false });
+  // _debug.meteor(t) starts a meteor and holds it at t (0..1) for a screenshot
+  Object.defineProperty(sky, '_debug', { value: { skyBaseJS, uniforms, meteor: (t) => { startMeteor(U.uAspect.value, U.uShift.value); meteorPin = t; } }, enumerable: false });
   return sky;
 }

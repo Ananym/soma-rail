@@ -17,6 +17,13 @@ export const PATCH_UNIFORMS = () => ({
   uBeat: { value: 0 },              // 0..1, jumps on each onset (kick, snare) and decays in a fraction of a second
   uSparkle: { value: 0 },           // 0..1, follows the treble (hi-hats, cymbals, air)
   uClock: { value: 0 },             // seconds, for the sparkle's flicker
+  uBeatRaised: { value: 1 },        // 1: everything above eye level swells on the beat; 0: only splats tagged for it
+  uMove: { value: 0 },              // strength of the motion classes (flags, traffic, vapour); 0 = everything still
+  uMoveT: { value: 0 },             // seconds of motion time; stands still while the train does
+  uTravel: { value: 0 },            // metres travelled (wrapped), so patterns can be pinned to the world
+  uFlowWith: { value: null },       // THREE.Vector3: per-lane pattern offsets (m) for traffic going the train's way
+  uFlowAgainst: { value: null },    // ... and for traffic coming the other way
+  uMoveDebug: { value: 0 },         // 1 paints each motion class a flat colour, to check the tagging
 });
 
 const EDITS = [
@@ -33,12 +40,87 @@ uniform float uDissolve;
 uniform float uBreath;
 uniform float uBeat;
 uniform float uSparkle;
-uniform float uClock;`,
+uniform float uClock;
+uniform float uBeatRaised;
+uniform float uMove;
+uniform float uMoveT;
+uniform float uTravel;
+uniform float uMoveDebug;
+uniform vec3 uFlowWith;
+uniform vec3 uFlowAgainst;`,
   },
   {
     // scatter and breathe, before the splat is moved into view space
     anchor: 'rgba.rgb = max(rgba.rgb, vec3(0.0));',
     insert: `
+    // Motion class: three bits carried in the lowest bit of each colour channel (see tagLast below).
+    ivec3 mvBits = ivec3(floor(rgba.rgb * 255.0 + 0.5)) & 1;
+    int mv = mvBits.r | (mvBits.g << 1) | (mvBits.b << 2);
+    if (uMove > 0.0 && mv != 0) {
+        // Things that move. Every phase is built from wrapped inputs whose wrap is a whole number of
+        // cycles (uMoveT and uTravel wrap at 200 pi; every multiplier on them is a multiple of 0.01),
+        // so nothing jumps when they wrap. center.z never changes as the world scrolls and center.y
+        // only by the camera's millimetre shake, so they may enter a phase smoothly but never a hash.
+        float wx = center.x + uTravel;                 // metres along the line
+        if (mv == 1) {
+            // Flags and banners: a ripple running along the string, sized by the flag itself, in gusts.
+            float sz = max(scales.x, scales.y);
+            float ph = 5.6 * uMoveT + 1.3 * wx + 0.9 * center.z + 2.0 * center.y;   // the y term runs the ripple down a hanging banner
+            float gust = 0.55 + 0.45 * sin(0.6 * uMoveT + 0.05 * wx);
+            float amp = uMove * gust * sz;
+            center.x += amp * 1.1 * sin(ph);
+            center.y += amp * 0.3 * sin(1.7 * ph + 1.3);
+            scales.x *= 1.0 + 0.35 * min(uMove, 1.0) * gust * sin(1.3 * ph + 2.0);
+        } else if (mv <= 4) {
+            // Traffic. Each lane is a continuous line of small light splats, and the shader lights
+            // only those that fall on a vehicle's lamps: white headlamps and a short pool of beam
+            // at the front, red tail lamps at the back, and along a lorry's flank a row of amber
+            // markers. One vehicle at most per 48 m of lane, placed in the traffic's own frame (the
+            // CPU sends where that frame has got to), so vehicles follow every bend of the road.
+            // The lane's baked colour says which way it runs (red: the train's way) and is read
+            // before it is replaced. Every lamp colour keeps red at 1, so each stays a light.
+            int lane = mv - 2;
+            bool sameWay = rgba.g < 0.4 * rgba.r;
+            float dirS = sameWay ? 1.0 : -1.0;
+            float u = (center.x + (sameWay ? uFlowWith[lane] : uFlowAgainst[lane])) / 48.0;
+            float cell = mod(floor(u), 4096.0);
+            vec3 hc = fract(sin(vec3(cell * 12.9898 + float(lane) * 37.7 + (sameWay ? 5.0 : 0.0), cell * 78.233 + float(lane) * 11.3, cell * 37.719 + float(lane) * 3.1)) * 43758.5453);
+            float present = step(0.42, hc.x);
+            float lorry = step(lane == 2 ? 0.45 : 0.92, hc.z);
+            float halfL = mix(2.1, 6.5, lorry);
+            float f = (fract(u) - (0.25 + 0.5 * hc.y)) * 48.0 * dirS;      // metres ahead of the vehicle's middle
+            // A lamp is one lane splat, the one nearest the lamp, slid along the lane to the lamp's
+            // exact place: so lamps glide instead of hopping between the fixed splats. The lane's
+            // spacing is read off the splat's own baked length (0.72 of the spacing).
+            float sp = scales.x / 0.72;
+            float dh = f - halfL, dtl = f + halfL;
+            float mk = floor(f / 2.4 + 0.5) * 2.4;                          // nearest side-marker position
+            float head = step(abs(dh), 0.53 * sp);                          // a shade wide: the spacing is only known to a few per cent
+            float tail = step(abs(dtl), 0.5 * sp) * (1.0 - head);
+            float side = lorry * step(abs(f - mk), 0.5 * sp) * step(abs(mk), halfL - 1.0) * (1.0 - head) * (1.0 - tail);
+            float beam = 0.3 * step(0.5 * sp, dh) * exp(-dh / 5.0);         // a short pool of light ahead
+            float slide = -(head * dh + tail * dtl + side * (f - mk)) * dirS;
+            float sum = head + 0.9 * tail + beam + 0.3 * side;
+            vec3 lamp = (vec3(1.0, 0.97, 0.88) * (head + beam) + vec3(1.0, 0.1, 0.07) * 0.9 * tail + vec3(1.0, 0.6, 0.15) * 0.3 * side) / max(sum, 0.001);
+            float k = min(uMove, 1.0);
+            center.x += slide * k;
+            rgba.rgb = mix(rgba.rgb, lamp, k);
+            rgba.a = mix(rgba.a, present * min(1.0, sum), k);
+            float point = head + tail + side;                               // 1 for a lamp, 0 for beam or dark lane
+            scales.x = mix(scales.x, mix(scales.x, 0.3 + 0.12 * head, point), k);
+            scales.yz *= mix(1.0, 0.9 + 1.0 * head + 0.5 * tail - 0.2 * side, k);
+        } else if (mv == 5) {
+            // Vapour (plumes, mist, cloud streamers): a slow billow, each splat on its own phase.
+            float sz = max(scales.x, max(scales.y, scales.z));
+            // (the hash is kept apart from the wx terms so that each sine's multiplier on wx stays a
+            // whole multiple of 0.01: scaling a combined phase would break the wrap rule above)
+            float hp = 6.2832 * fract(sin(center.z * 78.233) * 43758.5453);
+            float amp = uMove * sz;
+            center.x += amp * 0.3 * sin(0.31 * uMoveT + hp + 0.02 * wx + 0.015 * center.y);
+            center.y += amp * 0.12 * sin(0.23 * uMoveT + 1.7 * hp + 0.03 * wx + 0.025 * center.y);
+            scales *= 1.0 + 0.1 * min(uMove, 1.0) * sin(0.4 * uMoveT + 2.3 * hp + 0.05 * wx + 0.035 * center.y);
+        }
+    }
     if (uDissolve > 0.0) {
         // Keyed to the splat's distance from the track, which never changes as the world scrolls:
         // the scatter is steady, and things at one distance (a facade, a wire) drift together.
@@ -50,13 +132,18 @@ uniform float uClock;`,
     // out what stands above eye level (trees, buildings, towers, mesas) and leaves the ground alone.
     // On each beat those things, and every light, swell a little and fall back; the bass adds a slower
     // breath to everything. The treble makes raised things shimmer and lights twinkle (see below).
-    float raised = smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
+    // A biome whose high ground is the scenery itself (limestone towers, dunes) turns the raised rule
+    // off and names what should answer the beat instead (class 6, see kit.js MOVE.BEAT and a biome's
+    // beatKinds). A swell alone hardly shows on a mass of overlapping splats, so the chosen things
+    // also brighten for the length of the beat: still below the level that would make them lights.
+    float raised = uBeatRaised * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
-    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight);
-    float shimmer = 1.0;
+    float picked = mv == 6 ? 1.0 : 0.0;
+    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.16 * picked);
+    float shimmer = 1.0 + 0.38 * uBeat * picked * (1.0 - isLight);
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
-        shimmer = 1.0 + uSparkle * (tw - 0.5) * (0.2 * raised + 0.6 * isLight);
+        shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, picked) + 0.6 * isLight);
     }`,
   },
   {
@@ -71,6 +158,9 @@ uniform float uClock;`,
         // haze toward the sky colour at the splat's own elevation, so far hills meet the sky at twilight
         vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
         vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow) * shimmer, hazeCol, hz * (1.0 - 0.5 * glow));
+        if (uMoveDebug > 0.5) {
+            vRgba.rgb = mv == 0 ? vRgba.rgb * 0.35 : vec3(float(mv & 1), float((mv >> 1) & 1), float((mv >> 2) & 1)) * 0.8 + 0.2;
+        }
     }`,
   },
   {
@@ -100,4 +190,20 @@ export function buildVertexShader(defaultShader) {
     src = src.replace(anchor, anchor + insert);
   }
   return src;
+}
+
+// ---- motion tags ----
+// A splat's motion class (kit.js MOVE, 0..7) rides in the lowest bit of its red, green and blue
+// bytes: a change of at most 1/255 in colour, read back in the vertex shader above. Every splat that
+// reaches the renderer must therefore have those bits set on purpose: tagLast() after each push,
+// clearTags() for splats loaded from a file.
+export function tagLast(packed, cls = 0) {
+  const a = packed.packedArray, i4 = (packed.numSplats - 1) * 4;
+  a[i4] = ((a[i4] & 0xfffefefe) | (cls & 1) | (((cls >> 1) & 1) << 8) | (((cls >> 2) & 1) << 16)) >>> 0;
+}
+export function clearTags(packed) {
+  const a = packed.packedArray;
+  if (!a) return;
+  for (let i = 0, n = packed.numSplats * 4; i < n; i += 4) a[i] = (a[i] & 0xfffefefe) >>> 0;
+  packed.needsUpdate = true;
 }
