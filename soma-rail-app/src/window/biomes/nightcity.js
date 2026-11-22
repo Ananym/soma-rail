@@ -5,7 +5,9 @@
 // backs of sheds below the bank. Beyond: a street grid of terraces, flats and shops with lit
 // windows, rows of street lamps with pools of light on the road, parked cars, a river in places;
 // then the mass of the city rising block by block to towers, and a skyline far off with red
-// aircraft lamps under an orange glow.
+// aircraft lamps under an orange glow. Over it all, the sky's traffic: airliners strung out on
+// approach, single ones crossing high up, a helicopter with its searchlight, an airship now and
+// then, searchlight beams from downtown (see "The sky over the city").
 //
 // How light works (see sparkPatch.js): there are no lights in the renderer. Every splat is
 // multiplied by the time-of-day tint (about 0.2 at night) except colours with a channel >= 0.97,
@@ -22,13 +24,15 @@
 //
 // Surreal dials (all 0 at level 0):
 //   scale     towers of impossible height that thin out upward into the sky (mid and far)
-//   topology  blocks of city floating over the mid band; a second city hanging upside down from the sky
+//   topology  blocks of city floating over the mid band; a second city hanging upside down from the sky;
+//             airliners descending a corkscrew that stands in the sky
 //   logic     the same corner shop and sign repeating along the first street, each copy slightly
-//             wrong; window lights that form slow waves across the facades
+//             wrong; window lights that form slow waves across the facades; the airship comes as
+//             three in line, each copy a little more wrong
 import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, detail, shade, jitter,
-  mul3, mix3, smooth, clamp, lerp, broadleaf, blob, stick, overheadLine, quatPitch, strut,
+  mul3, mix3, smooth, clamp, lerp, broadleaf, blob, stick, overheadLine, quatPitch, quatXTo, strut,
 } from './kit.js';
 
 const PAL = {
@@ -914,6 +918,7 @@ function* mid(ctx, emit) {
   const cap = ctx.count * 0.7;
   out.limit = ctx.count * 0.78;
   const pattern = Ls.night > 0.3 ? windowPattern(ctx, dz.logic || 0) : null;   // a pattern of lights needs the dark
+  yield* skyOver(ctx, out, dz);        // first: a few dozen splats that must never be squeezed out
   yield* streetLights(ctx, out, L, ctx.zNear, ctx.zFar, true);
   yield* riverLights(ctx, out, L, false);
   // cranes over building sites
@@ -986,6 +991,7 @@ function* far(ctx, emit) {
   const ws = worldSeed(ctx);
   const pattern = Ls.night > 0.3 ? windowPattern(ctx, dz.logic || 0) : null;   // a pattern of lights needs the dark
   out.limit = ctx.count * 0.75;
+  yield* skyOver(ctx, out, dz);        // first: a few dozen splats that must never be squeezed out
   // the skyline: clusters of towers
   for (let i = Math.floor((ctx.x0 - 3000) / FCELL); i <= Math.floor((ctx.x0 + ctx.length + 3000) / FCELL); i++) {
     const sk = skylineIn(ctx, i);
@@ -1050,6 +1056,308 @@ function* far(ctx, emit) {
     power: 1.0, cover: 2.6, maxR: 0.03,
     color: (wx, d, rng) => jitter(mix3([0.2, 0.2, 0.2], [0.18, 0.2, 0.15], smooth(6000, 11000, d)), rng, 0.1),
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// The sky over the city: airliners, a helicopter, an airship, searchlights
+// ---------------------------------------------------------------------------------------------
+// Nothing up here moves or blinks by itself (a light has no motion class to spare: on a light,
+// those numbers mean traffic). A craft hangs where it is and drifts back as the train goes by,
+// slowly, which is how a distant aircraft looks from a train; its lights twinkle with the treble
+// and swell with the beat like every other light.
+//
+// Places are chosen in the frame, not in the air: (y - eye) / d is a thing's height on screen, the
+// same for the whole pass. The towers reach about 0.17 and the window frame cuts in at about 0.42,
+// so craft keep between 0.18 and 0.39 (a true three-degree approach would be lost behind the
+// skyline). The helicopter and the airship keep under 0.28, below where the overhead line's
+// wires swing.
+// Sizes come from distance as the lamps' do: a light's core never much under a pixel, a wingspan
+// never under about 0.009 d, so far off a plane is a few pixels of white, red and green that stay
+// apart. The lights are on at every hour; searchlight beams, the helicopter's cone and the glow
+// inside the airship wait for the night.
+//
+// One schedule, a pure function of the world seed (skyTraffic), says what is where; each band
+// draws the craft whose centre lies in it, before anything that the splat limit could cut.
+// How full the sky gets is set there, in metres of line: a far thing stays in view for some
+// 1.7 d of travel, so the far cells are long and hold one thing each.
+const EYE = 2.6;
+const NAV_RED = [1.0, 0.1, 0.06], NAV_GREEN = [0.12, 1.0, 0.42], NAV_WHITE = [0.94, 0.97, 1.0];
+const LANDING = [1.0, 0.97, 0.9], CABIN = [1.0, 0.86, 0.62], BEAM = [0.84, 0.92, 1.0];
+const SKY_FAR = 12000;      // one approach line, or up to two high airliners and a low one, per cell
+const SKY_LOW = 4500;       // at most one helicopter or airship per cell
+
+function skyTraffic(ctx, a, b, dz) {
+  const ws = worldSeed(ctx), res = [];
+  const topo = (dz && dz.topology) || 0, logic = (dz && dz.logic) || 0;
+  // Far cells. Half hold a line of airliners on approach: three to five on one straight line in
+  // space (so they stay in line on screen all the way past), coming down towards the line, the
+  // leader low, near and large over the mid city, each one behind it higher and smaller. The other
+  // half hold none, one or two single airliners, high up, crossing, and most of them one more low
+  // and near over the mid city: side on, with its row of cabin windows, or coming in alone. (A visit
+  // to the city lasts one piece of music, some 7 km of line: this is what brings a near airliner
+  // to more than half of them.)
+  for (let i = Math.floor((a - 7000) / SKY_FAR); i <= Math.floor((b + 7000) / SKY_FAR); i++) {
+    const r = makeRng(hashInts(ws, 941, i));
+    if (r() < 0.5) {
+      const dir = r() < 0.5 ? -1 : 1, n = 3 + Math.floor(r() * 2.6);
+      const d0 = 750 + 700 * r(), d1 = 8000 + 2500 * r();
+      const y0 = EYE + d0 * (0.18 + 0.04 * r()), y1 = EYE + d1 * (0.33 + 0.06 * r());
+      const x0 = (i + 0.3 + 0.4 * r()) * SKY_FAR, dX = dir * (3000 + 2500 * r());
+      const hl = Math.hypot(dX, d1 - d0);
+      const h = [-dX / hl, 0, (d1 - d0) / hl];          // level, nose down the line of approach
+      for (let k = 0; k < n; k++) {
+        const d = d0 * Math.pow(d1 / d0, k / (n - 1)), t = (d - d0) / (d1 - d0);
+        res.push({ type: 'liner', x: x0 + dX * t, y: y0 + (y1 - y0) * t, d, h, landing: true, group: 'approach', id: hashInts(ws, 943, i, k) });
+      }
+    } else {
+      for (let s = 0; s < 2; s++) {
+        const p = r(), fx = r(), fd = r(), fr = r(), fa = r(), dir = r() < 0.5 ? -1 : 1;
+        if (p > 0.6) continue;
+        const d = 4200 + 7300 * fd, ang = (fa - 0.5) * 0.6;
+        res.push({ type: 'liner', x: (i + (s + 0.15 + 0.7 * fx) / 2) * SKY_FAR, y: EYE + d * (0.25 + 0.13 * fr), d, h: [dir * Math.cos(ang), 0, Math.sin(ang)], landing: false, group: 'single', id: hashInts(ws, 945, i, s) });
+      }
+      const p = r(), fx = r(), fd = r(), fr = r(), fa = r(), dir = r() < 0.5 ? -1 : 1, landing = r() < 0.4;
+      if (p < 0.7) {
+        const d = 750 + 750 * fd, ang = landing ? 0.9 + 0.4 * fa : (fa - 0.5) * 0.5;      // the nose's swing from the line of the track towards it
+        res.push({ type: 'liner', x: (i + 0.2 + 0.6 * fx) * SKY_FAR, y: EYE + d * (0.19 + 0.07 * fr), d, h: [dir * Math.cos(ang), 0, Math.sin(ang)], landing, group: 'low', id: hashInts(ws, 945, i, 2) });
+      }
+    }
+  }
+  // Low cells: a helicopter over the towers of the mid city (nine cells in twenty), or an airship
+  // further back (one in five).
+  for (let i = Math.floor((a - 900) / SKY_LOW); i <= Math.floor((b + 900) / SKY_LOW); i++) {
+    const r = makeRng(hashInts(ws, 947, i));
+    const u = r(), x = (i + 0.2 + 0.6 * r()) * SKY_LOW, dir = r() < 0.5 ? -1 : 1, id = hashInts(ws, 949, i);
+    if (u < 0.45) {
+      const d = 420 + 600 * r();
+      res.push({ type: 'heli', x, y: EYE + d * (0.2 + 0.08 * r()), d, dir, yaw: 0.2 + 0.4 * r(), id });
+    } else if (u < 0.65) {
+      const d = 900 + 900 * r(), y = EYE + d * (0.2 + 0.06 * r()), len = Math.max(120, 0.11 * d);
+      res.push({ type: 'blimp', x, y, d, dir, len, id });
+      // logic: the same airship twice more behind it, each copy a little more wrong
+      if (logic > 0) for (let k = 1; k <= 2; k++) res.push({ type: 'blimp', x: x - dir * k * len * 1.3, y: y + k * len * 0.07, d, dir, len: len * (1 - 0.17 * k), id, wrong: k, surreal: true });
+    }
+  }
+  // Searchlights: three or four beams fanned out from a roof in front of one skyline in three.
+  for (let i = Math.floor((a - 2500) / FCELL); i <= Math.floor((b + 2500) / FCELL); i++) {
+    const sk = skylineIn(ctx, i);
+    if (!sk) continue;
+    const r = makeRng(hashInts(ws, 951, i));
+    if (r() > 0.36) continue;
+    res.push({ type: 'beams', x: sk.cx + (r() - 0.5) * sk.R * 0.5, d: sk.cd - 250 - 300 * r(), n: 3 + Math.floor(r() * 1.6), id: hashInts(ws, 953, i) });
+  }
+  // topology: a holding stack you can see, ten airliners nose to tail down a corkscrew
+  if (topo > 0) {
+    for (let i = Math.floor((a - 2500) / 15000); i <= Math.floor((b + 2500) / 15000); i++) {
+      const r = makeRng(hashInts(ws, 959, i));
+      if (r() > 0.4 * topo) continue;
+      const cx = (i + 0.2 + 0.6 * r()) * 15000, cd = 6200 + 2300 * r(), R = 650 + 350 * r(), th0 = r() * 6.283, sense = r() < 0.5 ? -1 : 1;
+      for (let k = 0; k < 10; k++) {
+        const th = th0 + sense * k * 1.05, d = cd + R * Math.sin(th);
+        // heading: down the corkscrew, the way of falling k
+        res.push({ type: 'liner', x: cx + R * Math.cos(th), y: EYE + d * (0.19 + 0.2 * k / 9), d, h: [sense * Math.sin(th), 0, sense * Math.cos(th)], landing: true, surreal: true, group: 'stack', id: hashInts(ws, 961, i, k) });
+      }
+    }
+  }
+  return res.filter((c) => c.x >= a && c.x < b);
+}
+
+// Everything in the sky that this chunk's band owns.
+function* skyOver(ctx, out, dz) {
+  const m = 2800;         // the widest thing (a searchlight beam leaning over) reaches this far along the line
+  for (const c of skyTraffic(ctx, ctx.x0 - m, ctx.x0 + ctx.length + m, dz)) {
+    if (c.d < ctx.zNear || c.d >= ctx.zFar) continue;
+    if (c.type === 'liner') airliner(ctx, out, c);
+    else if (c.type === 'heli') helicopter(ctx, out, c);
+    else if (c.type === 'blimp') blimp(ctx, out, c);
+    else searchlights(ctx, out, c);
+    if (out.due()) yield;
+  }
+  if (globalThis.__nightcitySky) globalThis.__nightcitySky(ctx, out.n);    // for scripts: how many splats the sky took
+}
+
+// A craft's lamp at p ([x, y, z]). By day it is still lit, but small and without its halo.
+function glowAt(out, p, c, r, halo, hk) {
+  const day = out.L && out.L.night < 0.3;
+  glowPoint(out, p[0], p[1], -p[2], c, day ? r * 0.7 : r, day ? 0 : halo, hk);
+}
+// A beam of light from a to b ([x, y, z]), r0 wide at a and r1 at b, fading from o0 to o1: a few
+// long, soft light splats that overlap by half, so it is one shaft and not a row of them.
+function beam(out, a, b, r0, r1, o0, o1, c, n) {
+  for (let i = 0; i < n; i++) {
+    const t0 = (i - 0.3) / n, t1 = (i + 1.3) / n, t = (i + 0.5) / n;
+    strut(out, lerp(a[0], b[0], t0), lerp(a[1], b[1], t0), lerp(a[2], b[2], t0), lerp(a[0], b[0], t1), lerp(a[1], b[1], t1), lerp(a[2], b[2], t1),
+      r0 + (r1 - r0) * t, c, 1, o0 + (o1 - o0) * t * (2 - t), KIND.LIGHT);
+  }
+}
+
+// An airliner. At night it is its lights: red on the port wingtip and green on the starboard
+// (which is on which side of the frame follows from the heading), white at the tail, a red beacon
+// on the roof, and, coming in to land towards the line, the white landing lights that outshine
+// the rest. The body is drawn too, pale and plain: it goes nearly black with the night tint and
+// shows against the glow over the city. c: { x (world), y, d, h (unit heading [x, y, z]), landing, len }
+function airliner(ctx, out, c) {
+  const d = c.d, x = c.x - ctx.x0, y = c.y, z = -d, [hx, hy, hz] = c.h;
+  const L = c.len || Math.max(62, 0.009 * d), span = L * 0.94;      // half as large again as life, and never a speck
+  if (x < -L || x > ctx.length + L) return;
+  const hl = Math.hypot(hx, hz) || 1, rx = -hz / hl, rz = hx / hl;   // the starboard side
+  // a point f metres ahead of the middle, s to starboard, u up
+  const P = (f, s, u) => [x + hx * f + rx * s, y + hy * f + u, z + hz * f + rz * s];
+  const S = (p, q, r, col, n, kind) => strut(out, p[0], p[1], p[2], q[0], q[1], q[2], r, col, n, 1, kind);
+  const kind = c.surreal ? KIND.SURREAL : KIND.OTHER;
+  const body = [0.62, 0.64, 0.68], under = [0.42, 0.44, 0.48];
+  const rf = Math.max(L * 0.03, 0.0005 * d), rw = Math.max(L * 0.011, 0.0004 * d);
+  const big = L / d > 0.02;                 // enough pixels for more than a few lights
+  S(P(-L * 0.5, 0, 0), P(L * 0.5, 0, 0), rf, body, big ? 6 : 3, kind);
+  for (const s of [-1, 1]) {
+    S(P(L * 0.08, s * rf * 0.5, -rf * 0.4), P(-L * 0.14, s * span / 2, rf * 0.2), rw, under, big ? 4 : 2, kind);
+    if (!big) continue;
+    S(P(-L * 0.42, 0, rf * 0.3), P(-L * 0.5, s * span * 0.19, rf * 0.3), rw * 0.8, under, 2, kind);       // tailplane
+    S(P(L * 0.1, s * span * 0.17, -rf * 1.25), P(-L * 0.0, s * span * 0.17, -rf * 1.25), rf * 0.5, under, 1, kind);   // engine
+  }
+  if (big) S(P(-L * 0.38, 0, rf * 0.6), P(-L * 0.5, 0, rf * 0.6 + L * 0.13), rw * 1.2, body, 2, kind);   // fin
+  // Lights get smaller in the frame with distance, but slowly (about 2 px across the core at 1 km,
+  // 1.3 px at 10 km; the landing lights 4.5 px and 2 px): a line of approach then reads as depth.
+  const km = d / 1000;
+  const rn = Math.max(L * 0.014, 0.0017 * d * Math.pow(km, -0.19));
+  glowAt(out, P(-L * 0.14, -span / 2, rf * 0.2), NAV_RED, rn, 0.2, 4);
+  glowAt(out, P(-L * 0.14, span / 2, rf * 0.2), NAV_GREEN, rn, 0.2, 4);
+  if (hz < 0.6) glowAt(out, P(-L * 0.52, 0, rf * 0.5), NAV_WHITE, rn * 0.9, 0.18, 4);       // head on, the tail light is out of sight
+  if (big || !c.landing) glowAt(out, P(L * 0.12, 0, rf * 1.5), NAV_RED, rn * 0.7, 0.15, 3);
+  if (c.landing && hz > 0.2) {
+    // (well forward, so that the dark body never stands between them and the window)
+    const rl = Math.max(L * 0.03, 0.0039 * d * Math.pow(km, -0.35));
+    if (big) {
+      for (const s of [-1, 1]) glowAt(out, P(L * 0.2, s * span * 0.13, -rf * 0.6), LANDING, rl, 0.24, 4.5);
+      glowAt(out, P(L * 0.5, 0, -rf * 1.5), LANDING, rl * 0.6, 0.22, 4);                     // the nose leg
+    } else glowAt(out, P(L * 0.54, 0, -rf), LANDING, rl * 1.1, 0.3, 6);
+  }
+  // the cabin: a line of lit windows down each side
+  if (big) {
+    const rc = Math.max(L * 0.005, 0.0007 * d);
+    for (const s of [-1, 1]) {
+      const a = P(-L * 0.34, s * rf * 0.95, rf * 0.25), b = P(L * 0.37, s * rf * 0.95, rf * 0.25);
+      strut(out, a[0], a[1], a[2], b[0], b[1], b[2], rc, CABIN, 8, 0.85, KIND.LIGHT);
+    }
+  }
+}
+
+// A helicopter low over the towers, three quarters on, its searchlight slanting down to the roofs.
+// Drawn large (never under 24 m long, and 4% of its distance): cabin, tail boom and fin, rotor
+// mast and four still blades, skids; one side light, the tail light, a beacon under the belly.
+// c: { x (world), y, d, dir (+1 nose towards +x), yaw (how far the nose swings towards the line) }
+function helicopter(ctx, out, c) {
+  const d = c.d, x = c.x - ctx.x0, y = c.y, z = -d;
+  const len = Math.max(24, 0.04 * d), u = len / 11.5;
+  if (x < -len * 8 || x > ctx.length + len * 8) return;
+  const fx = c.dir * Math.cos(c.yaw), fz = Math.sin(c.yaw), rx = -fz, rz = fx;
+  const P = (f, s, v) => [x + (fx * f + rx * s) * u, y + v * u, z + (fz * f + rz * s) * u];
+  const S = (p, q, r, col, n) => strut(out, p[0], p[1], p[2], q[0], q[1], q[2], r, col, n, 1, KIND.OTHER);
+  const thin = (k) => Math.max(k * u, 0.0004 * d);
+  const hull = [0.74, 0.74, 0.7], dark = [0.16, 0.17, 0.2];     // a pale hull: the night tint leaves it just lighter than the sky
+  const q = quatXTo(fx, 0, fz);
+  const E = (p, sx, sy, sz, col) => out(p[0], p[1], p[2], sx * u, sy * u, sz * u, col[0], col[1], col[2], 1, q[0], q[1], q[2], q[3], KIND.OTHER);
+  E(P(1.4, 0, 0), 1.9, 1.0, 1.0, hull);                            // cabin
+  E(P(3.0, 0, -0.25), 0.9, 0.7, 0.8, dark);                        // the glazed nose
+  E(P(0.6, 0, 1.05), 1.5, 0.5, 0.7, hull);                         // engine cowling
+  S(P(-0.4, 0, 0.45), P(-7.4, 0, 0.9), thin(0.26), hull, 3);       // tail boom
+  S(P(-7.1, 0, 0.6), P(-7.9, 0, 2.7), thin(0.24), hull, 1);        // fin
+  S(P(-8.5, -0.35, 1.3), P(-7.3, -0.35, 2.7), thin(0.07), dark, 1);  // tail rotor
+  S(P(-8.5, -0.35, 2.7), P(-7.3, -0.35, 1.3), thin(0.07), dark, 1);
+  S(P(1.0, 0, 1.4), P(1.0, 0, 2.3), thin(0.2), dark, 1);           // mast
+  for (const a of [0.5, 0.5 + Math.PI / 2]) {
+    const bx = Math.cos(a) * 5.6, bs = Math.sin(a) * 5.6;
+    S(P(1.0 - bx, -bs, 2.35), P(1.0 + bx, bs, 2.35), thin(0.09), dark, 4);
+  }
+  for (const s of [-1, 1]) {
+    S(P(-0.6, s * 1.15, -1.75), P(3.2, s * 1.15, -1.75), thin(0.09), dark, 2);   // skid
+    for (const f of [0.2, 2.4]) S(P(f, s * 0.7, -0.9), P(f, s * 1.15, -1.75), thin(0.07), dark, 1);
+  }
+  const rn = Math.max(0.3 * u, 0.0013 * d);
+  glowAt(out, P(1.6, -1.45, 0.1), NAV_RED, rn, 0.2, 4);            // port; the hull hides whichever is on the far side
+  glowAt(out, P(1.6, 1.45, 0.1), NAV_GREEN, rn, 0.2, 4);
+  glowAt(out, P(-8.0, 0, 1.0), NAV_WHITE, rn * 0.9, 0.18, 4);
+  glowAt(out, P(-1.2, 0, -1.25), NAV_RED, rn * 0.8, 0.18, 3);
+  // the searchlight, and its cone down to the roofs ahead of it (by night)
+  const lampP = P(2.5, 0, -1.4);
+  const L = out.L || lightState(ctx, out);
+  glowAt(out, lampP, BEAM, Math.max(0.4 * u, 0.0019 * d), L.night > 0.3 ? 0.3 : 0.12, 5);
+  if (L.night > 0.3) {
+    const hr = makeRng(c.id), roof = groundY(ctx, x, d) + 18 + 14 * hr();
+    const H = lampP[1] - roof, lean = 0.3 + 0.35 * hr();
+    const foot = [lampP[0] + c.dir * H * lean, roof, lampP[2] + H * 0.12];
+    const len2 = Math.hypot(H * lean, H), R1 = 0.085 * len2;
+    beam(out, lampP, foot, 0.4 * u, R1, 0.26, 0.07, BEAM, 6);
+    light(out, foot[0], roof + 0.5, -foot[2], R1 * 1.9, R1 * 0.22, R1 * 1.5, BEAM, 0.3);      // where it lands
+    light(out, foot[0], roof + 0.5, -foot[2], R1 * 0.8, R1 * 0.12, R1 * 0.7, BEAM, 0.45);
+  }
+}
+
+// An airship broadside on: a silver envelope lit from inside, tail fins, a gondola with lit
+// windows, and on its flank a lit sign of two lines.
+// c: { x (world), y, d, dir, len, wrong (level 1: 1, 2 = a copy gone wrong) }
+function blimp(ctx, out, c) {
+  const d = c.d, x = c.x - ctx.x0, y = c.y, z = -d, Lb = c.len, R = Lb * 0.15, dir = c.dir;
+  if (x < -Lb || x > ctx.length + Lb) return;
+  const r = makeRng(c.id), wrong = c.wrong || 0, up = wrong === 2 ? -1 : 1;   // the third copy hangs upside down
+  const night = (out.L || lightState(ctx, out)).night > 0.3;
+  const kind = c.surreal ? KIND.SURREAL : KIND.OTHER;
+  const P = (f, s, v) => [x + dir * f * Lb, y + up * v * R, z + s * R];      // f along (nose +0.5), s towards the line, v up, in radii
+  const silver = [0.62, 0.64, 0.69], shadow = [0.36, 0.38, 0.43];
+  const n = 8, prof = (t) => Math.sin(Math.PI * Math.pow(t, 0.8));            // fullest two fifths back from the nose
+  const sign = NEON[(Math.floor(r() * NEON.length) + wrong * 2) % NEON.length], sign2 = r() < 0.5 ? [1.0, 0.95, 0.85] : NEON[(Math.floor(r() * NEON.length) + wrong) % NEON.length];
+  const pale = mix3(sign, [1, 1, 1], 0.72), pm = Math.max(pale[0], pale[1], pale[2]), wash = [pale[0] / pm, pale[1] / pm, pale[2] / pm];   // brightest channel at 1: a light
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, rr = R * prof(t), f = 0.5 - t;
+    out(x + dir * f * Lb, y, z, Lb / n * 0.78, rr * 0.78, rr * 0.78, silver[0], silver[1], silver[2], 1, 0, 0, 0, 1, kind);
+    // lit from inside by night, as a show airship is: brightest amidships
+    if (night) light(out, x + dir * f * Lb, y - up * rr * 0.05, d - rr * 0.4, Lb / n * 0.74, rr * 0.64, rr * 0.3, wash, i >= 1 && i <= 5 ? 0.3 : 0.18);
+  }
+  // fins: top, bottom and one each side
+  for (const [s, v] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+    const a = P(-0.36, s * 0.25, v * 0.25), b = P(-0.49, s * 1.2, v * 1.2);
+    strut(out, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(R * 0.14, 0.0005 * d), shadow, 2, 1, kind);
+  }
+  // gondola and its windows
+  const g = P(0.06, 0, -1.1);
+  out(g[0], g[1], g[2], Lb * 0.075, R * 0.17, R * 0.2, 0.2, 0.2, 0.23, 1, 0, 0, 0, 1, kind);
+  const wa = P(0.0, 0.22, -1.08), wb = P(0.125, 0.22, -1.08);
+  strut(out, wa[0], wa[1], wa[2], wb[0], wb[1], wb[2], Math.max(R * 0.05, 0.0007 * d), CABIN, 4, 0.9, KIND.LIGHT);
+  // the sign: two lines of lit letters lying on the curve of the flank
+  const rows = [[0.36, sign, 11], [-0.2, sign2, 9]];
+  for (let j = 0; j < rows.length; j++) {
+    const [v, col, m] = rows[j];
+    const s = Math.sqrt(1 - v * v) * 0.93, a = -0.19 + 0.03 * j, w = 0.4 - 0.06 * j, hh = R * 0.2;
+    for (let i = 0; i < m; i++) {
+      if (((hashInts(c.id, 7, j, i) & 7) < 1 + wrong * 2) && i > 0 && i < m - 1) continue;      // gaps between words (more of them on a wrong copy)
+      const p = P(a + (i + 0.5) * w / m, s, v);
+      light(out, p[0], p[1], -p[2], Lb * w / m * 0.36, hh, R * 0.04, col, 0.95);
+    }
+  }
+  // white at the nose, red on the top fin and under the gondola
+  const rn = Math.max(R * 0.05, 0.0013 * d);
+  glowAt(out, P(0.51, 0, 0), NAV_WHITE, rn, 0.2, 4);
+  glowAt(out, P(-0.5, 0, 1.3), NAV_RED, rn, 0.2, 4);
+  glowAt(out, P(0.06, 0, -1.4), NAV_RED, rn * 0.8, 0.18, 3);
+}
+
+// Searchlights from a downtown roof: a fan of narrow beams leaning different ways and tilted in
+// depth, so that they close and open like scissors as the train goes by (they cannot sweep). Each
+// runs up to about four fifths of the way to the top of the window and fades out. By night only.
+// c: { x (world), d, n, id }
+function searchlights(ctx, out, c) {
+  const L = out.L || lightState(ctx, out);
+  if (L.night < 0.5) return;
+  const r = makeRng(c.id), d0 = c.d, x = c.x - ctx.x0, y0 = groundY(ctx, x, d0) + 90 + 60 * r();
+  const r0 = Math.max(8, 0.002 * d0);
+  for (let b = 0; b < c.n; b++) {
+    const lx = (b - (c.n - 1) / 2) * 0.34 + (r() - 0.5) * 0.3, lz = (r() - 0.5) * 0.7, top = 0.3 + 0.1 * r();
+    const vl = Math.hypot(lx, 1, lz), vx = lx / vl, vy = 1 / vl, vz = lz / vl;
+    const len = (EYE + top * d0 - y0) / (vy + top * vz);      // reaches the height `top` in the frame
+    const bx = x + (b - (c.n - 1) / 2) * 18;
+    beam(out, [bx, y0, -d0], [bx + vx * len, y0 + vy * len, -d0 + vz * len], r0, r0 * 3.2, 0.3, 0.015, BEAM, 8);
+    glowPoint(out, bx, y0, d0, BEAM, r0 * 1.5, 0.2, 4);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1175,6 +1483,8 @@ export const nightcityBiome = {
 // For scripts that look things up: pass { terrain } for a world (see scripts/pass-strip.mjs).
 export const _debug = {
   layout, rowAt, crossX, crossIn, crossW, riverAt,
+  // everything in the sky whose world x lies in [a, b): { type, x, y, d, ... } (see skyTraffic)
+  sky: (ctx, a, b, dials) => skyTraffic(ctx, a, b, dials || ctx.dials),
   // tower cranes whose world x lies in [a, b): { x, d, H }
   cranes(ctx, a, b) {
     const res = [];
