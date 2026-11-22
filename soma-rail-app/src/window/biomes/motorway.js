@@ -127,6 +127,18 @@ function pool(out, x, y, d, rx, rz, c, o) {
   for (let i = 0; i < k; i++) L(out, x, y + 0.08, d - rz + (2 * i + 1) * sz, rx, Math.max(0.02, rx * 0.01), sz * 1.25, c, o);
 }
 function nat(out, x, y, d, sx, sy, sz, c, o = 1, kind = KIND.OTHER) { return out(x, y, -d, sx, sy, sz, c[0], c[1], c[2], o, 0, 0, 0, 1, kind); }
+// A box lying along x: centre of its base (x, y, d), length L, height H, width Wd across, splat size
+// s. The camera-facing side, both ends and the top, in three tones so the corners read.
+function vbox(out, x, y, d, L, H, Wd, c, s) {
+  const nu = Math.max(1, Math.round(L / (s * 1.4))), nv = Math.max(1, Math.round(H / (s * 1.4))), nw = Math.max(1, Math.round(Wd / (s * 1.4)));
+  const su = L / nu * 0.66, sv = H / nv * 0.66, sw = Wd / nw * 0.66;
+  for (let i = 0; i < nu; i++) {
+    const px = x - L / 2 + (i + 0.5) * L / nu;
+    for (let j = 0; j < nv; j++) nat(out, px, y + (j + 0.5) * H / nv, d - Wd / 2, su, sv, 0.05, mul3(c, 0.85));
+    for (let k = 0; k < nw; k++) nat(out, px, y + H, d - Wd / 2 + (k + 0.5) * Wd / nw, su, 0.05, sw, mul3(c, 1.05));
+  }
+  for (const e of [-1, 1]) for (let j = 0; j < nv; j++) for (let k = 0; k < nw; k++) nat(out, x + e * L / 2, y + (j + 0.5) * H / nv, d - Wd / 2 + (k + 0.5) * Wd / nw, 0.05, sv, sw, mul3(c, e < 0 ? 1 : 0.6));
+}
 // A thin straight member between two points given as (x, y, d).
 function bar(out, ax, ay, ad, bx, by, bd, r, c, n = 2, kind = KIND.OTHER, o = 1) { strut(out, ax, ay, -ad, bx, by, -bd, r, c, n, o, kind); }
 // Same, but a light (a lit edge, a trail segment).
@@ -731,7 +743,7 @@ function* gantry(ctx, out, R, wx, Ls, rng, kind = KIND.OTHER) {
       const mode = rng();
       for (const lo of LANES) {
         const dd = D + c * lo, yc = Y + 8.2;
-        out(back, yc, -dd, 0.05, 0.8, 0.8, 0.08, 0.08, 0.09, 1, 0, 0, 0, 1, kind);
+        out(x - c * 0.22, yc, -dd, 0.28, 0.8, 0.8, 0.08, 0.08, 0.09, 1, 0, 0, 0, 1, kind);     // a box, not a plate
         out(fx, yc, -dd, 0.04, 0.75, 0.75, 0.05, 0.05, 0.06, 1, 0, 0, 0, 1, kind);
         bar(out, x, yc + 0.8, dd, x, bot, dd, rb, steel, 1, kind);
         if (!Ls.on) continue;
@@ -1126,10 +1138,12 @@ function* recovery(ctx, out, x, y, d, r, Ls) {
   // the car
   nat(out, x, y + 0.6, d, 2.0, 0.42, 0.85, [0.35, 0.1, 0.08]);
   nat(out, x - 0.25, y + 1.15, d, 1.1, 0.3, 0.7, [0.1, 0.11, 0.13]);
-  // the truck behind it (towards +x: traffic comes from there)
+  // the truck behind it (towards +x: traffic comes from there): a cab and a flat bed as boxes with
+  // their sides, ends and tops (it was a few plates facing the line, a yellow blob from the side)
   const tx = x + 8;
-  for (let a = 0; a < 8 / s; a++) nat(out, tx - 1 + (a + 0.5) * s, y + 1.3, d - 1.1, s * 0.62, 0.35, 0.06, [0.62, 0.6, 0.5]);
-  for (let b = 0; b < 3; b++) nat(out, tx - 2.4, y + 0.9 + b * 0.7, d - 1.1, 1.1, 0.45, 0.06, [0.7, 0.62, 0.2]);
+  vbox(out, tx + 3, y + 0.9, d, 8, 0.5, 2.3, [0.62, 0.6, 0.5], s);
+  vbox(out, tx - 2.4, y + 0.7, d, 2.2, 2.1, 2.3, [0.7, 0.62, 0.2], s * 0.7);
+  for (const wx of [tx - 2.2, tx + 4.5]) nat(out, wx, y + 0.5, d - 1.2, 0.5, 0.5, 0.15, [0.06, 0.06, 0.06]);
   if (!Ls.on) return;
   for (const o of [-0.5, 0, 0.5]) point(out, tx - 2.4, y + 3.1, d + o, AMBER, 0.13, 0.22, 3.5);
   for (const px of [x - 2, x + 2]) point(out, px, y + 0.7, d - 0.9, AMBER, 0.08, 0.2, 3);
@@ -1514,6 +1528,8 @@ function* villages(ctx, out, W, Ls, dz) {
         out(x - w / 2 + (a + 0.5) * w / nx, y + h / 2, -d, w / nx * 0.65, h / 2 * 0.9, 0.3, wall[0] * 0.8, wall[1] * 0.8, wall[2] * 0.8, 1, 0, 0, 0, 1, KIND.BUILDING);
         out(x - w / 2 + (a + 0.5) * w / nx, y + h + 1.2, -(d + 1.5), w / nx * 0.7, 1.4, 1.5, 0.22, 0.22, 0.24, 1, 0, 0, 0, 1, KIND.BUILDING);
       }
+      // both end walls, so the house is a box and not a card when it stands off to one side
+      for (const e of [-1, 1]) out(x + e * w / 2, y + h / 2, -(d + 2.2), 0.3, h / 2 * 0.9, 2.2, wall[0] * (e < 0 ? 0.9 : 0.55), wall[1] * (e < 0 ? 0.9 : 0.55), wall[2] * (e < 0 ? 0.9 : 0.6), 1, 0, 0, 0, 1, KIND.BUILDING);
       if (Ls.on && lit) {
         const nwin = 1 + (u * 7 & 1);
         for (let t = 0; t < nwin; t++) {
@@ -1763,10 +1779,14 @@ function* cathedral(ctx, out, W, lm, Ls, dz) {
   const nl = 170 * k, nh = 30 * k, nd = 36 * k, x0 = x - nl / 2;
   yield* frontFace(out, x0, y, d - nd / 2, nl, nh, s, (a, b) => ((a * 14) % 1 < 0.15 ? (on ? { c: FLOOD, o: 0.35 } : mul3(stone, 0.6)) : (on ? lit(b, 0.8) : mul3(stone, 0.8))), kind);
   for (let a = 0; a < nl / (s * 1.5); a++) for (let b = 0; b < 3; b++) out(x0 + (a + 0.5) * s * 1.5, y + nh + b * 6 * k, -(d - nd / 2 + 5 * k * b), s, 3 * k, 4 * k, 0.22, 0.22, 0.24, 1, 0, 0, 0, 1, kind);
+  yield* sideFace(out, x0 + nl, y, d - nd / 2, nd, nh, s * 1.3, (a, b) => (on ? lit(b, 0.5) : mul3(stone, 0.6)), kind);
   // west front: two towers
   for (const o of [-11, 11]) {
     const tw = 15 * k, th = 82 * k, tx = x0 + o * k - 4 * k;
     yield* frontFace(out, tx - tw / 2, y, d - nd / 2 - 2, tw, th, s, (a, b) => (on ? lit(b, 1) : mul3(stone, 0.85)), kind);
+    // (and the sides, so the towers keep their depth from either end of the window)
+    yield* sideFace(out, tx - tw / 2, y, d - nd / 2 - 2, tw, th, s * 1.3, (a, b) => (on ? lit(b, 0.8) : stone), kind);
+    yield* sideFace(out, tx + tw / 2, y, d - nd / 2 - 2, tw, th, s * 1.3, (a, b) => (on ? lit(b, 0.55) : mul3(stone, 0.6)), kind);
     for (const ex of [-0.45, 0.45]) {
       if (on) L(out, tx + ex * tw, y + th + 4 * k, d - nd / 2 - 2, s * 0.6, 4 * k, s * 0.3, FLOOD, 0.55);
       else out(tx + ex * tw, y + th + 4 * k, -(d - nd / 2 - 2), s * 0.6, 4 * k, s * 0.3, 0.5, 0.48, 0.42, 1, 0, 0, 0, 1, kind);
@@ -1777,6 +1797,7 @@ function* cathedral(ctx, out, W, lm, Ls, dz) {
     const tw = 20 * k, th = 100 * k, tx = x + 14 * k;
     yield* frontFace(out, tx - tw / 2, y, d - 3, tw, th, s, (a, b) => (on ? lit(b, 0.95) : mul3(stone, 0.85)), kind);
     yield* sideFace(out, tx + tw / 2, y, d - 3, tw, th, s * 1.3, (a, b) => (on ? lit(b, 0.55) : mul3(stone, 0.6)), kind);
+    yield* sideFace(out, tx - tw / 2, y, d - 3, tw, th, s * 1.3, (a, b) => (on ? lit(b, 0.8) : stone), kind);
     const sh = 68 * k, n = Math.max(5, Math.round(sh / s));
     for (let i = 0; i < n; i++) {
       const f = (i + 0.5) / n, wd = tw * 0.45 * (1 - f);
@@ -1811,16 +1832,19 @@ function* power(ctx, out, W, lm, Ls) {
     const x = wx - ctx.x0, y = W.H(wx, d) - 2;
     if (x < -150 || x > ctx.length + 150) continue;
     const H = 112, rings = Math.max(6, Math.round(H / (s * 1.6)));
+    // the shell runs well round the sides (a half cylinder lost its far flank as soon as the tower
+    // stood off to one side of the window)
+    const A0 = -0.35 * Math.PI, A1 = 1.35 * Math.PI;
     for (let i = 0; i < rings; i++) {
       const f = (i + 0.5) / rings;
       const rad = f < 0.78 ? lerp(46, 29, Math.pow(f / 0.78, 0.8)) : lerp(29, 32, (f - 0.78) / 0.22);
-      const nA = Math.max(4, Math.round(Math.PI * rad / (s * 1.6)));
+      const nA = Math.max(6, Math.round((A1 - A0) * rad / (s * 1.6)));
       for (let a = 0; a < nA; a++) {
-        const th = (a + 0.5) / nA * Math.PI;      // the camera-facing half
+        const th = A0 + (a + 0.5) / nA * (A1 - A0);
         const px = x + Math.cos(th) * rad, pd = d - Math.sin(th) * rad;
         const lit = on && f < 0.35;
         if (lit) L(out, px, y + f * H, pd, s * 0.8, H / rings * 0.62, s * 0.4, SODIUM, 0.35 * (1 - f / 0.35));
-        else out(px, y + f * H, -pd, s * 0.8, H / rings * 0.62, s * 0.4, 0.46 * (0.7 + 0.3 * Math.sin(th)), 0.46 * (0.7 + 0.3 * Math.sin(th)), 0.44, 1, 0, 0, 0, 1, KIND.BUILDING);
+        else out(px, y + f * H, -pd, s * 0.8, H / rings * 0.62, s * 0.4, 0.46 * (0.7 + 0.3 * Math.sin(th) - 0.12 * Math.cos(th)), 0.46 * (0.7 + 0.3 * Math.sin(th) - 0.12 * Math.cos(th)), 0.44 * (0.85 + 0.15 * Math.sin(th)), 1, 0, 0, 0, 1, KIND.BUILDING);
       }
       if (out.due()) yield;
     }
@@ -1872,6 +1896,7 @@ function* monument(ctx, out, W, lm, Ls) {
     // a folly tower with a battlemented top
     yield* frontFace(out, x - 7, y, d - 7, 14, 36, s, (a, b) => (on ? { c: FLOOD, o: clamp(0.95 - 0.5 * b, 0.2, 1) } : [0.5, 0.48, 0.42]));
     yield* sideFace(out, x + 7, y, d - 7, 14, 36, s * 1.3, (a, b) => (on ? { c: FLOOD, o: clamp(0.55 - 0.3 * b, 0.12, 1) } : [0.35, 0.33, 0.3]));
+    yield* sideFace(out, x - 7, y, d - 7, 14, 36, s * 1.3, (a, b) => (on ? { c: FLOOD, o: clamp(0.75 - 0.4 * b, 0.12, 1) } : [0.48, 0.46, 0.4]));
     for (let i = 0; i < 4; i++) if (i === 0 || i === 3) { if (on) L(out, x - 7 + (i + 0.5) * 3.5, y + 38, d - 7, 1.1, 2, 0.4, FLOOD, 0.6); }
   }
   // the floodlights at its foot

@@ -285,8 +285,9 @@ function makeVillage(W, i) {
       else v.trees.push({ wx, d, type: 'bamboo', seed: hashInts(h, 11, Math.round(a), Math.round(b)) });
     }
   }
-  // the village tree: a big banyan at the edge facing the line, and bamboo along the back
-  v.trees.push({ wx: cx + (r() - 0.5) * R, d: Math.max(38, dc - Rd - 4), type: 'banyan', big: true, seed: hashInts(h, 13) });
+  // the village tree: a big banyan at one end of the village, level with its middle, so that it
+  // frames the houses and never stands between them and the window; and bamboo along the back
+  v.trees.push({ wx: cx + (r() < 0.5 ? -1 : 1) * (R + 9 + 6 * r()), d: Math.max(38, dc + (r() - 0.5) * Rd), type: 'banyan', big: true, seed: hashInts(h, 13) });
   for (let k = 0; k < 4; k++) v.trees.push({ wx: cx + (r() - 0.5) * 1.6 * R, d: dc + Rd * (0.8 + 0.3 * r()), type: 'bamboo', seed: hashInts(h, 15, k) });
   return v;
 }
@@ -1161,11 +1162,12 @@ export function* pagoda(ctx, out, x, d, opts = {}) {
     const f = t / tiers;
     const hw = B * (1 - 0.5 * f), th = (bodyH / tiers) * (1.15 - 0.3 * f);
     const cx = x + lean * (y - y0);
-    // octagonal body: the camera-facing faces
-    const nu = Math.max(3, Math.round((hw * 2.4) / (s * 1.4))), nv = Math.max(2, Math.round(th / (s * 1.4)));
+    // octagonal body: the faces seen from anywhere along the line (it was only the camera-facing
+    // half, so the tower lost its far flank whenever it stood off to one side of the window)
+    const nu = Math.max(4, Math.round((hw * 4.6) / (s * 1.4))), nv = Math.max(2, Math.round(th / (s * 1.4)));
     for (let i = 0; i < nu; i++) {
       for (let j = 0; j < nv; j++) {
-        const a = ((i + 0.5) / nu - 0.5) * 2.6;
+        const a = ((i + 0.5) / nu - 0.5) * 5.0;
         const b = (j + 0.5) / nv;
         const nx = Math.sin(a), nz = Math.cos(a);
         let c = faceTone(body, nx, nz);
@@ -1175,12 +1177,12 @@ export function* pagoda(ctx, out, x, d, opts = {}) {
     }
     // the eave: a dark flared ring, turned up at its corners
     const ew = hw * 1.75, ey = y + th;
-    const ne = Math.max(6, Math.round((ew * 3) / (s * 1.2)));
+    const ne = Math.max(8, Math.round((ew * 5) / (s * 1.2)));
     for (let i = 0; i < ne; i++) {
-      const a = ((i + 0.5) / ne - 0.5) * 3.0;
+      const a = ((i + 0.5) / ne - 0.5) * 5.0;
       const corner = Math.pow(Math.abs(Math.cos(a * 4 / 2)), 10);
       const c = shade(C.tile, Math.sin(a) * 0.4, 0.8, Math.cos(a) * 0.6, 0.55, 0.4);
-      out(cx + Math.sin(a) * ew, ey - th * 0.05 + corner * th * 0.22, -(d - Math.cos(a) * ew), Math.max(s, ew * 3 / ne * 0.6), Math.max(0.1, th * 0.08), Math.max(s, ew * 0.25), c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+      out(cx + Math.sin(a) * ew, ey - th * 0.05 + corner * th * 0.22, -(d - Math.cos(a) * ew), Math.max(s, ew * 5 / ne * 0.6), Math.max(0.1, th * 0.08), Math.max(s, ew * 0.25), c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
     }
     y += th * 1.04;
     if (out.due()) yield;
@@ -1236,6 +1238,18 @@ export function* archBridge(ctx, out, x, d, opts = {}) {
       }
       if (out.due()) yield;
     }
+  }
+  // the arch's soffit spanning between the two faces (seen through the opening from either side:
+  // without it the arch was two cut-out cards with nothing between them), and both ends
+  const na = Math.max(6, Math.round(Math.PI * span / 2 / (s * 1.3)));
+  for (let i = 0; i < na; i++) {
+    const a = (i + 0.5) / na * Math.PI, u = Math.cos(a) * span / 2, yy = y0 + Math.sin(a) * rise;
+    const c = mul3(stone, 0.32 + 0.12 * Math.sin(a));
+    out(x + u, yy, -d, Math.max(s, span / 2 * Math.PI / na * 0.62), Math.max(s, rise * Math.PI / na * 0.5), Wd / 2, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+  }
+  for (const sg of [-1, 1]) {
+    const c = faceTone(stone, sg, 0), h = deck(sg * len / 2) - y0;
+    for (let j = 0; j < Math.max(1, Math.round(h / (s * 1.3))); j++) out(x + sg * len / 2, y0 + (j + 0.5) * h / Math.max(1, Math.round(h / (s * 1.3))), -d, s * 0.3, Math.max(s, h / Math.max(1, Math.round(h / (s * 1.3))) * 0.62), Wd / 2, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
   }
   // the shadowed underside seen through the arch, and the parapet top
   for (let i = 0; i < nu; i++) {
@@ -1333,12 +1347,15 @@ function* frontLine(ctx, out, W, hs, d, night) {
   const yb = W.H(hs.wx, d), washing = r() < 0.4;
   const top = yb + (washing ? 2.1 : 3.4);
   const pc = [0.32, 0.28, 0.22];
-  for (const px of [xa, xa + span]) strutM(out, px - ctx.x0, yb - 0.2, -d, px - ctx.x0, top + 0.15, -d, 0.05, pc, 3, KIND.OTHER, 0);
+  for (const px of [xa, xa + span]) strutM(out, px - ctx.x0, yb - 0.2, -d, px - ctx.x0, top + 0.15, -d, Math.max(0.05, 0.0005 * d), pc, 3, KIND.OTHER, 0);
   const sag = 0.35;
   const n = Math.max(3, Math.round(span / (washing ? 1.1 : 1.35)));
   for (let k = 0; k < n; k++) {
     const u = (k + 0.5) / n, lx = xa + u * span - ctx.x0, ly = top - sag * 4 * u * (1 - u);
-    out(lx, ly, -d, span / n * 0.5, 0.012, 0.012, 0.2, 0.18, 0.16, 1, 0, 0, 0, 1, KIND.OTHER);    // the cord
+    // the cord: a sagging chain of struts sized from distance (it was beads of a 12 mm cord, under
+    // a pixel wide, with gaps between them)
+    { const u0 = k / n, u1 = (k + 1) / n;
+      strutM(out, xa + u0 * span - ctx.x0, top - sag * 4 * u0 * (1 - u0), -d, xa + u1 * span - ctx.x0, top - sag * 4 * u1 * (1 - u1), -d, Math.max(0.025, 0.0005 * d), [0.2, 0.18, 0.16], 1, KIND.OTHER, 0); }
     if (washing) {
       if (r() < 0.25) continue;
       const c = [[0.72, 0.72, 0.7], [0.2, 0.3, 0.55], [0.62, 0.2, 0.16], [0.55, 0.52, 0.35], [0.3, 0.42, 0.3]][Math.floor(r() * 5)];
@@ -1369,26 +1386,56 @@ function* smoke(ctx, out, x, y, d, r) {
 // ---------------------------------------------------------------------------------------------
 // Placed things, shared by the bands (each draws what its centre puts in the band)
 // ---------------------------------------------------------------------------------------------
-function treeOf(ctx, out, t, d, y, rng, k = 1) {
-  if (t.type === 'bamboo') return bamboo(ctx, out, t.wx - ctx.x0, d, { rng, height: (8 + 5 * rng()) * k, width: (5 + 5 * rng()) * k, y, n: Math.round(treeSplats(out, d, 10 * k) * 1.1) });
-  if (t.type === 'banyan') { const H = (t.big ? 13 : 10) + 4 * rng(); return broadCrown(ctx, out, t.wx - ctx.x0, d, { rng, height: H, crown: H * (1.5 + 0.6 * rng()), banyan: true, y }); }
-  const H = 9 + 6 * rng();
-  return broadCrown(ctx, out, t.wx - ctx.x0, d, { rng, height: H, crown: H * (1.0 + 0.35 * rng()), y });
+function treeOf(ctx, out, t, d, y, rng, k = 1, nk = 1) {
+  if (t.type === 'bamboo') return bamboo(ctx, out, t.wx - ctx.x0, d, { rng, height: (8 + 5 * rng()) * k, width: (5 + 5 * rng()) * k, y, n: Math.round(treeSplats(out, d, 10 * k) * 1.1 * nk) });
+  if (t.type === 'banyan') { const H = (t.big ? 13 : 10) + 4 * rng(), Wc = H * (1.5 + 0.6 * rng()); return broadCrown(ctx, out, t.wx - ctx.x0, d, { rng, height: H, crown: Wc, banyan: true, y, n: Math.round(treeSplats(out, d, Wc) * 0.9 * nk) }); }
+  const H = 9 + 6 * rng(), Wc = H * (1.0 + 0.35 * rng());
+  return broadCrown(ctx, out, t.wx - ctx.x0, d, { rng, height: H, crown: Wc, y, n: Math.round(treeSplats(out, d, Wc) * 0.9 * nk) });
+}
+
+// Splats a house costs at splat size s (its walls, both roof pitches, the court wall), and what a
+// village tree costs: for the village budget below.
+function houseCost(hs, s) {
+  const h = hs.concrete ? hs.storeys * 3.1 + 0.9 : hs.storeys * 2.9 + 0.6;
+  const area = 2 * (hs.w + hs.dep) * h + hs.w * hs.dep * 1.3 + (hs.court ? (hs.w + 11) * 2.1 : 0);
+  return area / (s * s * 2.25) + 60;
+}
+const houseS = (out, d, k) => Math.max(0.14, detail(out, d, 1.05 * k));
+// A big village close to the line wants more splats than the band has: its houses used to be cut
+// off part-way when the band ran out (half a house, or none, and nothing drawn after them). Each
+// village gets a fixed share of the band and coarsens its houses (and thins its trees) to fit it.
+// The factor depends only on the village, the band and the budget, never on the chunk, so a house
+// cut by a chunk border is drawn the same by both chunks.
+function villageCoarse(out, v, dLo, dHi, k, room) {
+  const key = `${dLo}|${dHi}|${k}|${room}`;
+  const memo = v.coarse || (v.coarse = new Map());
+  let f = memo.get(key);
+  if (f != null) return f;
+  let cost = 0;
+  for (const hs of v.houses) if (hs.d >= dLo && hs.d < dHi) cost += houseCost(hs, houseS(out, hs.d, k));
+  for (const t of v.trees) if (t.d >= dLo && t.d < dHi) cost += treeSplats(out, t.d, t.type === 'banyan' ? 18 : 12) * 1.1;
+  f = cost > room ? Math.sqrt(cost / room) : 1;
+  memo.set(key, f);
+  return f;
 }
 
 function* villages(ctx, out, W, dLo, dHi, opts = {}) {
   const lit = litShare(ctx);
   const i0 = Math.floor((ctx.x0 - 250) / VCELL), i1 = Math.floor((ctx.x0 + ctx.length + 250) / VCELL);
   const k = opts.coarse || 1;
+  const room = (opts.room || 0.35) * ctx.count;
   for (let i = i0; i <= i1; i++) {
     const v = village(W, i);
     if (!v || v.dc + v.Rd < dLo - 30 || v.dc - v.Rd > dHi + 30) continue;
+    const f = villageCoarse(out, v, dLo, dHi, k, room);
     for (const hs of v.houses) {
       if (hs.d < dLo || hs.d >= dHi) continue;
       if (hs.wx < ctx.x0 - 20 || hs.wx > ctx.x0 + ctx.length + 20) continue;
+      const s = houseS(out, hs.d, k) * f;
+      // all or nothing: a house the band has no room left for is left out whole, never cut short
+      if (out.n + houseCost(hs, s) > out.limit) continue;
       const rng = makeRng(hs.seed);
       const y = W.H(hs.wx, hs.d);
-      const s = Math.max(0.14, detail(out, hs.d, 1.05 * k));
       if (hs.concrete) yield* concreteHouse(ctx, out, hs.wx - ctx.x0, hs.d, { w: hs.w, depth: hs.dep, storeys: hs.storeys, wall: hs.wall, yaw: hs.yaw, rng, s, y, lit, seed: hs.seed });
       else yield* tiledHouse(ctx, out, hs.wx - ctx.x0, hs.d, { w: hs.w, depth: hs.dep, storeys: hs.storeys, wall: hs.wall, yaw: hs.yaw, rng, s, y, lit, court: hs.court && hs.d < 400, seed: hs.seed });
       if (opts.small && hs.d < 320) {
@@ -1403,8 +1450,9 @@ function* villages(ctx, out, W, dLo, dHi, opts = {}) {
     for (const t of v.trees) {
       if (t.d < dLo || t.d >= dHi) continue;
       if (t.wx < ctx.x0 - 30 || t.wx > ctx.x0 + ctx.length + 30) continue;
+      if (out.n + treeSplats(out, t.d, t.type === 'banyan' ? 36 : 20) / (f * f) > out.limit) continue;    // whole or not at all
       const rng = makeRng(t.seed);
-      yield* treeOf(ctx, out, t, t.d, W.H(t.wx, t.d) - 0.2, rng);
+      yield* treeOf(ctx, out, t, t.d, W.H(t.wx, t.d) - 0.2, rng, 1, 1 / (f * f));
     }
     // lamps along the village lane at night
     if (lit > 0 && opts.lamps !== false) {
@@ -1415,7 +1463,7 @@ function* villages(ctx, out, W, dLo, dHi, opts = {}) {
           const lr = makeRng(hashInts(v.seed, 21, Math.round(s)));
           if (lr() > 0.6 || wx < ctx.x0 - 2 || wx >= ctx.x0 + ctx.length + 2) continue;
           const y = W.H(wx, ld);
-          yield* stick(ctx, out, wx - ctx.x0, y, ld, 5.5, 0.08, { color: [0.3, 0.3, 0.3], kind: KIND.OTHER, n: 3 });
+          strutM(out, wx - ctx.x0, y - 0.2, -ld, wx - ctx.x0, y + 5.5, -ld, Math.max(0.08, 0.0005 * ld), [0.3, 0.3, 0.3], 3, KIND.OTHER, 0);   // a strut, not round beads
           yield* lamp(ctx, out, wx - ctx.x0, y + 5.6, ld - 0.3, LAMP, { size: Math.max(0.15, detail(out, ld, 0.6)), halo: 1 });
         }
       }
@@ -1448,8 +1496,10 @@ function* laneProps(ctx, out, W, dLo, dHi) {
     }
     if ((i & 1) === 0) {
       const wx = wx0 + 3, ld = laneD(W, wx) + 2.8, y = W.H(wx, ld);
-      yield* stick(ctx, out, wx - ctx.x0, y, ld, 9, 0.13, { color: [0.55, 0.54, 0.5], kind: KIND.OTHER, n: 6 });
-      out(wx - ctx.x0, y + 8.6, -ld, 0.6, 0.06, 0.06, 0.3, 0.3, 0.3, 1, 0, 0, 0, 1, KIND.OTHER);
+      // the pole and its cross-arm as struts sized from distance (they were stacked round blobs)
+      const pr = Math.max(0.12, 0.0005 * ld);
+      strutM(out, wx - ctx.x0, y - 0.2, -ld, wx - ctx.x0, y + 9, -ld, pr, [0.55, 0.54, 0.5], 4, KIND.OTHER, 0);
+      strutM(out, wx - ctx.x0 - 0.9, y + 8.6, -ld, wx - ctx.x0 + 0.9, y + 8.6, -ld, pr * 0.6, [0.3, 0.3, 0.3], 2, KIND.OTHER, 0);
     }
     if (out.due()) yield;
   }
@@ -1641,7 +1691,11 @@ function* terraces(ctx, out, W, dLo, dHi, K) {
     if (!t || t.d < dLo || t.d >= dHi) continue;
     const r = makeRng(t.seed);
     const n = Math.round(clamp(K * out.density * t.R * t.Hh / (t.d * t.d), 60, 9000 * out.density));
+    // drawn whole even when the band is short (a hill cut off part-way is a loose cloud of strips)
+    const lim = out.limit;
+    out.limit = Infinity;
     yield* terraceHill(ctx, out, t.wx - ctx.x0, t.d, { radius: t.R, radiusD: t.Rd, height: t.Hh, rng: r, n, y: W.H(t.wx, t.d) - 0.4 });
+    out.limit = lim;
   }
 }
 
@@ -1651,7 +1705,10 @@ function* mounds(ctx, out, W, dLo, dHi) {
   for (let i = i0; i <= i1; i++) {
     const m = moundSite(W, i);
     if (!m || m.d < dLo || m.d >= dHi) continue;
+    const lim = out.limit;
+    out.limit = Infinity;       // rare and small: always drawn whole
     yield* moundWith(ctx, out, W, m.wx, m.d, m.R, m.Hm, makeRng(m.seed), m.pagoda ? 'pagoda' : 'pavilion', 0, KIND.HEDGE);
+    out.limit = lim;
   }
 }
 function* moundWith(ctx, out, W, wx, d, R, Hm, r, what, wrong, kind) {
@@ -1881,9 +1938,11 @@ function* near(ctx, emit) {
   yield* laneProps(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* crossingLanes(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* streamProps(ctx, out, W, ctx.zNear, ctx.zFar);
-  yield* villages(ctx, out, W, ctx.zNear, ctx.zFar, { small: true });
+  // the river's boats and bamboo and the terraced hills before the villages, so a big village
+  // never leaves them out
   yield* riverProps(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* terraces(ctx, out, W, ctx.zNear, ctx.zFar, 40000);
+  yield* villages(ctx, out, W, ctx.zNear, ctx.zFar, { small: true });
   // scattered field trees and bamboo clumps by the paddies
   for (const { i, wx0 } of cellsAround(ctx, 45, 12)) {
     const r = worldRng(ctx, 1101, i);
@@ -1891,6 +1950,7 @@ function* near(ctx, emit) {
     const wx = wx0 + r() * 45, d = 40 + r() * 250;
     const s = surface(W, wx, d);
     if (s.t !== T.PADDY && s.t !== T.BANK) continue;
+    if (out.n + treeSplats(out, d, 14) * 1.3 > out.limit) continue;      // whole or not at all
     if (r() < 0.45) yield* bamboo(ctx, out, wx - ctx.x0, d, { rng: r, height: 8 + 5 * r(), width: 5 + 5 * r(), y: s.y - 0.2 });
     else yield* broadCrown(ctx, out, wx - ctx.x0, d, { rng: r, height: 9 + 7 * r(), crown: 10 + 8 * r(), y: s.y - 0.2 });
   }
@@ -1904,11 +1964,18 @@ function* mid(ctx, emit) {
   const W = world(ctx);
   const dz = ctx.dials || {};
   out.limit = ctx.count * 0.9;
+  // level 1's floating and impossibly tall towers first, drawn whole: the ordinary towers below
+  // make room for them (towers() fits itself to what is left). Drawn after, they used to be cut
+  // off part-way in crowded chunks, leaving a loose scatter of rock in the sky.
+  out.limit = Infinity;
+  if ((dz.topology || 0) > 0) yield* floatingTowers(ctx, out, W, 1700, 800, 2600, dz.topology, 1);
+  if ((dz.scale || 0) > 0) yield* needles(ctx, out, W, 2100, 900, 2800, dz.scale, 1);
+  out.limit = ctx.count * 0.9;
   // the towers take most of the band: the valley floor from 300 m out is a thin strip on screen.
   // (the same K in the far band, so towers keep their grain across 3000 m)
   yield* towers(ctx, out, W, ctx.zNear, ctx.zFar, TOWER_K, { share: 0.8 });
-  yield* terraces(ctx, out, W, ctx.zNear, ctx.zFar, 30000);
   yield* mounds(ctx, out, W, ctx.zNear, ctx.zFar);
+  yield* terraces(ctx, out, W, ctx.zNear, ctx.zFar, 30000);
   yield* villages(ctx, out, W, ctx.zNear, ctx.zFar, { coarse: 1.3 });
   // groves of dark trees and bamboo standing on the valley floor between the towers
   for (const { i, wx0 } of cellsAround(ctx, 90, 30)) {
@@ -1921,13 +1988,15 @@ function* mid(ctx, emit) {
       const Wd = 20 + 40 * r(), gh = 6 + 3 * r();
       // enough splats, each no bigger than fine detail here, that the grove's top is a clean line
       const gs = detail(out, d, 0.9);
-      yield* blob(ctx, out, wx - ctx.x0, s.y + 6, d, Wd, gh, Wd * 0.3, { n: Math.round(clamp(Wd * gh * 3 / (gs * gs), 24, 600)), color: r() < 0.3 ? C.bambooLeaf : C.camphor, rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.55 });
+      const gn = Math.round(clamp(Wd * gh * 3 / (gs * gs), 24, 600));
+      const gc = r() < 0.3 ? C.bambooLeaf : C.camphor;
+      // all or nothing: a grove cut off part-way by the band's limit is a thin scatter of dots
+      if (out.n + gn > out.limit) continue;
+      yield* blob(ctx, out, wx - ctx.x0, s.y + 6, d, Wd, gh, Wd * 0.3, { n: gn, color: gc, rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.55 });
 
     }
   }
   if ((dz.logic || 0) > 0) yield* repeatingPagoda(ctx, out, W, dz.logic);
-  if ((dz.topology || 0) > 0) yield* floatingTowers(ctx, out, W, 1700, 800, 2600, dz.topology, 1);
-  if ((dz.scale || 0) > 0) yield* needles(ctx, out, W, 2100, 900, 2800, dz.scale, 1);
   yield* mistBands(ctx, out, W, ctx.zNear, 2400, 160, 130, 26, 0.3);
   yield* fillSurface(ctx, out, W, { power: 1.2, cover: 3, maxR: 0.05 });
 }
@@ -1938,10 +2007,12 @@ function* far(ctx, emit) {
   const out = makeOut(ctx, emit, { zMargin: 600 });
   const W = world(ctx);
   const dz = ctx.dials || {};
-  out.limit = ctx.count * 0.88;
-  yield* towers(ctx, out, W, ctx.zNear, ctx.zFar, TOWER_K, { share: 0.82 });
+  // (level 1's surreal towers first and whole, as in mid)
+  out.limit = Infinity;
   if ((dz.topology || 0) > 0) yield* floatingTowers(ctx, out, W, 5000, 3500, 8000, dz.topology, 3);
   if ((dz.scale || 0) > 0) yield* needles(ctx, out, W, 5200, 3500, 9000, dz.scale, 2);
+  out.limit = ctx.count * 0.88;
+  yield* towers(ctx, out, W, ctx.zNear, ctx.zFar, TOWER_K, { share: 0.82 });
   yield* mistBands(ctx, out, W, ctx.zNear, 9000, 700, 650, 70, 0.22);
   out.limit = Infinity;
   const ws = W.ws;
@@ -2032,7 +2103,10 @@ function* repeatingPagoda(ctx, out, W, logic) {
     if (noise1(wx0 / 4200, W.ws + 1431) > 0.3 + logic) continue;
     const wrong = ((((i % 5) + 5) % 5) / 4) * logic * 2;
     const d = 340;
+    const lim = out.limit;
+    out.limit = Infinity;       // drawn whole, as mounds() does
     yield* moundWith(ctx, out, W, wx0 + Pc * 0.5, d, 50, 16, worldRng(ctx, 1432), 'pagoda', wrong, KIND.SURREAL);
+    out.limit = lim;
   }
 }
 
@@ -2055,4 +2129,4 @@ export const karstBiome = {
 };
 
 // for scripts that inspect the layout
-export const _debug = { world, surface, towersIn, riverN, riverW, village, terraceSite, moundSite };
+export const _debug = { world, surface, towersIn, riverN, riverW, village, terraceSite, moundSite, stream, streamX, laneD, laneOn };

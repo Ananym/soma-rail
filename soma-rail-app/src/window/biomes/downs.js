@@ -11,7 +11,8 @@
 //   scale     giant trees and a monolith in the far band
 //   topology  floating islands of downland in the mid and far sky
 //   logic     the same farmstead repeating along the line, each time slightly wrong
-import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
+import { hashInts, hashString, makeRng, noise1, noise2 } from '../rng.js';
+import { makeTerrain } from '../terrain.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, strip, blob, broadleaf, conifer,
   bush, hedge, house, treeSplats, church, overheadLine, fence, floatingIsland, monolith, stick, jitter, mul3, mix3, shade, smooth, clamp, lerp,
@@ -595,3 +596,41 @@ export const downsBiome = {
 
 // exported for the check script and for other biomes that want English field patterns
 export const downsLayout = { layout, fieldAt, rowAt, colAt, edgeD, colEdge, fieldInfo };
+
+// For scripts that look for things to inspect (scripts/pass-strip.mjs needs a world x and a distance):
+//   const { _debug } = await import('./src/window/biomes/downs.js');
+//   _debug.layout('7', 0, 20000, 3000) -> { woods, oaks, farms, villages, flocks }
+// Positions are exact for oaks, farmsteads and village churches (the same rng draws as the
+// generators); woods and flocks are given by field.
+export const _debug = {
+  layout(seedStr, x0, x1, dMax = 3000) {
+    const terrain = makeTerrain(hashString(String(seedStr)), downsBiome.terrain);
+    const ctx = { terrain };
+    const L = layout(ctx);
+    const res = { woods: [], oaks: [], farms: [], villages: [], flocks: [] };
+    for (let k = 0; k + 1 < L.rows.length && L.rows[k].D < dMax; k++) {
+      const q = L.rows[k];
+      for (let j = Math.floor(x0 / q.W) - 1; j <= Math.floor(x1 / q.W) + 1; j++) {
+        const f = fieldInfo(L, k, j);
+        const dMid = (q.D + L.rows[k + 1].D) / 2;
+        const xl = colEdge(L, k, j, dMid), xr = colEdge(L, k, j + 1, dMid);
+        if (xr < x0 || xl > x1) continue;
+        if (f.wood) { res.woods.push({ x0: Math.round(xl), x1: Math.round(xr), d0: Math.round(q.D), d1: Math.round(L.rows[k + 1].D) }); continue; }
+        if (dMid < 1800 && inVillage(L, (xl + xr) / 2, dMid)) continue;
+        const rng = worldRng(ctx, 11, k, j);
+        for (let t = 0; t < f.oaks; t++) {
+          const d = lerp(q.D, L.rows[k + 1].D, 0.25 + 0.5 * rng()), wx = lerp(xl, xr, 0.15 + 0.7 * rng());
+          rng(); rng();     // height and crown
+          if (k > 0) res.oaks.push({ x: Math.round(wx), d: Math.round(d) });
+        }
+        if (f.farm) { const d = q.D + 14 + 10 * rng(), wx = lerp(xl, xr, 0.2 + 0.6 * rng()); res.farms.push({ x: Math.round(wx), d: Math.round(d) }); }
+        if (f.flock) res.flocks.push({ x: Math.round((xl + xr) / 2), d: Math.round(dMid), sheep: f.flock === 1 });
+      }
+    }
+    for (let i = Math.floor(x0 / VCELL) - 1; i <= Math.floor(x1 / VCELL) + 1; i++) {
+      const v = villageIn(L, i);
+      if (v && v.cx >= x0 && v.cx <= x1 && v.dc < dMax) res.villages.push({ church: { x: Math.round(v.cx), d: Math.round(v.dc + 14) }, R: Math.round(v.R), spire: v.spire });
+    }
+    return res;
+  },
+};

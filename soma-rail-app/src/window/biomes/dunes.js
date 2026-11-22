@@ -1065,7 +1065,7 @@ function* tent(ctx, out, x, d, rng, night) {
       const fall = 1 - Math.pow(Math.abs(v - 0.5) * 2, 1.6) * 0.6;
       const y = y0 + H * ridge * fall;
       const c = jitter(mul3(C.tent, 0.85 + 0.35 * (1 - v) + 0.15 * (1 - u)), rng, 0.1);
-      out(x - w / 2 + u * w, y, -(d - dep / 2 + v * dep), w / nu * 0.65, 0.08, dep / nv * 0.65, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING);
+      out(x - w / 2 + u * w, y, -(d - dep / 2 + v * dep), w / nu * 0.65, 0.22, dep / nv * 0.65, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING);   // a cloth with body: level discs seen from rail level were near edge-on slivers
     }
     if (out.due()) yield;
   }

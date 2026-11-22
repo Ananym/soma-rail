@@ -31,7 +31,7 @@ import { hashInts, hashString, makeRng } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, detail, shade, jitter, mul3, mix3, smooth,
-  clamp, lerp, norm3, quatYaw, quatUpTo, quatMul, quatAxis, quatPitch, overheadLine, blob, strut, house,
+  clamp, lerp, norm3, quatXTo, quatYaw, quatUpTo, quatMul, quatAxis, quatPitch, overheadLine, blob, strut, house,
   rotY, SUN,
 } from './kit.js';
 
@@ -841,8 +841,18 @@ function* drawStream(ctx, out, st, dLo, dHi) {
     const a = p[k - 1], b = p[k], dm = (a[2] + b[2]) / 2;
     if (!inD(dm, dLo, dHi) || !inX(ctx, b[0], 20)) continue;
     const r = Math.max(1.1, 0.0014 * dm) * st.w;
-    const c = st.frozen ? (hh(k, st.seed & 0xffff, 3) < 0.7 ? C.ice : [0.6, 0.68, 0.74]) : (hh(k, st.seed & 0xffff, 3) < 0.6 ? [0.76, 0.79, 0.8] : [0.58, 0.66, 0.7]);
-    strut(out, a[0] - ctx.x0, a[1], -a[2], b[0] - ctx.x0, b[1], -b[2], r, c, 1, 1, KIND.GROUND);
+    // the colour drifts slowly along the stream (a colour per segment made it a dashed line)
+    const u = noise1(k / 5, st.seed & 0xffff);
+    const c = st.frozen ? mix3(C.ice, [0.6, 0.68, 0.74], u) : mix3([0.76, 0.79, 0.8], [0.58, 0.66, 0.7], u);
+    // overlapping splats laid along the segment (two per segment, each longer than its spacing),
+    // stood a little proud of the face toward the camera so the big ground discs do not swallow them
+    const off = Math.max(1.2, 0.004 * dm);
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = a[2] - b[2], len = Math.hypot(dx, dy, dz) || 1e-6;
+    const q = quatXTo(dx / len, dy / len, dz / len);
+    for (let j = 0; j < 2; j++) {
+      const t = (j + 0.5) / 2;
+      out(a[0] + dx * t - ctx.x0, a[1] + dy * t + off * 0.4, -(a[2] - dz * t) + off, len * 0.42, r, r * 0.6, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
+    }
     if (out.due()) yield;
   }
 }
@@ -884,6 +894,16 @@ function snowLine(W, wx, d) { return 100 + 150 * noise2(wx / 1800, d / 1500, W.w
 function surfColor(W, S, wx, d, rng, nn) {
   let c;
   const lit = Math.max(0, nn[0] * SUN[0] + nn[1] * SUN[1] + nn[2] * SUN[2]);
+  // a glacial lake on the floor: the ground under it is water too, so the big ground discs of the
+  // mid band, which sort in front of the lake's own splats, do not speckle it with grass
+  if (d > S.bf && d < S.bf + 260) {
+    const li = Math.floor(wx / LKCELL), f = wx / LKCELL - li;
+    // (a lake lies within 400 m of its cell's middle stretch; look next door only near the ends)
+    for (let i = f < 0.2 ? li - 1 : li; i <= (f > 0.8 ? li + 1 : li); i++) {
+      const L = lake(W, i);
+      if (L && Math.hypot((wx - L.wx) / L.rx, (d - L.d) / L.rz) < 0.97) return jitter([0.14, 0.52, 0.57], rng, 0.03);
+    }
+  }
   switch (S.t) {
     case T.CHANNEL: {
       const ice = S.ch.f > 0.72 && noise1(wx / 60, W.ws + 91) > 0.5;
@@ -1420,6 +1440,11 @@ function* yak(ctx, out, wx, y, d, o) {
     E(0.05, 1.08, -0.27, 0.28, 0.16, 0.03, bc2);
   }
   if (o.white) E(-0.3, 1.0, 0.25, 0.22, 0.17, 0.05, [0.7, 0.68, 0.64]);
+  if (o.load) {
+    // a pack yak: two sacks slung either side and a bundle lashed on top
+    for (const v of [1, -1]) E(-0.05, 1.08, 0.34 * v, 0.36, 0.21, 0.08, o.load);
+    E(-0.05, 1.42, 0, 0.36, 0.13, 0.3, [0.7, 0.66, 0.58]);
+  }
   if (out.due()) yield;
 }
 
@@ -1434,15 +1459,17 @@ function* bharal(ctx, out, wx, y, d, o) {
   const P = (u, h, v) => { pt[0] = x0 + (u * ca - v * sa) * k; pt[1] = y + h * k; pt[2] = -(d + (u * sa + v * ca) * k); return pt; };
   const q = quatYaw(o.yaw);
   const E = (u, h, v, rx, ry, rz, c, qq = q) => { P(u, h, v); out(pt[0], pt[1], pt[2], rx * k, ry * k, rz * k, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], kind); };
-  const coat = [0.44, 0.4, 0.35], coatHi = [0.55, 0.5, 0.43], belly = [0.74, 0.72, 0.67], black = [0.08, 0.07, 0.07];
+  // (the coat is a warm slate-brown, apart from the grey rock it stands on; the legs dark with only
+  // a pale stripe, since pale legs under a body the colour of the rock read as a little table)
+  const coat = [0.52, 0.43, 0.33], coatHi = [0.64, 0.54, 0.41], belly = [0.74, 0.72, 0.67], black = [0.08, 0.07, 0.07];
   const lr = Math.max(0.045, 0.00055 * d) / k;
-  for (const [u, v, c] of [[0.24, 0.08, black], [0.24, -0.08, belly], [-0.24, 0.08, coat], [-0.24, -0.08, belly]]) {
+  for (const [u, v, c] of [[0.24, 0.08, black], [0.24, -0.08, black], [-0.24, 0.08, mul3(coat, 0.7)], [-0.24, -0.08, mul3(coat, 0.7)]]) {
     const a = [...P(u, 0.62, v)], b = P(u, 0.02, v);
     strut(out, a[0], a[1], a[2], b[0], b[1], b[2], lr * k, c, 2, 1, kind);
   }
   E(0, 0.8, 0, 0.36, 0.19, 0.16, coat);
   E(-0.05, 0.94, 0, 0.3, 0.07, 0.12, coatHi);
-  E(0, 0.65, 0, 0.28, 0.06, 0.13, belly);
+  E(0, 0.66, 0, 0.22, 0.045, 0.1, belly);
   E(0.02, 0.7, 0.15, 0.28, 0.03, 0.02, black);
   E(0.3, 0.72, 0, 0.09, 0.13, 0.09, black);
   const look = o.look ? 0.9 : 0;
@@ -1537,7 +1564,7 @@ function* cairn(ctx, out, W, c, kind = KIND.OTHER) {
   const n = c.small ? 2 : 4;
   let yy = y;
   for (let k = 0; k < n; k++) {
-    const r = (c.small ? 0.3 : 0.55) * (1 - k * 0.18);
+    const r = (c.small ? 0.42 : 0.55) * (1 - k * 0.18);
     const col = jitter(mix3(C.stone, C.stoneDark, hh(k, c.seed | 0, 9) * 0.6), () => hh(k, c.seed | 0, 10), 0.1);
     out(x, yy + r * 0.6, -c.d, r, r * 0.65, r * 0.9, col[0], col[1], col[2], 1, 0, 0, 0, 1, kind);
     yy += r * 1.05;
@@ -1823,7 +1850,9 @@ function* bridges(ctx, out, W, dLo, dHi) {
     }
     // the deck: a sagging plank walk, and the two hand cables with flags along them
     const span = Math.hypot(bb[0] - a[0], bb[2] - a[2]);
-    yield* flagString(ctx, out, { a: [a[0], deck, a[2]], b: [bb[0], deck, bb[2]], sag: 1.2 / span, seed: b.seed ^ 5, fw: 0.001, cord: C.wood, noFlags: true }, dLo, dHi, KIND.BUILDING);
+    // (it was a single cord, which from the window read as one more cable: now a plank walk 1.4 m
+    // wide, laid as overlapping boards along the sag, with a dark edge each side)
+    yield* bridgeDeck(ctx, out, a, bb, deck, 1.2, b.seed, dLo, dHi);
     for (const side of [-1, 1]) {
       const sa = [a[0] + side * ud * 1.1, deck + b.tower, a[2] - side * ux * 1.1], sb = [bb[0] + side * ud * 1.1, deck + b.tower, bb[2] - side * ux * 1.1];
       yield* flagString(ctx, out, { a: sa, b: sb, sag: (b.tower - 0.8) / span, seed: b.seed ^ (side + 9), fw: 0.4, fade: 0.1 }, dLo, dHi);
@@ -1837,10 +1866,28 @@ function* bridges(ctx, out, W, dLo, dHi) {
         if (!inD(hd, dLo, dHi) || !inX(ctx, hx, 1)) continue;
         const top = lerp(sa[1], sb[1], t) - 4 * (b.tower - 0.8) * t * (1 - t);
         const bot = deck - 4 * 1.2 * t * (1 - t);
-        strut(out, hx - ctx.x0, top, -hd, hx - ctx.x0, bot, -hd, Math.max(0.025, 0.0003 * hd), C.cord, 1, 0.8, KIND.WIRE);
+        strut(out, hx - ctx.x0, top, -hd, hx - ctx.x0, bot, -hd, Math.max(0.035, 0.0005 * hd), C.cord, 2, 1, KIND.WIRE);
       }
     }
     for (const s of b.strings) yield* flagString(ctx, out, s, dLo, dHi);
+    if (out.due()) yield;
+  }
+}
+
+function* bridgeDeck(ctx, out, a, b, y0, sagH, seed, dLo, dHi) {
+  const dx = b[0] - a[0], dd = b[2] - a[2], span = Math.hypot(dx, dd);
+  const ux = dx / span, ud = dd / span;
+  const step = Math.max(0.6, 0.0035 * Math.min(a[2], b[2]));
+  const n = Math.ceil(span / step);
+  for (let k = 0; k < n; k++) {
+    const t = (k + 0.5) / n, wx = a[0] + dx * t, d = a[2] + dd * t;
+    if (!inD(d, dLo, dHi) || !inX(ctx, wx, 2)) continue;
+    const y = y0 - 4 * sagH * t * (1 - t), slope = -4 * sagH * (1 - 2 * t) / span;
+    const ql = Math.hypot(1, slope), q = quatXTo(ux / ql, slope / ql, -ud / ql);
+    const u = hh(k, seed & 0xffff, 31), c = mix3([0.5, 0.4, 0.29], [0.38, 0.3, 0.22], u);
+    out(wx - ctx.x0, y, -d, step * 0.75, 0.09, 0.62, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.BUILDING);
+    // the edge boards / mesh, a little darker, so the deck has sides when seen from below
+    for (const sg of [1, -1]) out(wx - ctx.x0 - sg * ud * 0.66, y + 0.18, -(d + sg * ux * 0.66), step * 0.75, 0.2, 0.05, c[0] * 0.6, c[1] * 0.6, c[2] * 0.6, 1, q[0], q[1], q[2], q[3], KIND.BUILDING);
     if (out.due()) yield;
   }
 }
@@ -1937,6 +1984,1054 @@ function* banners(ctx, out, W, dLo, dHi) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Life in the valley: travellers, camps, lodges, orchards, shrines, birds, ice, lakes, ruins, snow
+// ---------------------------------------------------------------------------------------------
+// Each kind has its own world cell size, and a slow regional mood decides which kinds a stretch
+// favours: herding country (caravans, nomad camps, lodges on the trail), farming country (orchards,
+// fields, prayer-wheel walls, monks, a school) and wild country (birds, icefalls, glacial lakes,
+// snowfall). So one stretch has a caravan passing a lodge, the next black tents and horses, the
+// next an orchard in blossom by a hamlet, and the next vultures circling under an icefall.
+function mood(W, wx) {
+  const a = noise1(wx / 4700, W.ws + 1701), b = noise1(wx / 3300, W.ws + 1702), c = noise1(wx / 5900, W.ws + 1703);
+  const s = a + b + c + 1e-6;
+  return { herd: 0.25 + 1.5 * a / s, farm: 0.25 + 1.5 * b / s, wild: 0.25 + 1.5 * c / s };
+}
+// Somewhere a new thing on the near slope may stand: on the slope (not the river bed) and clear of
+// the hamlets and flag sites already there.
+function nearFree(W, wx, d, rad) {
+  if (d > bnAt(W, wx) - 18 || d < 42) return false;
+  const h = hamlet(W, Math.floor(wx / HCELL));
+  if (h && Math.abs(h.wx - wx) < 70 + rad && Math.abs(h.d - d) < 40 + rad * 0.5) return false;
+  for (let i = Math.floor(wx / FCELL) - 1; i <= Math.floor(wx / FCELL) + 1; i++) {
+    const f = flagSite(W, i);
+    if (f && Math.abs(f.wx - wx) < 35 + rad && Math.abs(f.d - d) < 30 + rad * 0.5) return false;
+  }
+  return true;
+}
+// The new kinds keep out of each other's way by a fixed order of precedence (lodge, camp, school,
+// prayer-wheel wall, monks' path, caravan path): each asks only about the kinds before it, so the
+// answer never depends on which chunk asked first.
+const RANKED = [
+  (W, i) => { const o = lodge(W, i); return o && { wx: o.wx, d: o.d, r: 28 }; },
+  (W, i) => { const o = camp(W, i); return o && { wx: o.wx, d: o.d, r: 48 }; },
+  (W, i) => { const o = school(W, i); return o && { wx: o.wx, d: o.d, r: 28 }; },
+  (W, i) => { const o = wheelWall(W, i); return o && { wx: o.wx, d: o.d, r: o.len / 2 + 10 }; },
+];
+const RCELLS = [1700, 2100, 3100, 1400];
+function* claimsBefore(W, rank, x0, x1) {
+  for (let k = 0; k < Math.min(rank, RANKED.length); k++) {
+    for (let i = Math.floor((x0 - 60) / RCELLS[k]); i <= Math.floor((x1 + 60) / RCELLS[k]); i++) { const c = RANKED[k](W, i); if (c) yield c; }
+  }
+}
+function taken(W, rank, wx, d, rad) {
+  for (const c of claimsBefore(W, rank, wx - rad, wx + rad)) if (Math.abs(c.wx - wx) < c.r + rad && Math.abs(c.d - d) < (c.r + rad) * 0.7) return true;
+  return false;
+}
+function pathTaken(W, rank, p) {
+  for (const c of claimsBefore(W, rank, p.xa, p.xb)) if (c.wx > p.xa - c.r && c.wx < p.xb + c.r && Math.abs(pathD(p, clamp(c.wx, p.xa, p.xb)) - c.d) < c.r * 0.7 + 6) return true;
+  if (rank > 4) {
+    for (let i = Math.floor((p.xa - 200) / MKCELL); i <= Math.floor((p.xb + 200) / MKCELL); i++) {
+      const m = monkLine(W, i);
+      if (m && m.path.xb > p.xa && m.path.xa < p.xb && Math.abs(m.d - p.d0) < 30) return true;
+    }
+  }
+  return false;
+}
+
+// Rotation whose local x, y, z axes are u, v and u x v (u, v unit and at right angles).
+function quatBasis(ux, uy, uz, vx, vy, vz) {
+  const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  const m00 = ux, m01 = vx, m02 = nx, m10 = uy, m11 = vy, m12 = ny, m20 = uz, m21 = vz, m22 = nz;
+  const t = m00 + m11 + m22;
+  if (t > 0) { const s = Math.sqrt(t + 1) * 2; return [(m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s]; }
+  if (m00 > m11 && m00 > m22) { const s = Math.sqrt(1 + m00 - m11 - m22) * 2; return [0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s]; }
+  if (m11 > m22) { const s = Math.sqrt(1 + m11 - m00 - m22) * 2; return [(m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s]; }
+  const s = Math.sqrt(1 + m22 - m00 - m11) * 2; return [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s];
+}
+// A flat panel from corner o along u (lu metres) and toward p (the far end of the second edge).
+function* panel(out, o, u, p, lu, s, colorAt, kind, rng) {
+  const vx = p[0] - o[0], vy = p[1] - o[1], vz = p[2] - o[2], lv = Math.hypot(vx, vy, vz) || 1e-6;
+  const v = [vx / lv, vy / lv, vz / lv];
+  yield* quad(out, o, u, v, lu, lv, s, colorAt, quatBasis(u[0], u[1], u[2], v[0], v[1], v[2]), kind, rng);
+}
+// Smoke from a chimney, a tent or a fire: a few pale puffs rising and spreading, billowing in the
+// shader (MOVE.VAPOUR; drawn through the plain out, never beatOut, which would replace the motion).
+function smoke(out, x, y, d, seed, n = 7, rise = 9, k = 1) {
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, s = (0.45 + 2.2 * t) * k;
+    const drift = 3.5 * t * t * k + (hh(i, seed, 1) - 0.5) * s * 0.6;
+    const g = 0.6 + 0.12 * hh(i, seed, 2);
+    out(x + drift, y + rise * t * k, -(d + (hh(i, seed, 3) - 0.5) * s * 0.4), s, s * 0.75, s * 0.7, g, g, g * 1.02, 0.42 * (1 - 0.55 * t), 0, 0, 0, 1, KIND.OTHER, MOVE.VAPOUR);
+  }
+}
+
+// --- people and pack animals -----------------------------------------------------------------
+// A person, about 1.3 times life size like the yaks, from a dozen shaped splats: legs and arms as
+// struts, a torso, a head with hair or a hat, and what they carry. A still picks out the roles:
+//   role 'porter'  bent under a tall wicker doko with a tarpaulin bundle on top
+//        'trekker' a bright jacket, a rucksack and two walking poles
+//        'monk'    a maroon robe to the ankles, a shawl over one shoulder, a shaven head
+//        'herder'  a long dark chuba with a sash; 'child' as herder but small and bright
+//   o: { yaw (heading), ph (stride phase 0..1), role, col (jacket), k, hat }
+const SKIN = [0.42, 0.28, 0.2], HAIR = [0.06, 0.05, 0.05];
+const JACKETS = [[0.72, 0.16, 0.1], [0.12, 0.3, 0.62], [0.78, 0.48, 0.08], [0.1, 0.45, 0.32], [0.55, 0.12, 0.38], [0.2, 0.22, 0.26]];
+function* person(ctx, out, wx, y, d, o) {
+  out = beatOut(out);
+  const role = o.role || 'herder';
+  const k = (o.k || 1.3) * (role === 'child' ? 0.66 : 1);
+  const ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
+  const pt = [0, 0, 0];
+  const P = (u, h, v) => { pt[0] = x0 + (u * ca - v * sa) * k; pt[1] = y + h * k; pt[2] = -(d + (u * sa + v * ca) * k); return pt; };
+  const q = quatYaw(o.yaw);
+  // (no radius under 0.0006 d: smaller splats fall below a pixel and the GPU dims them away)
+  const fl = 0.0006 * d;
+  const E = (u, h, v, rx, ry, rz, c, qq = q) => { P(u, h, v); out(pt[0], pt[1], pt[2], Math.max(rx * k, fl), Math.max(ry * k, fl), Math.max(rz * k, fl), c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], KIND.OTHER); };
+  const S = (a, b, r, c) => { const pa = [...P(a[0], a[1], a[2])], pb = P(b[0], b[1], b[2]); strut(out, pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], r, c, 1, 1, KIND.OTHER); };
+  const lr = Math.max(0.065 * k, 0.0008 * d);
+  const sw = Math.sin((o.ph || 0) * Math.PI * 2) * 0.24;
+  const lean = role === 'porter' ? 0.16 : role === 'trekker' ? 0.05 : 0;
+  const robe = role === 'monk';
+  const coat = o.col || (robe ? [0.46, 0.08, 0.07] : role === 'herder' ? [0.2, 0.15, 0.12] : role === 'porter' ? [0.3, 0.27, 0.24] : JACKETS[0]);
+  const trousers = role === 'trekker' ? [0.16, 0.16, 0.18] : [0.2, 0.17, 0.15];
+  // legs (a monk's robe hides them to the ankle)
+  if (!robe) {
+    for (const s of [1, -1]) S([0, 0.9, 0.09 * s], [s * sw, 0.04, 0.1 * s], lr, trousers);
+    for (const s of [1, -1]) E(s * sw + 0.05, 0.04, 0.1 * s, 0.07, 0.035, 0.045, [0.1, 0.08, 0.07]);
+  } else {
+    // (radii are standard deviations: a splat shows to about twice its radius, so every part is
+    // drawn at about half its extent, or the body swallows the head)
+    E(0, 0.5, 0, 0.13, 0.3, 0.15, mul3(coat, 0.9));
+    E(0, 0.86, 0, 0.12, 0.14, 0.14, mul3(coat, 0.95));
+    for (const s of [1, -1]) E(s * sw * 0.5 + 0.05, 0.04, 0.09 * s, 0.07, 0.035, 0.045, [0.12, 0.08, 0.06]);
+  }
+  // the long coat of a herder hangs below the knee
+  if (role === 'herder' || role === 'child') E(0, 0.74, 0, 0.12, 0.2, 0.14, mul3(coat, 0.85));
+  // torso, with a sash or the monk's shawl
+  E(lean * 0.4, 1.18, 0, 0.1, 0.17, 0.13, coat);
+  if (robe) { E(lean * 0.4 + 0.04, 1.24, 0.05, 0.06, 0.08, 0.06, [0.74, 0.56, 0.1]); E(lean * 0.4, 1.24, -0.05, 0.11, 0.15, 0.12, coat); }
+  if (role === 'herder') E(0.02, 0.98, 0, 0.11, 0.03, 0.14, [0.7, 0.3, 0.12]);
+  // arms
+  const sh = 1.43;
+  if (role === 'trekker') {
+    for (const s of [1, -1]) {
+      const hand = [0.24 + s * sw * 0.4, 1.0, 0.27 * s];
+      S([lean * 0.5, sh, 0.21 * s], hand, lr * 0.85, coat);
+      S(hand, [0.5 + s * sw * 0.6, 0.02, 0.34 * s], Math.max(0.03 * k, 0.0005 * d), [0.62, 0.62, 0.64]);
+    }
+  } else if (role === 'porter') {
+    // hands up at the tumpline on the forehead
+    for (const s of [1, -1]) S([lean * 0.6, sh, 0.2 * s], [lean + 0.18, 1.55, 0.12 * s], lr * 0.85, coat);
+  } else {
+    for (const s of [1, -1]) S([lean * 0.5, sh, 0.21 * s], [-s * sw * 0.7 + 0.02, 0.98, 0.25 * s], lr * 0.85, robe ? coat : mul3(coat, 0.9));
+  }
+  // head: face toward the heading, hair or hat on top
+  E(lean + 0.03, 1.58, 0, 0.075, 0.085, 0.075, SKIN);
+  if (robe) E(lean + 0.01, 1.63, 0, 0.07, 0.04, 0.07, mul3(SKIN, 0.8));
+  else if (o.hat) E(lean, 1.66, 0, 0.1, 0.04, 0.1, o.hat);
+  else E(lean - 0.01, 1.64, 0, 0.077, 0.045, 0.077, HAIR);
+  if (role === 'porter') {
+    // the doko: a tall wicker basket on the back, the load lashed under a blue tarpaulin
+    E(lean * 0.5 - 0.24, 1.22, 0, 0.13, 0.24, 0.16, [0.55, 0.42, 0.24]);
+    E(lean * 0.5 - 0.26, 1.56, 0, 0.15, 0.11, 0.18, o.load || [0.14, 0.32, 0.62]);
+  } else if (role === 'trekker') {
+    E(-0.18, 1.25, 0, 0.07, 0.15, 0.11, o.pack || [0.62, 0.36, 0.08]);
+  }
+  if (out.due()) yield;
+}
+// A horse or a pack mule: a deep body, a long neck and head, slim legs, a tail. Mules carry two
+// side packs and a load on top; a horse may stand tethered with its head down to graze.
+const HORSES = [[0.3, 0.18, 0.1], [0.16, 0.11, 0.09], [0.48, 0.46, 0.42], [0.5, 0.38, 0.24], [0.24, 0.2, 0.17]];
+function* horse(ctx, out, wx, y, d, o) {
+  out = beatOut(out);
+  const k = o.k || 1.3, ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
+  const pt = [0, 0, 0];
+  const P = (u, h, v) => { pt[0] = x0 + (u * ca - v * sa) * k; pt[1] = y + h * k; pt[2] = -(d + (u * sa + v * ca) * k); return pt; };
+  const q = quatYaw(o.yaw);
+  // (no radius under 0.0006 d: smaller splats fall below a pixel and the GPU dims them away)
+  const fl = 0.0006 * d;
+  const E = (u, h, v, rx, ry, rz, c, qq = q) => { P(u, h, v); out(pt[0], pt[1], pt[2], Math.max(rx * k, fl), Math.max(ry * k, fl), Math.max(rz * k, fl), c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], KIND.OTHER); };
+  const S = (a, b, r, c) => { const pa = [...P(a[0], a[1], a[2])], pb = P(b[0], b[1], b[2]); strut(out, pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], r, c, 2, 1, KIND.OTHER); };
+  const c = o.col, hi = mul3(c, 1.35), lo = mul3(c, 0.7);
+  const lr = Math.max(0.06 * k, 0.0008 * d), sw = Math.sin((o.ph || 0) * Math.PI * 2) * 0.16;
+  for (const [u, v, s] of [[0.48, 0.13, 1], [0.48, -0.13, -1], [-0.46, 0.13, -1], [-0.46, -0.13, 1]]) S([u, 0.98, v], [u + s * sw, 0.03, v], lr, lo);
+  E(0, 1.18, 0, 0.58, 0.27, 0.24, c);
+  E(0.44, 1.2, 0, 0.24, 0.27, 0.22, c);
+  E(-0.44, 1.24, 0, 0.26, 0.27, 0.23, c);
+  E(-0.05, 1.42, 0, 0.5, 0.06, 0.16, hi);
+  const graze = o.graze;
+  const qn = quatMul(q, quatAxis(0, 0, 1, graze ? -0.75 : 0.95)), qd = quatMul(q, quatAxis(0, 0, 1, graze ? -1.2 : -0.55));
+  if (graze) { E(0.72, 1.0, 0, 0.3, 0.1, 0.11, c, qn); E(0.96, 0.62, 0, 0.22, 0.085, 0.095, c, qd); }
+  else { E(0.72, 1.55, 0, 0.27, 0.1, 0.11, c, qn); E(0.95, 1.74, 0, 0.23, 0.085, 0.095, c, qd); E(0.82, 1.92, 0, 0.04, 0.08, 0.06, lo); }
+  E(graze ? 0.62 : 0.66, graze ? 1.2 : 1.66, 0, 0.2, 0.05, 0.04, mul3(c, 0.45), qn);   // the mane
+  S([-0.66, 1.34, 0], [-0.78, 0.62, 0], Math.max(0.07 * k, 0.0009 * d), mul3(c, 0.5));
+  if (o.pack) {
+    const pc = o.pack;
+    for (const v of [1, -1]) E(0, 1.18, 0.34 * v, 0.36, 0.2, 0.08, pc);
+    E(0, 1.5, 0, 0.36, 0.13, 0.3, o.load || [0.7, 0.66, 0.58]);
+    E(0.42, 1.38, 0, 0.06, 0.12, 0.27, [0.6, 0.12, 0.08]);    // a red tassel collar
+  } else if (o.saddle) {
+    E(-0.02, 1.48, 0, 0.26, 0.07, 0.27, o.saddle);
+  }
+  if (out.due()) yield;
+}
+
+// A worn path across the near slope: d = d0 + A sin((wx - x0) / P + ph), from xa to xb.
+const pathD = (p, wx) => p.d0 + p.A * Math.sin((wx - p.xa) / p.P + p.ph);
+function* drawPath(ctx, out, W, p, dLo, dHi) {
+  const xa = Math.max(p.xa, ctx.x0 - 1), xb = Math.min(p.xb, ctx.x0 + ctx.length + 1);
+  if (xb <= xa) return;
+  const dm = pathD(p, (xa + xb) / 2);
+  if (!inD(dm, dLo - 40, dHi + 40)) return;
+  const s = Math.max(0.45, detail(out, dm, 0.9)), st = s * 1.2;
+  // (on a grid of world x, so the two chunks either side of a border meet without a gap or a double)
+  for (let wx = (Math.floor(xa / st) + 0.5) * st; wx < xb; wx += st) {
+    if (wx < xa) continue;
+    const d = pathD(p, wx);
+    if (!inD(d, dLo, dHi)) continue;
+    for (const off of [-0.45, 0.45]) {
+      const dd = d + off * p.w, y = W.H(wx, dd);
+      const e = 1.2, nn = norm3(-(W.H(wx + e, dd) - y) / e, 1, (W.H(wx, dd + e) - y) / e);
+      const u = hh(Math.round(wx * 3), Math.round(off * 10), p.seed & 0xffff);
+      const c = shade(mix3([0.67, 0.64, 0.59], [0.55, 0.51, 0.45], u), nn[0], nn[1], nn[2], 0.55, 0.6);
+      const qq = quatUpTo(nn[0], nn[1], nn[2]);
+      out(wx - ctx.x0, y + 0.2, -dd, s * 1.1, s * 0.1, Math.max(s * 0.8, p.w * 0.35), c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], KIND.GROUND);
+    }
+    if (out.due()) yield;
+  }
+}
+// File of walkers along a path: positions, ground heights and headings fixed in the layout.
+function fileAlong(W, p, lead, dir, list) {
+  let x = lead;
+  for (const m of list) {
+    x -= dir * m.gap;
+    const d = pathD(p, x), dd = (pathD(p, x + dir) - d);
+    m.wx = x; m.d = d; m.y = W.H(x, d) - 0.05; m.yaw = Math.atan2(dd, dir);
+  }
+  return list;
+}
+function* drawWalkers(ctx, out, list, dLo, dHi) {
+  for (const m of list) {
+    if (!inD(m.d, dLo, dHi) || !inX(ctx, m.wx, 3)) continue;
+    if (m.type === 'mule' || m.type === 'horse') yield* horse(ctx, out, m.wx, m.y, m.d, m);
+    else if (m.type === 'yak') yield* yak(ctx, out, m.wx, m.y, m.d, m);
+    else yield* person(ctx, out, m.wx, m.y, m.d, m);
+  }
+}
+
+// --- caravans: mules or yaks in single file on a trail, porters, trekkers ---
+const CVCELL = 1150;
+function caravan(W, i) { return cache(W, 'cv', i, () => makeCaravan(W, i)); }
+function makeCaravan(W, i) {
+  const seed = hashInts(W.ws, 1601, i), r = makeRng(seed);
+  const wx = (i + 0.2 + 0.6 * r()) * CVCELL;
+  if (r() > 0.42 * mood(W, wx).herd) return null;
+  const bn = bnAt(W, wx);
+  const d0 = 50 + (Math.min(bn - 30, 170) - 50) * Math.pow(r(), 1.3);
+  if (!nearFree(W, wx, d0, 40)) return null;
+  const p = { xa: wx - 170, xb: wx + 170, d0, A: 4 + 10 * r(), P: 40 + 50 * r(), ph: r() * 6.3, w: 1.6, seed };
+  if (pathTaken(W, 5, p)) return null;
+  const dir = r() < 0.5 ? 1 : -1;
+  const kind = r() < 0.55 ? 'mule' : r() < 0.7 ? 'none' : 'yak';
+  const list = [];
+  const ph = () => r();
+  list.push({ role: 'herder', gap: 0, ph: ph(), hat: r() < 0.5 ? [0.3, 0.24, 0.16] : null, col: [0.2, 0.15, 0.12] });
+  const na = kind === 'none' ? 0 : 4 + Math.floor(r() * 6);
+  const packs = [[0.55, 0.42, 0.26], [0.2, 0.3, 0.55], [0.6, 0.2, 0.12], [0.45, 0.45, 0.4]];
+  for (let k = 0; k < na; k++) {
+    if (kind === 'mule') list.push({ type: 'mule', gap: 3.3, ph: ph(), col: HORSES[Math.floor(r() * HORSES.length)], pack: packs[Math.floor(r() * packs.length)] });
+    else list.push({ type: 'yak', gap: 3.6, ph: ph(), k: 1.3 + 0.2 * r(), col: YAKS[Math.floor(r() * YAKS.length)], graze: false, tassel: r() < 0.6, load: packs[Math.floor(r() * packs.length)], white: r() < 0.2, seed: hashInts(seed, 3, k) });
+    if (k === Math.floor(na / 2) && r() < 0.7) list.push({ role: 'herder', gap: 2.4, ph: ph(), col: [0.25, 0.18, 0.14] });
+  }
+  const np = kind === 'none' ? 3 + Math.floor(r() * 4) : Math.floor(r() * 3);
+  for (let k = 0; k < np; k++) list.push({ role: 'porter', gap: 2.4, ph: ph(), load: r() < 0.6 ? [0.14, 0.32, 0.62] : [0.62, 0.2, 0.12] });
+  const nt = 1 + Math.floor(r() * 3);
+  for (let k = 0; k < nt; k++) list.push({ role: 'trekker', gap: 3, ph: ph(), col: JACKETS[Math.floor(r() * 5)], pack: JACKETS[Math.floor(r() * JACKETS.length)], hat: r() < 0.4 ? [0.75, 0.7, 0.6] : null });
+  const len = list.reduce((a, m) => a + m.gap, 0);
+  const lead = wx + dir * len / 2;
+  return { i, wx, d: d0, seed, path: p, walkers: fileAlong(W, p, lead, dir, list), kind };
+}
+function* caravans(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 200) / CVCELL); i <= Math.floor((ctx.x0 + ctx.length + 200) / CVCELL); i++) {
+    const c = caravan(W, i);
+    if (!c || !inX(ctx, c.wx, 190)) continue;
+    yield* drawPath(ctx, out, W, c.path, dLo, dHi);
+    yield* drawWalkers(ctx, out, c.walkers, dLo, dHi);
+  }
+}
+
+// --- a file of monks in maroon walking to a chorten, through a kani gate ---
+const MKCELL = 1900;
+function monkLine(W, i) { return cache(W, 'mk', i, () => makeMonks(W, i)); }
+function makeMonks(W, i) {
+  const seed = hashInts(W.ws, 1611, i), r = makeRng(seed);
+  const wx = (i + 0.2 + 0.6 * r()) * MKCELL;
+  if (r() > 0.7 * mood(W, wx).farm) return null;
+  const bn = bnAt(W, wx);
+  const d0 = 55 + (Math.min(bn - 30, 160) - 55) * r();
+  if (!nearFree(W, wx, d0, 45)) return null;
+  const p = { xa: wx - 130, xb: wx + 130, d0, A: 3 + 6 * r(), P: 50 + 40 * r(), ph: r() * 6.3, w: 1.4, seed };
+  if (pathTaken(W, 4, p)) return null;
+  const dir = r() < 0.5 ? 1 : -1;
+  const n = 5 + Math.floor(r() * 8);
+  const list = [];
+  for (let k = 0; k < n; k++) list.push({ role: 'monk', gap: k ? 1.9 + 0.5 * r() : 0, ph: r(), hat: null });
+  // the head of the line: a senior monk under a yellow crested hat, now and then
+  if (r() < 0.5) list[0].hat = [0.8, 0.62, 0.1];
+  const len = list.reduce((a, m) => a + m.gap, 0);
+  const lead = wx + dir * (len / 2 - 15);
+  const walkers = fileAlong(W, p, lead, dir, list);
+  // ahead of them, a kani gate astride the path and a chorten beyond it
+  const gx = lead + dir * 22, cx = lead + dir * 55;
+  const gd = pathD(p, gx), cd = pathD(p, cx) + 7;
+  const gate = { wx: gx, d: gd, yaw: Math.atan2(pathD(p, gx + 1) - gd, 1), seed: hashInts(seed, 7) };
+  return { i, wx, d: d0, seed, path: p, walkers, gate, chorten: { wx: cx, d: cd, H: 6 + 2 * r(), seed: hashInts(seed, 8) } };
+}
+function* monkLines(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 200) / MKCELL); i <= Math.floor((ctx.x0 + ctx.length + 200) / MKCELL); i++) {
+    const m = monkLine(W, i);
+    if (!m || !inX(ctx, m.wx, 190)) continue;
+    yield* drawPath(ctx, out, W, m.path, dLo, dHi);
+    yield* drawWalkers(ctx, out, m.walkers, dLo, dHi);
+    if (inD(m.gate.d, dLo, dHi) && inX(ctx, m.gate.wx, 8)) yield* kaniGate(ctx, out, W, m.gate);
+    if (inD(m.chorten.d, dLo, dHi) && inX(ctx, m.chorten.wx, 8)) yield* drawChorten(ctx, out, W, m.chorten);
+  }
+}
+
+// --- the kani gate: a gateway chorten the path walks through ---
+// Two thick whitewashed piers under a deep lintel with a painted band, a small chorten on top.
+// The path runs along local x through the passage, so the passage faces along the track.
+function* kaniGate(ctx, out, W, g) {
+  const rng = makeRng(g.seed);
+  const yaw = g.yaw + Math.PI / 2;      // the passage runs along the path
+  const pw = 2.6, pier = 1.7, dep = 4.2, ph = 3.4, lh = 1.5;
+  const [ex, ez] = rotY(1, 0, yaw);
+  let lo = Infinity, hi = -Infinity;
+  for (const a of [-1, 1]) for (const b of [-1, 1]) { const yy = W.H(g.wx + ex * a * 3.2 + b * 2, g.d - ez * a * 3.2); lo = Math.min(lo, yy); hi = Math.max(hi, yy); }
+  const y = Math.max(lo, hi - 0.8) - 0.2;
+  const x = g.wx - ctx.x0, s = clamp(sizeS(out, g.d, 0.7), 0.1, 0.5);
+  const white = C.white;
+  const pierF = (f, a, b, nx, nz) => (f === 4 ? mul3(white, 0.9) : faceTone(white, nx, nz));
+  for (const sgn of [-1, 1]) {
+    const o = sgn * (pw / 2 + pier / 2);
+    yield* box(out, x + ex * o, y, g.d - ez * o, pier, dep, ph, yaw, s, pierF, KIND.BUILDING, rng);
+  }
+  if (y > lo + 0.3) yield* plinth(out, x, g.d, pw + 2 * pier, dep, yaw, lo - 0.4, y + 0.1, s, KIND.BUILDING, rng);
+  const lw = pw + 2 * pier + 0.4;
+  yield* box(out, x, y + ph, g.d, lw, dep + 0.4, lh, yaw, s, (f, a, b, nx, nz) => {
+    if (f === 4) return mul3(white, 0.9);
+    if (b > 0.72) return faceTone(C.maroon, nx, nz);
+    if (b > 0.55) return faceTone(hh(Math.floor(a * 9), f, 3) < 0.5 ? [0.72, 0.56, 0.22] : [0.2, 0.36, 0.6], nx, nz);
+    return faceTone(white, nx, nz);
+  }, KIND.BUILDING, rng);
+  // the dark of the passage, seen through the gate
+  yield* box(out, x, y, g.d, pw * 0.98, dep * 0.96, ph * 0.98, yaw, s, (f) => (f === 4 ? null : [0.1, 0.09, 0.08]), KIND.BUILDING, rng);
+  yield* chorten(ctx, out, x, g.d, 4.2, { y: y + ph + lh, s: clamp(s, 0.06, 0.45), rng, kind: KIND.BUILDING, yaw });
+}
+// Kani gates on their own, at the entrance to a hamlet.
+function* hamletGates(ctx, out, W, h, dLo, dHi) {
+  if (!h.gate || !inD(h.gate.d, dLo, dHi) || !inX(ctx, h.gate.wx, 8)) return;
+  yield* kaniGate(ctx, out, W, h.gate);
+}
+
+// --- a row of prayer wheels along a roofed wall ---
+const PWCELL = 1400;
+function wheelWall(W, i) { return cache(W, 'pw', i, () => makeWheelWall(W, i)); }
+function makeWheelWall(W, i) {
+  const seed = hashInts(W.ws, 1621, i), r = makeRng(seed);
+  const wx = (i + 0.2 + 0.6 * r()) * PWCELL;
+  if (r() > 0.4 * mood(W, wx).farm) return null;
+  const bn = bnAt(W, wx);
+  const d = 48 + (Math.min(bn - 25, 150) - 48) * Math.pow(r(), 1.4);
+  if (!nearFree(W, wx, d, 25)) return null;
+  const len = 14 + 14 * r(), yaw = (r() - 0.5) * 0.5;
+  if (taken(W, 3, wx, d, len / 2 + 10)) return null;
+  const pw = { i, wx, d, len, yaw, seed, people: [] };
+  // pilgrims turning the wheels as they walk along
+  const np = Math.floor(r() * 3);
+  for (let k = 0; k < np; k++) {
+    const t = (r() - 0.5) * 0.8 * len, [ox, oz] = rotY(t, 2.1, yaw);
+    const px = wx + ox, pd = d - oz;
+    pw.people.push({ role: 'herder', wx: px, d: pd, y: W.H(px, pd), yaw: yaw + (r() < 0.5 ? 0 : Math.PI), ph: r(), col: r() < 0.5 ? [0.22, 0.17, 0.14] : [0.36, 0.1, 0.08], hat: r() < 0.5 ? [0.55, 0.5, 0.42] : null });
+  }
+  if (r() < 0.55) {
+    const [ox, oz] = rotY(-(len / 2 + 7), 0, yaw);
+    pw.gate = { wx: wx + ox, d: d - oz, yaw, seed: hashInts(seed, 4) };
+  }
+  return pw;
+}
+function* wheelWalls(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 60) / PWCELL); i <= Math.floor((ctx.x0 + ctx.length + 60) / PWCELL); i++) {
+    const p = wheelWall(W, i);
+    if (!p || !inX(ctx, p.wx, p.len / 2 + 20)) continue;
+    if (inD(p.d, dLo, dHi)) yield* drawWheelWall(ctx, out, W, p);
+    for (const m of p.people) if (inD(m.d, dLo, dHi) && inX(ctx, m.wx, 2)) yield* person(ctx, out, m.wx, m.y, m.d, m);
+    if (p.gate && inD(p.gate.d, dLo, dHi) && inX(ctx, p.gate.wx, 8)) yield* kaniGate(ctx, out, W, p.gate);
+  }
+}
+function* drawWheelWall(ctx, out, W, p) {
+  const rng = makeRng(p.seed);
+  const [ex, ez] = rotY(1, 0, p.yaw), [fx, fz] = rotY(0, 1, p.yaw);
+  let lo = Infinity, hi = -Infinity;
+  for (const a of [-0.5, 0, 0.5]) for (const b of [-1, 1.2]) { const yy = W.H(p.wx + ex * a * p.len + fx * b, p.d - (ez * a * p.len + fz * b)); lo = Math.min(lo, yy); hi = Math.max(hi, yy); }
+  const y = Math.max(lo, hi - 0.6);
+  const x = p.wx - ctx.x0, s = clamp(sizeS(out, p.d, 0.7), 0.1, 0.45);
+  const at = (lu, lz) => [x + ex * lu + fx * lz, -p.d + ez * lu + fz * lz];
+  if (y > lo + 0.3) yield* plinth(out, x, p.d, p.len + 1, 3.2, p.yaw, lo - 0.4, y + 0.05, s, KIND.BUILDING, rng);
+  // the back wall, whitewashed, with a maroon band under the roof
+  const [bx, bz] = at(0, -0.9);
+  // (the front face is in deep shadow behind the wheels, so the drums stand out against it)
+  yield* box(out, bx, y, -bz, p.len, 0.7, 2.6, p.yaw, s, (f, a, b, nx, nz) => (f === 4 ? C.parapet : f === 0 && b > 0.22 && b < 0.78 ? [0.16, 0.1, 0.08] : faceTone(b > 0.8 ? C.maroon : C.white, nx, nz)), KIND.BUILDING, rng);
+  // the roof: a deep eave over the wheels on a row of posts
+  const [rx, rz] = at(0, -0.3);
+  yield* box(out, rx, y + 2.6, -rz, p.len + 0.8, 1.9, 0.32, p.yaw, s, (f, a, b, nx, nz) => (f === 4 ? jitter([0.3, 0.2, 0.15], rng, 0.08) : faceTone(f === 0 ? [0.72, 0.56, 0.22] : C.parapet, nx, nz)), KIND.BUILDING, rng);
+  const pr = Math.max(0.06, 0.0005 * p.d);
+  for (let t = -p.len / 2; t <= p.len / 2 + 0.01; t += p.len / Math.max(2, Math.round(p.len / 4.5))) {
+    const [px, pz] = at(t, 0.6);
+    strut(out, px, y, pz, px, y + 2.6, pz, pr, [0.3, 0.14, 0.1], 2, 1, KIND.BUILDING);
+  }
+  // the wheels: upright drums in copper, gold and red, side by side on their spindles
+  const wr = Math.max(0.26, 0.0022 * p.d), step = wr * 2.7;
+  const nw = Math.floor((p.len - 0.8) / step);
+  for (let k = 0; k < nw; k++) {
+    const t = -((nw - 1) / 2) * step + k * step;
+    const [wxx, wz] = at(t, -0.15);
+    const u = hh(k, p.seed & 0xffff, 21);
+    const c = u < 0.45 ? [0.72, 0.46, 0.22] : u < 0.85 ? [0.8, 0.64, 0.22] : [0.66, 0.16, 0.1];
+    const cs = shade(c, 0, 0.3, 1, 0.7, 0.5);
+    out(wxx, y + 1.3, wz, wr, wr * 1.5, wr, cs[0], cs[1], cs[2], 1, 0, 0, 0, 1, KIND.BUILDING);
+    // a painted band round the middle and the dark cap
+    out(wxx, y + 1.3, wz + wr * 0.15, wr * 1.03, wr * 0.28, wr * 1.03, 0.62, 0.14, 0.1, 1, 0, 0, 0, 1, KIND.BUILDING);
+    out(wxx, y + 1.3 + wr * 1.25, wz, wr * 0.9, wr * 0.25, wr * 0.9, 0.2, 0.12, 0.08, 1, 0, 0, 0, 1, KIND.BUILDING);
+    if (out.due()) yield;
+  }
+}
+
+// --- the trekkers' lodge: a two-storey tea house under a blue tin roof, a walled terrace in front
+// with trekkers at it, firewood stacked against the end wall, smoke from the stove pipe ---
+const LDCELL = 1700;
+function lodge(W, i) { return cache(W, 'ld', i, () => makeLodge(W, i)); }
+function makeLodge(W, i) {
+  const seed = hashInts(W.ws, 1631, i), r = makeRng(seed);
+  const wx = (i + 0.2 + 0.6 * r()) * LDCELL;
+  if (r() > 0.75 * mood(W, wx).herd) return null;
+  const bn = bnAt(W, wx);
+  const d = 60 + (Math.min(bn - 30, 190) - 60) * r();
+  if (!nearFree(W, wx, d, 30)) return null;
+  const L = { i, wx, d, seed, w: 11 + 5 * r(), dep: 8 + 2 * r(), h: 5.6 + 1.2 * r(), yaw: (r() - 0.5) * 0.3, roof: r() < 0.75 ? [0.14, 0.34, 0.6] : [0.12, 0.46, 0.46], people: [] };
+  L.base = minGround(W, L); L.top = GR.max;
+  const nt = 1 + Math.floor(r() * 3);
+  for (let k = 0; k < nt; k++) {
+    const [ox, oz] = rotY((r() - 0.5) * L.w * 0.7, L.dep / 2 + 2 + 2 * r(), L.yaw);
+    L.people.push({ role: 'trekker', wx: wx + ox, d: d - oz, yaw: r() * 6.3, ph: 0, col: JACKETS[Math.floor(r() * 5)], pack: JACKETS[Math.floor(r() * JACKETS.length)] });
+  }
+  return L;
+}
+function* lodges(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 60) / LDCELL); i <= Math.floor((ctx.x0 + ctx.length + 60) / LDCELL); i++) {
+    const L = lodge(W, i);
+    if (!L || !inX(ctx, L.wx, 30) || !inD(L.d, dLo, dHi)) continue;
+    yield* drawLodge(ctx, out, W, L);
+  }
+}
+function* drawLodge(ctx, out, W, L) {
+  const rng = makeRng(L.seed);
+  const x = L.wx - ctx.x0, s = sizeS(out, L.d, 0.8);
+  const y = Math.max(L.base, L.top - 0.33 * L.h) - 0.3;
+  const [ex, ez] = rotY(1, 0, L.yaw), [fx, fz] = rotY(0, 1, L.yaw);
+  const P = (lx, ly, lz) => [x + ex * lx + fx * lz, y + ly, -L.d + ez * lx + fz * lz];
+  // the terrace: a stone platform built out in front, its top beaten earth
+  const T = 5;
+  const [tx, tz] = rotY(0, L.dep / 2 + T / 2, L.yaw);
+  const tlo = Math.min(L.base, W.H(L.wx + tx, L.d - tz) - 0.3);
+  yield* box(out, x + tx, tlo - 0.4, L.d - tz, L.w + 2, T, y - tlo + 0.4, L.yaw, Math.max(0.25, s), (f, a, b, nx, nz) => (f === 4 ? jitter(C.yard, rng, 0.06) : jitter(faceTone(mix3(C.wallStone, C.stoneDark, 0.25), nx, nz), rng, 0.08)), KIND.BUILDING, rng);
+  if (y > L.base + 0.8) yield* plinth(out, x, L.d, L.w, L.dep, L.yaw, L.base - 0.6, y + 0.2, s, KIND.BUILDING, rng);
+  yield* flatHouse(ctx, out, x, L.d, { w: L.w, dep: L.dep, h: L.h, yaw: L.yaw, wall: C.white, y, s, rng, lit: litShare(ctx), salt: L.seed & 0xffff });
+  // the low-pitched tin roof, front and back slopes and the gable ends
+  const rh = 1.6, ov = 0.45, top = L.h;
+  const roofC = (nz) => (a, b) => jitter(shade(L.roof, 0, 0.9, nz, 0.62, 0.45), rng, 0.04);
+  yield* panel(out, P(-L.w / 2 - ov, top, L.dep / 2 + ov), [ex, 0, ez], P(-L.w / 2 - ov, top + rh, 0), L.w + 2 * ov, s, roofC(0.6), KIND.BUILDING, rng);
+  yield* panel(out, P(L.w / 2 + ov, top, -L.dep / 2 - ov), [-ex, 0, -ez], P(L.w / 2 + ov, top + rh, 0), L.w + 2 * ov, s, roofC(-0.4), KIND.BUILDING, rng);
+  for (const sg of [-1, 1]) {
+    yield* panel(out, P(sg * L.w / 2, top, -L.dep / 2), [fx, 0, fz], P(sg * L.w / 2, top + rh, -L.dep / 2), L.dep, s, (a, b) => {
+      if (b > 1 - Math.abs(a - 0.5) * 2) return null;
+      return faceTone(L.roof, sg * ex, sg * ez);
+    }, KIND.BUILDING, rng);
+  }
+  // the stove pipe and its smoke
+  const cp = P(L.w * 0.3, top + rh * 0.6, -L.dep * 0.15);
+  strut(out, cp[0], cp[1], cp[2], cp[0], cp[1] + 2.2, cp[2], Math.max(0.12, 0.0008 * L.d), [0.2, 0.2, 0.21], 2, 1, KIND.BUILDING);
+  smoke(out, cp[0], cp[1] + 2.4, -cp[2], L.seed & 0xffff, 7, 8, 1);
+  // firewood stacked against the sunny end wall: log ends in rows
+  const fwp = P(-L.w / 2 - 0.8, 0, 0);
+  yield* box(out, fwp[0], y, -fwp[2], 1.4, L.dep * 0.75, 1.9, L.yaw, clamp(s, 0.1, 0.3), (f, a, b, nx, nz) => {
+    if (f === 4) return jitter([0.36, 0.28, 0.2], rng, 0.1);
+    const u = hh(Math.floor(a * 14), Math.floor(b * 6) + f * 7, 77);
+    return faceTone(u < 0.5 ? [0.64, 0.5, 0.32] : u < 0.8 ? [0.46, 0.34, 0.22] : [0.3, 0.22, 0.15], nx, nz);
+  }, KIND.BUILDING, rng);
+  // a short string of flags from the roof to a pole by the terrace
+  const pp = P(L.w / 2 + 1.5, 0, L.dep / 2 + T);
+  const pwx = pp[0] + ctx.x0, pd = -pp[2];
+  yield* flagPole(ctx, out, W, { wx: pwx, d: pd, h: 7, seed: L.seed ^ 3 });
+  const ra = P(-L.w * 0.3, top + rh, 0);
+  yield* flagString(ctx, out, { a: [ra[0] + ctx.x0, ra[1], -ra[2]], b: [pwx, W.H(pwx, pd) + 6.6, pd], sag: 0.05, seed: L.seed ^ 9, fw: 0.4 }, ctx.zNear, ctx.zFar);
+  for (const m of L.people) yield* person(ctx, out, m.wx, y + 0.05, m.d, m);
+}
+
+// --- a nomad camp: black yak-hair tents, a fire, horses on a tether line, a few yaks ---
+const NCCELL = 2100;
+function camp(W, i) { return cache(W, 'nc', i, () => makeCamp(W, i)); }
+function makeCamp(W, i) {
+  const seed = hashInts(W.ws, 1641, i), r = makeRng(seed);
+  const wx = (i + 0.2 + 0.6 * r()) * NCCELL;
+  if (r() > 0.8 * mood(W, wx).herd) return null;
+  const bn = bnAt(W, wx);
+  const d = 60 + (Math.min(bn - 30, 200) - 60) * r();
+  if (!nearFree(W, wx, d, 45) || taken(W, 1, wx, d, 48)) return null;
+  const c = { i, wx, d, seed, tents: [], horses: [], yaks: [], people: [] };
+  const nt = 1 + Math.floor(r() * 3);
+  for (let k = 0; k < nt; k++) {
+    const tx = wx + (k - (nt - 1) / 2) * (17 + 6 * r()), td = d + (r() - 0.5) * 10;
+    c.tents.push({ wx: tx, d: td, w: 9.5 + 3.5 * r(), dep: 7 + 2 * r(), h: 3.3 + 0.7 * r(), yaw: (r() - 0.5) * 0.6, seed: hashInts(seed, 1, k) });
+  }
+  c.fire = { wx: wx + (r() - 0.5) * 10, d: d - 7 - 3 * r() };
+  c.fire.y = W.H(c.fire.wx, c.fire.d);
+  // a tether line between two stakes with horses tied along it
+  const lx = wx + (r() < 0.5 ? -1 : 1) * (18 + 8 * r()), ld = d - 4 + 6 * r(), ll = 8 + 6 * r();
+  c.line = { a: [lx - ll / 2, ld], b: [lx + ll / 2, ld] };
+  const nh = 2 + Math.floor(r() * 3);
+  for (let k = 0; k < nh; k++) {
+    const hx = lx - ll / 2 + (k + 0.5) * ll / nh, hd = ld - 1.2;
+    c.horses.push({ type: 'horse', wx: hx, d: hd, y: W.H(hx, hd), yaw: -Math.PI / 2 + (r() - 0.5) * 0.7, col: HORSES[Math.floor(r() * HORSES.length)], graze: r() < 0.4, saddle: r() < 0.5 ? [0.6, 0.14, 0.1] : null, ph: 0.25 });
+  }
+  const ny = Math.floor(r() * 5);
+  for (let k = 0; k < ny; k++) {
+    const yx = wx + (r() - 0.5) * 50, yd = d + 10 + 10 * r();
+    c.yaks.push({ wx: yx, d: yd, yaw: r() * 6.3, k: 1.3 + 0.3 * r(), col: YAKS[Math.floor(r() * YAKS.length)], graze: r() < 0.7, tassel: r() < 0.3, white: r() < 0.25, seed: hashInts(seed, 4, k) });
+  }
+  const np = 1 + Math.floor(r() * 3);
+  for (let k = 0; k < np; k++) {
+    const px = c.fire.wx + (r() - 0.5) * 6, pd = c.fire.d + (r() - 0.5) * 4;
+    c.people.push({ role: r() < 0.25 ? 'child' : 'herder', wx: px, d: pd, y: W.H(px, pd), yaw: r() * 6.3, ph: 0.25, col: r() < 0.5 ? [0.22, 0.16, 0.12] : [0.3, 0.12, 0.1], hat: r() < 0.4 ? [0.5, 0.36, 0.2] : null });
+  }
+  return c;
+}
+function* camps(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 100) / NCCELL); i <= Math.floor((ctx.x0 + ctx.length + 100) / NCCELL); i++) {
+    const c = camp(W, i);
+    if (!c || !inX(ctx, c.wx, 80)) continue;
+    for (const t of c.tents) if (inD(t.d, dLo, dHi) && inX(ctx, t.wx, 10)) yield* blackTent(ctx, out, W, t);
+    if (inD(c.fire.d, dLo, dHi) && inX(ctx, c.fire.wx, 2)) {
+      const fx = c.fire.wx - ctx.x0, fy = c.fire.y;
+      for (let k = 0; k < 6; k++) { const a = k / 6 * 6.28; out(fx + Math.cos(a) * 0.7, fy + 0.15, -(c.fire.d + Math.sin(a) * 0.7), 0.22, 0.16, 0.2, 0.3, 0.29, 0.27, 1, 0, 0, 0, 1, KIND.OTHER); }
+      out(fx, fy + 0.35, -c.fire.d, 0.3, 0.3, 0.3, 1.0, 0.56, 0.18, 1, 0, 0, 0, 1, KIND.LIGHT);
+      out(fx, fy + 0.6, -c.fire.d, 0.18, 0.32, 0.18, 1.0, 0.78, 0.35, 1, 0, 0, 0, 1, KIND.LIGHT);
+      smoke(out, fx, fy + 1.4, c.fire.d, c.seed & 0xffff, 7, 9, 0.9);
+    }
+    const [a, b] = [c.line.a, c.line.b];
+    if (inD(a[1], dLo, dHi) && inX(ctx, a[0], 15)) {
+      const ya = W.H(a[0], a[1]), yb = W.H(b[0], b[1]);
+      const pr = Math.max(0.06, 0.0006 * a[1]);
+      strut(out, a[0] - ctx.x0, ya, -a[1], a[0] - ctx.x0, ya + 1.2, -a[1], pr, C.pole, 1, 1, KIND.OTHER);
+      strut(out, b[0] - ctx.x0, yb, -b[1], b[0] - ctx.x0, yb + 1.2, -b[1], pr, C.pole, 1, 1, KIND.OTHER);
+      strut(out, a[0] - ctx.x0, ya + 1.1, -a[1], b[0] - ctx.x0, yb + 1.1, -b[1], Math.max(0.03, 0.0005 * a[1]), C.cord, 4, 1, KIND.WIRE);
+    }
+    for (const h of c.horses) if (inD(h.d, dLo, dHi) && inX(ctx, h.wx, 3)) yield* horse(ctx, out, h.wx, h.y, h.d, h);
+    for (const y of c.yaks) if (inD(y.d, dLo, dHi) && inX(ctx, y.wx, 4)) yield* yak(ctx, out, y.wx, W.H(y.wx, y.d) - 0.05, y.d, y);
+    for (const m of c.people) if (inD(m.d, dLo, dHi) && inX(ctx, m.wx, 2)) yield* person(ctx, out, m.wx, m.y, m.d, m);
+  }
+}
+// A black tent of woven yak hair: a ridge along its length, the two long slopes pegged out low with
+// a short wall of cloth beneath, end walls closing it, a smoke gap along the ridge and guy ropes
+// out to stakes. The weave shows as darker and lighter bands; a white cloth trims the eaves.
+function* blackTent(ctx, out, W, t) {
+  const rng = makeRng(t.seed);
+  const [ex, ez] = rotY(1, 0, t.yaw), [fx, fz] = rotY(0, 1, t.yaw);
+  let lo = Infinity;
+  for (const a of [-0.5, 0.5]) for (const b of [-0.5, 0.5]) lo = Math.min(lo, W.H(t.wx + ex * a * t.w + fx * b * t.dep, t.d - (ez * a * t.w + fz * b * t.dep)));
+  const x = t.wx - ctx.x0, y = lo - 0.15;
+  const P = (lx, ly, lz) => [x + ex * lx + fx * lz, y + ly, -t.d + ez * lx + fz * lz];
+  const s = clamp(sizeS(out, t.d, 0.6), 0.08, 0.4);
+  const eave = 0.8, H = t.h;
+  const cloth = (nz, k) => (a, b) => {
+    const band = hh(Math.floor(a * t.w / 0.9), 3, t.seed & 0xffff) < 0.3 ? 1.6 : 1;
+    return jitter(mul3(shade([0.11, 0.095, 0.085], 0, 0.7, nz, 0.62, 0.5), band * k), rng, 0.08);
+  };
+  for (const sg of [1, -1]) {
+    const o = P(-sg * t.w / 2, eave, sg * t.dep / 2), u = [sg * ex, 0, sg * ez];
+    yield* panel(out, o, u, P(-sg * t.w / 2, H, sg * 0.25), t.w, s, cloth(0.6 * sg, sg > 0 ? 1 : 0.8), KIND.BUILDING, rng);
+    yield* panel(out, P(-sg * t.w / 2, 0, sg * t.dep / 2), u, P(-sg * t.w / 2, eave, sg * t.dep / 2), t.w, s, (a, b) => (b > 0.8 ? [0.72, 0.7, 0.64] : cloth(sg, 0.9)(a, b)), KIND.BUILDING, rng);
+    // the end walls
+    yield* panel(out, P(sg * t.w / 2, 0, -t.dep / 2), [fx, 0, fz], P(sg * t.w / 2, H, -t.dep / 2), t.dep, s, (a, b) => {
+      const top = eave / H + (1 - eave / H) * (1 - Math.abs(a - 0.5) * 2);
+      if (b > top) return null;
+      return jitter(faceTone([0.12, 0.1, 0.09], sg * ex, sg * ez), rng, 0.08);
+    }, KIND.BUILDING, rng);
+  }
+  // the ridge poles standing up through the smoke gap, and the smoke
+  const pr = Math.max(0.05, 0.0006 * t.d);
+  for (const a of [-0.3, 0.3]) { const p = P(a * t.w, 0, 0); strut(out, p[0], H * 0.7 + y, p[2], p[0], y + H + 0.9, p[2], pr, C.pole, 2, 1, KIND.BUILDING); }
+  const sp = P(0, H + 0.3, 0);
+  smoke(out, sp[0], sp[1], -sp[2], t.seed & 0xffff, 6, 8, 0.8);
+  // guy ropes out to stakes
+  const gr = Math.max(0.03, 0.0005 * t.d);
+  for (const sg of [1, -1]) for (const a of [-0.4, 0, 0.4]) {
+    const p = P(a * t.w, (eave + H) / 2, sg * t.dep / 4), q2 = P(a * t.w * 1.15, 0, sg * (t.dep / 2 + 2.4));
+    q2[1] = W.H(q2[0] + ctx.x0, -q2[2]);
+    strut(out, p[0], p[1], p[2], q2[0], q2[1], q2[2], gr, [0.26, 0.22, 0.18], 2, 1, KIND.WIRE);
+  }
+}
+
+// --- hamlet extras: an apricot orchard in blossom, a walled potato field, a school ---
+function* blossomTree(ctx, out, W, t) {
+  const x = t.wx - ctx.x0, y = t.y - 0.2, rng = makeRng(t.seed);
+  const tr = Math.max(0.14, 0.0008 * t.d);
+  strut(out, x, y, -t.d, x + 0.2, y + t.h * 0.45, -t.d, tr, [0.3, 0.24, 0.2], 2, 1, KIND.TREE);
+  const R = t.h * 0.3;
+  // a few dark limbs fanning up into the crown, so it is a tree in flower and not a pink cloud
+  const br = Math.max(0.06, 0.0006 * t.d);
+  for (let k = 0; k < 4; k++) {
+    const a = k / 4 * 6.28 + rng(), sp = R * (0.6 + 0.3 * rng());
+    strut(out, x + 0.2, y + t.h * 0.42, -t.d, x + Math.cos(a) * sp, y + t.h * (0.7 + 0.15 * rng()), -(t.d + Math.sin(a) * sp * 0.6), br, [0.26, 0.2, 0.17], 2, 1, KIND.TREE);
+  }
+  const n = Math.round(clamp(treeSplats2(out, t.d, R * 2) * 1.3, 18, 260));
+  const lumps = 4;
+  for (let k = 0; k < lumps; k++) {
+    const a = k / lumps * 6.28 + rng();
+    const c = t.white ? [0.8, 0.78, 0.76] : [0.8, 0.6 + 0.08 * rng(), 0.68];
+    yield* blob(ctx, out, x + Math.cos(a) * R * 0.5, y + t.h * 0.68 + (rng() - 0.4) * R * 0.4, t.d + Math.sin(a) * R * 0.4, R * 0.6, R * 0.5, R * 0.6, { n: Math.round(n / lumps), color: c, rng, kind: KIND.TREE, inner: 0.45, amb: 0.62, clump: 0.85 });
+  }
+}
+function* potatoField(ctx, out, W, f) {
+  // rows of earthed-up green ridges inside a dry-stone wall
+  yield* stoneWall(ctx, out, W, f.x0, f.d0, f.x1, f.d0, 0.9, f.seed & 0xffff);
+  yield* stoneWall(ctx, out, W, f.x0, f.d1, f.x1, f.d1, 0.9, (f.seed >> 3) & 0xffff);
+  yield* stoneWall(ctx, out, W, f.x0, f.d0, f.x0, f.d1, 0.9, (f.seed >> 5) & 0xffff);
+  yield* stoneWall(ctx, out, W, f.x1, f.d0, f.x1, f.d1, 0.9, (f.seed >> 7) & 0xffff);
+  const dm = (f.d0 + f.d1) / 2, s = Math.max(0.35, detail(out, dm, 0.8));
+  const rows = Math.max(3, Math.round((f.d1 - f.d0) / Math.max(1.0, s * 1.6)));
+  const xa = Math.max(f.x0 + 0.6, ctx.x0), xb = Math.min(f.x1 - 0.6, ctx.x0 + ctx.length);
+  for (let j = 0; j < rows; j++) {
+    const d = f.d0 + (j + 0.5) * (f.d1 - f.d0) / rows;
+    const st = s * 1.3;
+    for (let wx = (Math.floor(xa / st) + 0.5) * st; wx < xb; wx += st) {
+      if (wx < xa) continue;
+      const y = W.H(wx, d), u = hh(Math.round(wx * 2), j, f.seed & 0xffff);
+      const c = f.bare ? mix3([0.42, 0.32, 0.22], [0.34, 0.26, 0.19], u) : mix3([0.24, 0.42, 0.16], [0.32, 0.48, 0.2], u);
+      out(wx - ctx.x0, y + 0.45, -d, s * 1.0, 0.3, Math.max(0.3, (f.d1 - f.d0) / rows * 0.32), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+      out(wx - ctx.x0, y + 0.05, -(d - (f.d1 - f.d0) / rows * 0.5), s * 1.0, 0.08, Math.max(0.22, (f.d1 - f.d0) / rows * 0.25), 0.3, 0.24, 0.18, 1, 0, 0, 0, 1, KIND.GROUND);
+      if (out.due()) yield;
+    }
+  }
+}
+function hamletExtras(W, h) {
+  if (h.extras) return h.extras;
+  const r = makeRng(h.seed ^ 0x6a11), m = mood(W, h.wx);
+  const e = { orchard: [], field: null, gate: null };
+  const side = r() < 0.5 ? -1 : 1;
+  if (r() < 0.45 + 0.35 * m.farm) {
+    const ox = h.wx + side * (40 + 25 * r()), od = h.d - 6 + 14 * r();
+    const nt = 5 + Math.floor(r() * 8), white = r() < 0.3;
+    for (let k = 0; k < nt; k++) {
+      const tx = ox + ((k % 4) - 1.5) * 7 + (r() - 0.5) * 2, td = Math.max(45, od + (Math.floor(k / 4) - 1) * 7 + (r() - 0.5) * 2);
+      e.orchard.push({ wx: tx, d: td, y: W.H(tx, td), h: 5.5 + 2.5 * r(), white: white || r() < 0.2, seed: hashInts(h.seed, 31, k) });
+    }
+  }
+  if (r() < 0.55) {
+    // beside the hamlet, on the gate's side and a little further down the slope than the houses
+    const fw = 18 + 14 * r(), fdp = 10 + 8 * r();
+    const fx = h.wx - side * (30 + fw / 2 + 20 * r()), fd = Math.min(h.d + 16 + 10 * r(), bnAt(W, h.wx) - 20 - fdp / 2);
+    const hit = (ax, ad, bx, bd) => Math.max(ax, bx) > fx - fw / 2 - 3 && Math.min(ax, bx) < fx + fw / 2 + 3 && Math.max(ad, bd) > fd - fdp / 2 - 3 && Math.min(ad, bd) < fd + fdp / 2 + 3;
+    const clash = (h.mani && hit(h.mani.wx - h.mani.len / 2, h.mani.d, h.mani.wx + h.mani.len / 2, h.mani.d)) || h.walls.some((w) => hit(w[0], w[1], w[2], w[3]));
+    if (!clash && fd - fdp / 2 > 42) e.field = { x0: fx - fw / 2, x1: fx + fw / 2, d0: fd - fdp / 2, d1: fd + fdp / 2, seed: hashInts(h.seed, 32), bare: r() < 0.3 };
+  }
+  if (r() < 0.4) {
+    const gx = h.wx - side * (55 + 15 * r()), gd = h.d - 12 + 6 * r();
+    if (gd > 45) e.gate = { wx: gx, d: gd, yaw: (r() - 0.5) * 0.4, seed: hashInts(h.seed, 33) };
+  }
+  h.extras = e;
+  return e;
+}
+function* hamletAdds(ctx, out, W, dLo, dHi) {
+  const i0 = Math.floor((ctx.x0 - 150) / HCELL), i1 = Math.floor((ctx.x0 + ctx.length + 150) / HCELL);
+  for (let i = i0; i <= i1; i++) {
+    const h = hamlet(W, i);
+    if (!h || !inX(ctx, h.wx, 140)) continue;
+    const e = hamletExtras(W, h);
+    for (const t of e.orchard) if (inD(t.d, dLo, dHi) && inX(ctx, t.wx, 5)) yield* blossomTree(ctx, out, W, t);
+    if (e.field && inD((e.field.d0 + e.field.d1) / 2, dLo, dHi) && e.field.x1 > ctx.x0 - 2 && e.field.x0 < ctx.x0 + ctx.length + 2) yield* potatoField(ctx, out, W, e.field);
+    if (e.gate) yield* hamletGates(ctx, out, W, e, dLo, dHi);
+  }
+}
+// A village school: a long single-storey building painted ochre, a walled yard in front with
+// children in it in their maroon and blue, a flag pole.
+const SHCELL = 3100;
+function school(W, i) { return cache(W, 'sh', i, () => makeSchool(W, i)); }
+function makeSchool(W, i) {
+  const seed = hashInts(W.ws, 1651, i), r = makeRng(seed);
+  const wx = (i + 0.2 + 0.6 * r()) * SHCELL;
+  if (r() > 0.45 * mood(W, wx).farm) return null;
+  const bn = bnAt(W, wx);
+  const d = 65 + (Math.min(bn - 30, 170) - 65) * r();
+  if (!nearFree(W, wx, d, 30)) return null;
+  if (taken(W, 2, wx, d, 28)) return null;
+  const sc = { i, wx, d, seed, w: 18 + 6 * r(), dep: 7, h: 4.2, yaw: (r() - 0.5) * 0.2, kids: [] };
+  sc.base = minGround(W, sc); sc.top = GR.max;
+  const n = 6 + Math.floor(r() * 10);
+  for (let k = 0; k < n; k++) {
+    const kx = wx + (r() - 0.5) * sc.w * 0.9, kd = d - sc.dep / 2 - 2 - 9 * r();
+    sc.kids.push({ role: 'child', wx: kx, d: kd, y: W.H(kx, kd), yaw: r() * 6.3, ph: r(), col: r() < 0.5 ? [0.46, 0.1, 0.1] : [0.14, 0.24, 0.52], hat: null });
+  }
+  sc.kids.push({ role: 'herder', wx, d: d - sc.dep / 2 - 3, y: W.H(wx, d - sc.dep / 2 - 3), yaw: -Math.PI / 2, ph: 0.25, col: [0.2, 0.2, 0.3] });
+  return sc;
+}
+function* schools(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 60) / SHCELL); i <= Math.floor((ctx.x0 + ctx.length + 60) / SHCELL); i++) {
+    const sc = school(W, i);
+    if (!sc || !inX(ctx, sc.wx, 40)) continue;
+    if (inD(sc.d, dLo, dHi) && inX(ctx, sc.wx, sc.w)) {
+      const rng = makeRng(sc.seed);
+      const y = Math.max(sc.base, sc.top - 1.4) - 0.3, s = sizeS(out, sc.d, 0.8);
+      if (y > sc.base + 0.6) yield* plinth(out, sc.wx - ctx.x0, sc.d, sc.w, sc.dep, sc.yaw, sc.base - 0.6, y + 0.2, s, KIND.BUILDING, rng);
+      yield* flatHouse(ctx, out, sc.wx - ctx.x0, sc.d, { w: sc.w, dep: sc.dep, h: sc.h, yaw: sc.yaw, wall: [0.74, 0.6, 0.3], y, s, rng, lit: litShare(ctx), salt: sc.seed & 0xffff });
+      // the yard wall
+      const yd = sc.d - sc.dep / 2 - 12;
+      yield* stoneWall(ctx, out, W, sc.wx - sc.w / 2 - 2, yd, sc.wx + sc.w / 2 + 2, yd, 0.7, sc.seed & 0xffff);
+      yield* flagPole(ctx, out, W, { wx: sc.wx + sc.w / 2 + 3, d: sc.d - sc.dep / 2 - 4, h: 8, seed: sc.seed, banner: true });
+    }
+    for (const m of sc.kids) if (inD(m.d, dLo, dHi) && inX(ctx, m.wx, 2)) yield* person(ctx, out, m.wx, m.y, m.d, m);
+  }
+}
+
+// --- big birds: lammergeiers and griffon vultures circling on the updraughts ---
+// A bird is a body, two long wings with a little dihedral and the bird banked into its turn, a
+// wedge or fan tail and a head, about 1.3 times life size (a 3.5 m span). Wings are given some
+// thickness so a bird seen almost edge-on is still a line with a body, not nothing.
+const BDCELL = 900;
+function birdFlock(W, i) { return cache(W, 'bd', i, () => makeBirds(W, i)); }
+function makeBirds(W, i) {
+  const seed = hashInts(W.ws, 1661, i), r = makeRng(seed);
+  const wx = (i + 0.2 + 0.6 * r()) * BDCELL;
+  if (r() > 0.4 * mood(W, wx).wild) return null;
+  const d = 110 + 170 * r();
+  const g = Math.max(W.H(wx, d), valleyAt(W.ws, wx).fy);
+  const cy = Math.max(g + 25, 10) + 30 * r();
+  const R = 14 + 22 * r(), n = 2 + Math.floor(r() * 4), sp = r() < 0.5 ? 1 : -1;
+  const birds = [];
+  for (let k = 0; k < n; k++) {
+    const a = r() * 6.28;
+    birds.push({ wx: wx + Math.cos(a) * R, d: d + Math.sin(a) * R * 0.7, y: cy + (r() - 0.5) * 14, yaw: a + sp * Math.PI / 2, bank: sp * (0.25 + 0.2 * r()), lam: r() < 0.4, flap: r() < 0.2 });
+  }
+  return { i, wx, d, y: cy, seed, birds };
+}
+function* bird(ctx, out, b) {
+  out = beatOut(out);
+  const k = 1.3, x0 = b.wx - ctx.x0;
+  const q = quatMul(quatYaw(b.yaw), quatAxis(1, 0, 0, b.bank));
+  // local frame: x forward, y up, z the span
+  const R = (u, h, v) => {
+    const t = [2 * (q[1] * v - q[2] * h), 2 * (q[2] * u - q[0] * v), 2 * (q[0] * h - q[1] * u)];
+    return [u + q[3] * t[0] + (q[1] * t[2] - q[2] * t[1]), h + q[3] * t[1] + (q[2] * t[0] - q[0] * t[2]), v + q[3] * t[2] + (q[0] * t[1] - q[1] * t[0])];
+  };
+  const E = (u, h, v, rx, ry, rz, c, qq = q) => {
+    const p = R(u * k, h * k, v * k);
+    const fl = 0.0006 * b.d;
+    out(x0 + p[0], b.y + p[1], -b.d + p[2], Math.max(rx * k, fl), Math.max(ry * k, fl), Math.max(rz * k, fl), c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], KIND.OTHER);
+  };
+  const wing = b.lam ? [0.2, 0.19, 0.18] : [0.34, 0.26, 0.18], wingD = b.lam ? [0.12, 0.11, 0.11] : [0.16, 0.12, 0.09];
+  const body = b.lam ? [0.6, 0.42, 0.24] : [0.6, 0.52, 0.4];
+  const th = Math.max(0.07, 0.0006 * b.d / k);
+  const up = b.flap ? 0.45 : 0.12;
+  for (const s of [1, -1]) {
+    const qw = quatMul(q, quatAxis(1, 0, 0, -s * up));
+    E(-0.02, 0.05 + up * 0.35, s * 0.62, 0.3, th, 0.58, s > 0 ? wing : mul3(wing, 0.9), qw);
+    E(-0.12, 0.05 + up * 0.85, s * 1.3, 0.24, th * 0.9, 0.36, wingD, qw);
+  }
+  E(0, 0, 0, 0.42, 0.13, 0.14, body);
+  E(0.48, 0.03, 0, 0.12, 0.09, 0.09, b.lam ? [0.66, 0.55, 0.42] : [0.72, 0.68, 0.6]);
+  E(-0.6, 0, 0, 0.3, th * 0.8, b.lam ? 0.13 : 0.18, wingD);
+  if (out.due()) yield;
+}
+function* birds(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 60) / BDCELL); i <= Math.floor((ctx.x0 + ctx.length + 60) / BDCELL); i++) {
+    const f = birdFlock(W, i);
+    if (!f || !inX(ctx, f.wx, 60)) continue;
+    for (const b of f.birds) if (inD(b.d, dLo, dHi) && inX(ctx, b.wx, 3)) yield* bird(ctx, out, b);
+  }
+}
+
+// --- icefalls: frozen waterfalls hanging down cliff steps on the wall ---
+// Traced down the fall line from a point high on a steep face: a curtain of pale blue-white ice
+// fluted into columns, darker blue in the grooves, wider and bulging at the foot where it spreads.
+const ICCELL = 1700;
+function icefall(W, i) { return cache(W, 'ic', i, () => makeIcefall(W, i)); }
+function makeIcefall(W, i) {
+  const seed = hashInts(W.ws, 1671, i), r = makeRng(seed);
+  const x0 = (i + 0.2 + 0.6 * r()) * ICCELL;
+  if (r() > 0.55 * mood(W, x0).wild) return null;
+  const s = 160 + 500 * r();
+  // the steepest of a few spots along the cell at that height up the wall
+  let best = null;
+  for (let k = 0; k < 7; k++) {
+    const wx = x0 + (k - 3) * 40, d = bfAt(W, wx) + s;
+    const y = W.H(wx, d), y2 = W.H(wx, d - 8);
+    const g = (y - y2) / 8;
+    if (WL.sv > 0.2) continue;
+    if (!best || g > best.g) best = { wx, d, y, g };
+  }
+  if (!best || best.g < 0.9) return null;
+  const H = 50 + 90 * r(), w = 16 + 18 * r();
+  // trace down: the falling ice clings to the face, so step down in distance until it has dropped H
+  const pts = [];
+  let d = best.d, y = best.y;
+  for (let k = 0; k < 200 && best.y - y < H; k++) { pts.push([d, y]); d -= 2.5; y = W.H(best.wx, d); if (d < bfAt(W, best.wx) - 20) break; }
+  if (pts.length < 6) return null;
+  return { i, wx: best.wx, d: best.d, y: best.y, H: best.y - y, w, pts, seed };
+}
+function* icefalls(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 60) / ICCELL); i <= Math.floor((ctx.x0 + ctx.length + 60) / ICCELL); i++) {
+    const f = icefall(W, i);
+    if (!f || !inX(ctx, f.wx, f.w + 5)) continue;
+    const dm = f.pts[f.pts.length >> 1][0];
+    if (!inD(dm, dLo, dHi)) continue;
+    const s = Math.max(1.0, 0.0024 * dm);
+    const np = f.pts.length, cols = Math.max(3, Math.round(f.w / (s * 1.2)));
+    const stepK = Math.max(1, Math.round(s * 1.1 / 2.5));
+    for (let k = 0; k < np; k += stepK) {
+      const [d, y] = f.pts[k], t = k / (np - 1);
+      const wid = f.w * (0.75 + 0.4 * t * t + 0.9 * smooth(0.75, 1, t));
+      // the face's normal here (down the fall line it leans back toward the camera)
+      const [d2, y2] = f.pts[Math.min(np - 1, k + 1)];
+      const nn = norm3(0, d - d2, y - y2 + 1e-3);
+      const qq = quatUpTo(0, nn[1], nn[2]);
+      const seg = Math.hypot(d - d2, y - y2) * stepK;
+      for (let c = 0; c < cols; c++) {
+        const a = (c + 0.5) / cols - 0.5;
+        const fl = hh(c, f.seed & 0xffff, 5), groove = (c % 2) ? 0.78 : 1;
+        if (Math.abs(a) > 0.42 && hh(c, k, f.seed & 0xffff) < 0.4 + 0.5 * (1 - t)) continue;   // ragged edges
+        const col = mul3(mix3([0.78, 0.8, 0.8], [0.52, 0.66, 0.76], fl * 0.5 + (1 - groove)), groove);
+        const cs = shade(col, 0, nn[1], nn[2], 0.75, 0.3);
+        const wx = f.wx + a * wid, gy = W.H(wx, d), off = Math.max(2, 0.006 * d);
+        out(wx - ctx.x0, Math.max(gy, y) + off * 0.5, -(d - off), wid / cols * 0.75, s * 0.18, Math.max(s, seg * 0.75), cs[0], cs[1], cs[2], 1, qq[0], qq[1], qq[2], qq[3], KIND.GROUND);
+      }
+      if (out.due()) yield;
+    }
+  }
+}
+
+// --- hanging glaciers on the great peaks (far band): icefalls hundreds of metres wide ---
+// From below a giant's summit, down its face toward the window: blue-grey ice broken by dark
+// transverse crevasse bands, which sets it apart from the white snow round it.
+// Placed per 2600 m cell on whichever peak of the range stands highest in the window there, and
+// only where enough of it shows above the crest of the wall.
+const HGCELL = 2600;
+function hangingIce(W, i) {
+  return cache(W, 'hg', i, () => {
+    const r = makeRng(hashInts(W.ws, 1721, i));
+    if (r() > 0.7) return null;
+    const x = (i + 0.2 + 0.6 * r()) * HGCELL;
+    let occ = -1;
+    for (const dd of [500, 800, 1150, 1550, 2000, 2450, 2900]) occ = Math.max(occ, (W.H(x, dd) - 2.6) / dd);
+    let best = -1, bd = 0;
+    for (let d = 3200; d <= 8000; d += 160) { const e = (W.H(x, d) - 2.6) / d; if (e > best) { best = e; bd = d; } }
+    if (best < occ + 0.05) return null;
+    const w = 240 + 260 * r(), drop = 450 + 450 * r();
+    let d = bd - 80, y = W.H(x, d);
+    // (the tops can stand above the window: start where the face comes into view)
+    while ((y - 2.6) / d > 0.42 && d > 3400) { d -= 40; y = W.H(x, d); }
+    const y0 = y, pts = [];
+    for (let k = 0; k < 120 && y0 - y < drop && d > 3300 && (y - 2.6) / d > occ + 0.015; k++) { pts.push([d, y]); d -= 40; y = W.H(x, d); }
+    if (pts.length < 6 || (y0 - y) / (pts.length * 40) < 0.3) return null;
+    return { wx: x, w, pts, seed: hashInts(W.ws, 1722, i) };
+  });
+}
+function* hangingGlaciers(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 600) / HGCELL); i <= Math.floor((ctx.x0 + ctx.length + 600) / HGCELL); i++) {
+    {
+      const f = hangingIce(W, i);
+      if (!f || !inX(ctx, f.wx, f.w)) continue;
+      const np = f.pts.length;
+      for (let k = 0; k < np; k++) {
+        const [d, y] = f.pts[k], t = k / (np - 1);
+        if (!inD(d, dLo, dHi)) continue;
+        const s = Math.max(12, 0.0026 * d), off = 0.012 * d;
+        const [d2, y2] = f.pts[Math.min(np - 1, k + 1)];
+        const nn = norm3(0, Math.max(1, d - d2), y - y2 + 1e-3);
+        const qq = quatUpTo(0, nn[1], nn[2]);
+        const seg = Math.hypot(d - d2, y - y2);
+        // a tongue: narrow where it pours from the basin, broad below, rounded at the snout, and
+        // wandering a little from side to side
+        const wid = f.w * (0.3 + 0.7 * Math.sqrt(Math.sin(Math.PI * Math.min(1, 0.15 + t * 0.95))));
+        const cx = f.wx + 0.12 * f.w * Math.sin(t * 5 + (f.seed & 7));
+        const cols = Math.max(3, Math.round(wid / (s * 1.3)));
+        const crev = hh(k, f.seed & 0xffff, 3) < 0.28;
+        for (let c = 0; c < cols; c++) {
+          const a = (c + 0.5) / cols - 0.5;
+          if (Math.abs(a) > 0.36 && hh(c, k, f.seed & 0xffff) < 0.55) continue;   // ragged edges
+          const wx = cx + a * wid + (hh(c, k, 9) - 0.5) * s * 0.6;
+          let col = crev ? [0.36, 0.42, 0.5] : mix3([0.6, 0.69, 0.77], [0.72, 0.76, 0.8], hh(c, k, f.seed & 0xffff));
+          col = shade(col, 0, nn[1], nn[2], 0.7, 0.35);
+          const edge = Math.abs(a) > 0.3 ? 0.6 : 1;
+          out(wx - ctx.x0, y + off * 0.4, -(d - off), wid / cols * 0.8, s * 0.2, Math.max(s, seg * 0.8), col[0], col[1], col[2], edge, qq[0], qq[1], qq[2], qq[3], KIND.GROUND);
+        }
+        if (out.due()) yield;
+      }
+    }
+  }
+}
+
+// --- turquoise glacial lakes on the valley floor, held behind a moraine ---
+const LKCELL = 2900;
+function lake(W, i) { return cache(W, 'lk', i, () => makeLake(W, i)); }
+function makeLake(W, i) {
+  const seed = hashInts(W.ws, 1681, i), r = makeRng(seed);
+  const x0 = (i + 0.2 + 0.6 * r()) * LKCELL;
+  if (r() > 0.6 * mood(W, x0).wild) return null;
+  // where the floor between the river and the wall is widest (a gully mouth)
+  let best = null;
+  for (let k = 0; k < 9; k++) {
+    const wx = x0 + (k - 4) * 60, v = valleyAt(W.ws, wx), bf = v.bf, foot = footAt(W.ws, wx);
+    if (!best || foot - bf > best.room) best = { wx, bf, room: foot - bf };
+  }
+  if (best.room < 150) return null;
+  const rz = Math.min(45, (best.room - 70) / 2) * (0.7 + 0.3 * r()), rx = rz * (1.4 + 0.8 * r());
+  const d = best.bf + 35 + rz;
+  // the water level: just above the highest ground inside the inner two thirds, so it lies flat
+  let lvl = -Infinity;
+  for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) {
+    if (a * a / 4 + b * b / 4 > 1) continue;
+    lvl = Math.max(lvl, W.H(best.wx + a * rx * 0.33, d + b * rz * 0.33));
+  }
+  if (lvl > valleyAt(W.ws, best.wx).fy + 30) return null;
+  return { i, wx: best.wx, d, rx, rz, y: lvl + 0.4, seed };
+}
+function* lakes(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 300) / LKCELL); i <= Math.floor((ctx.x0 + ctx.length + 300) / LKCELL); i++) {
+    const L = lake(W, i);
+    if (!L || !inX(ctx, L.wx, L.rx + 10) || L.d + L.rz < dLo || L.d - L.rz * 1.3 >= dHi) continue;
+    // (sizes and grid from the lake alone, never from the band: it straddles the near-mid border)
+    const s = Math.max(0.9, 0.0035 * L.d);
+    const sz = s * 0.55;     // seen at a low angle: the step in distance can be coarser than along x
+    const sd = s * 2.2;
+    for (let dd = -L.rz + sd * 0.5; dd <= L.rz; dd += sd) {
+      const d = L.d + dd;
+      if (!inD(d, dLo, dHi)) continue;
+      const half = L.rx * Math.sqrt(Math.max(0, 1 - (dd / L.rz) ** 2)) * (0.92 + 0.08 * Math.sin(dd * 0.3 + L.seed));
+      const xa = Math.max(L.wx - half, ctx.x0 - 1), xb = Math.min(L.wx + half, ctx.x0 + ctx.length + 1);
+      const st = s * 1.25;
+      for (let wx = (Math.floor(xa / st) + 0.5) * st; wx < xb; wx += st) {
+        if (wx < xa) continue;
+        const e = Math.hypot((wx - L.wx) / L.rx, dd / L.rz);
+        const c0 = e > 0.86 ? [0.42, 0.66, 0.64] : mix3([0.12, 0.5, 0.56], [0.2, 0.6, 0.62], e);
+        const c = mul3(mix3(c0, [0.6, 0.72, 0.76], smooth(0.8, 0.95, noise2(wx / 30, d / 6, L.seed & 0xffff)) * 0.4), 0.97 + 0.06 * hh(Math.round(wx), Math.round(d), 7));
+        out(wx - ctx.x0, L.y, -d, s * 0.9, 0.04, sd * 0.62 + sz * 0.2, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        if (out.due()) yield;
+      }
+    }
+    // the moraine dam along the near shore, and a few boulders round the rest
+    const nb = Math.round(clamp(L.rx * 2 / Math.max(2, s * 2.2), 6, 120));
+    for (let k = 0; k < nb; k++) {
+      const h1 = hh(k, L.seed & 0xffff, 41), h2 = hh(k, L.seed & 0xffff, 42), h3 = hh(k, L.seed & 0xffff, 43);
+      const a = Math.PI + (k + h1) / nb * Math.PI;     // the near half
+      const bx = L.wx + Math.cos(a) * L.rx * 1.04, bd = L.d + Math.sin(a) * L.rz * 1.08;
+      if (!inD(bd, dLo, dHi) || !inX(ctx, bx, 3)) continue;
+      const rr = Math.max(1.2, s * 1.3) * (0.7 + 0.6 * h2);
+      const by = Math.max(W.H(bx, bd), L.y - 0.5);
+      const c = mix3(C.scree, C.stoneDark, h3 * 0.6);
+      out(bx - ctx.x0, by + rr * 0.35, -bd, rr * 1.4, rr * 0.55, rr, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK);
+      if (out.due()) yield;
+    }
+  }
+}
+
+// --- a ruined fort (dzong) on a spur: broken walls round a court, crumbling towers ---
+const FTCELL = 5300;
+function fort(W, i) { return cache(W, 'ft', i, () => makeFort(W, i)); }
+function makeFort(W, i) {
+  const seed = hashInts(W.ws, 1691, i), r = makeRng(seed);
+  if (r() > 0.6) return null;
+  const s = 110 + 260 * r();
+  let best = -1, bx = 0;
+  for (let k = 0; k < 9; k++) {
+    const wx = (i + 0.15 + 0.7 * k / 8) * FTCELL, sp = spurOf(W.ws, wx, s);
+    if (sp > best) { best = sp; bx = wx; }
+  }
+  for (let k = Math.floor(bx / VCELL) - 1; k <= Math.floor(bx / VCELL) + 1; k++) { const v = village(W, k); if (v && Math.abs(v.cx - bx) < v.R + 220) return null; }
+  for (let k = Math.floor(bx / MCELL) - 1; k <= Math.floor(bx / MCELL) + 1; k++) { const g = gompa(W, k); if (g && Math.abs(g.wx - bx) < 260) return null; }
+  const d = bfAt(W, bx) + s;
+  const f = { i, wx: bx, d, seed, yaw: (r() - 0.5) * 0.3, w: 60 + 30 * r(), dep: 34 + 14 * r(), parts: [] };
+  // the curtain walls and the towers at the corners (one gone), and a tall keep
+  const [ex, ez] = rotY(1, 0, f.yaw), [fx, fz] = rotY(0, 1, f.yaw);
+  const at = (lx, lz) => [bx + ex * lx + fx * lz, d - (ez * lx + fz * lz)];
+  const walls = [[0, f.dep / 2, f.w, 3, 0], [0, -f.dep / 2, f.w, 3, 0], [-f.w / 2, 0, 3, f.dep, 0], [f.w / 2, 0, 3, f.dep, 0]];
+  for (const [lx, lz, w, dep] of walls) { const [px, pd] = at(lx, lz); f.parts.push({ wx: px, d: pd, w, dep, h: 9 + 5 * r(), rag: 0.55, seed: hashInts(seed, 1, f.parts.length) }); }
+  for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    if (r() < 0.2) continue;
+    const [px, pd] = at(a * f.w / 2, b * f.dep / 2);
+    f.parts.push({ wx: px, d: pd, w: 9, dep: 9, h: 16 + 8 * r(), rag: 0.3, seed: hashInts(seed, 2, f.parts.length) });
+  }
+  const [kx, kd] = at((r() - 0.5) * f.w * 0.4, -f.dep * 0.15);
+  f.parts.push({ wx: kx, d: kd, w: 16, dep: 13, h: 26 + 8 * r(), rag: 0.25, seed: hashInts(seed, 3) });
+  for (const p of f.parts) { p.base = minGround(W, { ...p, yaw: f.yaw }); p.top = GR.max; }
+  return f;
+}
+function* forts(ctx, out, W, dLo, dHi) {
+  for (let i = Math.floor((ctx.x0 - 200) / FTCELL); i <= Math.floor((ctx.x0 + ctx.length + 200) / FTCELL); i++) {
+    const f = fort(W, i);
+    if (!f || !inX(ctx, f.wx, f.w + 20)) continue;
+    const earth = [0.58, 0.49, 0.38];
+    for (const p of f.parts) {
+      if (!inD(p.d, dLo, dHi) || !inX(ctx, p.wx, p.w + 2)) continue;
+      const rng = makeRng(p.seed), s = sizeS(out, p.d, 0.75);
+      const sunk = p.top - p.base, y = p.base - 0.5, H = p.h + sunk;
+      // the top broken off along its length in steps and notches
+      // (steps of 9 m or more: finer notches break up into loose splats at this range)
+      const rag = (f2, a) => 1 - p.rag * (hh(Math.floor(a * Math.max(p.w, p.dep) / Math.max(9, s * 8)), f2 & 1, p.seed & 0xffff) ** 1.5);
+      yield* box(out, p.wx - ctx.x0, y, p.d, p.w, p.dep, H, f.yaw, s, (fc, a, b, nx, nz) => {
+        if (fc === 4) return null;
+        if (b > rag(fc, a)) return null;
+        const yy = b * H;
+        // holes: windows and slots, and pale patches where the plaster survives
+        // a few big dark openings (windows and breaches) on the towers and keep only
+        const ncol = Math.max(1, Math.round(Math.max(p.w, p.dep) / 6));
+        if (p.rag < 0.5 && yy > sunk + 4 && (Math.floor(yy / 6) % 2) === 1 && Math.abs((a * ncol) % 1 - 0.5) < 0.2 && hh(Math.floor(a * ncol), Math.floor(yy / 6), (p.seed >> 4) & 0xffff) < 0.6) return [0.12, 0.1, 0.09];
+        const pl = noise2(a * 2, b * 1.5, p.seed & 0xffff) > 0.62 ? mix3(earth, C.white, 0.45) : earth;
+        return jitter(faceTone(mix3(pl, C.stoneDark, 0.3 * (1 - b)), nx, nz), rng, 0.07);
+      }, KIND.BUILDING, rng);
+      // rubble heaped at the foot
+      const nr = 4 + Math.round(p.w / 4);
+      for (let k = 0; k < nr; k++) {
+        const ox = (rng() - 0.5) * p.w * 1.1, oz = p.dep / 2 + 1 + 2 * rng();
+        const [rx2, rz2] = rotY(ox, oz, f.yaw);
+        const gx = p.wx + rx2, gd = p.d - rz2;
+        const rr = Math.max(1.0, s * 1.4) * (0.8 + 0.8 * rng());
+        const c = jitter(mix3(earth, C.stoneDark, 0.4), rng, 0.1);
+        out(gx - ctx.x0, W.H(gx, gd) + rr * 0.3, -gd, rr * 1.3, rr * 0.6, rr, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING);
+      }
+      if (out.due()) yield;
+    }
+  }
+}
+
+// --- snowfall: in some stretches a light fall of small flakes drifts past the window ---
+// Round splats tagged MOVE.FALL, scattered evenly through the slab of air the shader wraps them in
+// (3.4 m below rail level to 12.6 m above), each at its own distance. Few and small.
+function snowAmt(W, wx) { return smooth(0.56, 0.75, noise1(wx / 2700, W.ws + 1711)) * (0.5 + 0.5 * mood(W, wx).wild); }
+function* snowfall(ctx, out, W, dLo, dHi, perM2) {
+  const xm = ctx.x0 + ctx.length / 2;
+  const a = Math.max(snowAmt(W, ctx.x0), snowAmt(W, xm), snowAmt(W, ctx.x0 + ctx.length));
+  if (a <= 0.01) return;
+  const rng = ctx.rng;
+  const n = Math.round(perM2 * a * ctx.length * (dHi - dLo) * Math.sqrt(out.density));
+  for (let i = 0; i < n; i++) {
+    const x = rng() * ctx.length, d = dLo + rng() * (dHi - dLo), y = -3.4 + 16 * rng();
+    if (rng() > snowAmt(W, ctx.x0 + x) / a) continue;
+    const r = Math.max(0.04, 0.0018 * d) * (0.7 + 0.6 * rng());
+    out(x, y, -d, r, r, r, 0.8, 0.8, 0.8, 0.85, 0, 0, 0, 1, KIND.OTHER, MOVE.FALL);
+    if (out.due()) yield;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Level 1
 // ---------------------------------------------------------------------------------------------
 // Scale: a giant yak standing on a spur of the wall, a few hundred metres up.
@@ -2022,8 +3117,13 @@ function* trackside(ctx0, emit) {
     const r = worldRng(ctx, 1502, i);
     if (r() > 0.3) continue;
     const ax = wx0 + 140 * r(), len = 25 + 35 * r(), d = 13 + 9 * r();
-    const ay = W.H(ax, d) + 2.2, by = W.H(ax + len, d) + 2.2;
-    for (const [px, py] of [[ax, ay], [ax + len, by]]) if (inX(ctx, px, 1)) strut(out, px - ctx.x0, py - 2.3, -d, px - ctx.x0, py, -d, 0.06, C.pole, 2, 1, KIND.OTHER);
+    // (the slope falls away fast here: flags hung 2 m up sat level with the dry-stone wall at 8 m and
+    // were veiled by it, so the poles are tall enough to lift the line clear above it)
+    // (tested at the string's own world x, so both chunks it crosses agree)
+    const walled = noise1(Math.floor(ax / 100) * 100 / 900, W.ws + 1501) > 0.35 || noise1(Math.floor((ax + len) / 100) * 100 / 900, W.ws + 1501) > 0.35;
+    const lift = walled ? 3.4 : 2.2;
+    const ay = W.H(ax, d) + lift, by = W.H(ax + len, d) + lift;
+    for (const [px, py] of [[ax, ay], [ax + len, by]]) if (inX(ctx, px, 1)) strut(out, px - ctx.x0, py - lift - 0.1, -d, px - ctx.x0, py, -d, 0.06, C.pole, 3, 1, KIND.OTHER);
     yield* flagString(ctx, out, { a: [ax, ay, d], b: [ax + len, by, d], sag: 0.03, seed: hashInts(W.ws, 1503, i), fw: 0.3 }, ctx.zNear, ctx.zFar);
   }
   // boulders and snow on the slope
@@ -2033,6 +3133,7 @@ function* trackside(ctx0, emit) {
     const wx = wx0 + 9 * r(), d = 10 + 18 * r(), rad = 0.3 + 0.8 * r() * r();
     yield* blob(ctx, out, wx - ctx.x0, W.H(wx, d) + rad * 0.2, d, rad, rad * 0.6, rad * 0.8, { n: 14, color: mix3(C.rock, C.stone, r()), rng: r, kind: KIND.ROCK, inner: 0.25, amb: 0.5, clump: 0.2 });
   }
+  yield* snowfall(ctx, out, W, 6.5, ctx.zFar, 0.04);
   out.limit = Infinity;
   const rest = out.left();
   yield* fillStrip(ctx, out, W, Math.round(rest * 0.06), 2.5, 4.2, (wx, d, rng) => jitter(C.ballast, rng, 0.25), 0, 0.12);
@@ -2053,6 +3154,17 @@ function* near(ctx0, emit) {
   yield* flagSites(ctx, out, W, lo, hi);
   yield* herds(ctx, out, W, lo, hi);
   yield* sheepGroups(ctx, out, W, lo, hi);
+  yield* caravans(ctx, out, W, lo, hi);
+  yield* monkLines(ctx, out, W, lo, hi);
+  yield* camps(ctx, out, W, lo, hi);
+  yield* lodges(ctx, out, W, lo, hi);
+  yield* wheelWalls(ctx, out, W, lo, hi);
+  yield* schools(ctx, out, W, lo, hi);
+  yield* hamletAdds(ctx, out, W, lo, hi);
+  yield* birds(ctx, out, W, lo, hi);
+  yield* lakes(ctx, out, W, lo, hi);
+  yield* forts(ctx, out, W, lo, hi);
+  yield* snowfall(ctx, out, W, lo, Math.min(hi, 140), 0.018);
   yield* scatter(ctx, out, W, lo, hi);
   if ((dz.logic || 0) > 0) yield* repeatingChorten(ctx, out, W, dz.logic);
   if ((dz.scale || 0) > 0) yield* giantStrings(ctx, out, W, lo, hi, dz.scale);
@@ -2077,6 +3189,9 @@ function* mid(ctx0, emit) {
   yield* bridges(ctx, out, W, lo, hi);
   yield* herds(ctx, out, W, lo, hi, 1);
   yield* streams(ctx, out, W, lo, hi);
+  yield* icefalls(ctx, out, W, lo, hi);
+  yield* lakes(ctx, out, W, lo, hi);
+  yield* forts(ctx, out, W, lo, hi);
   if ((dz.scale || 0) > 0) { yield* giantYaks(ctx, out, W, lo, hi, dz.scale); yield* giantStrings(ctx, out, W, lo, hi, dz.scale); }
   if ((dz.topology || 0) > 0) yield* skyStrings(ctx, out, W, lo, hi, dz.topology);
   yield* mist(ctx, out, W, lo, hi, 150, 110, 0.2);
@@ -2089,6 +3204,7 @@ function* far(ctx0, emit) {
   const dz = ctx.dials || {};
   const lo = ctx.zNear, hi = ctx.zFar;
   yield* banners(ctx, out, W, lo, hi);
+  yield* hangingGlaciers(ctx, out, W, lo, hi);
   if ((dz.scale || 0) > 0) yield* giantYaks(ctx, out, W, lo, hi, dz.scale);
   if ((dz.topology || 0) > 0) yield* skyStrings(ctx, out, W, lo, hi, dz.topology);
   yield* farRange(ctx, out, W, dz.scale || 0);
@@ -2237,6 +3353,19 @@ function layout(seedStr, x0, x1) {
     ridgeStrings: list(RCELL, ridgeString, (s) => ({ wx: Math.round((s.a[0] + s.b[0]) / 2), d: Math.round((s.a[2] + s.b[2]) / 2) })),
     giants: list(GCELLX, (W2, i) => giant(W2.ws, i), (g) => ({ wx: Math.round(g.wx), d: Math.round(g.d) })),
     sideValleys: list(SVC, (W2, i) => sideValley(W2.ws, i), (sv) => ({ wx: Math.round(sv.xc), glacier: !!sv.glacier, d: Math.round(footAt(W.ws, sv.xc)) })),
+    caravans: list(CVCELL, caravan, (c) => ({ wx: Math.round(c.wx), d: Math.round(c.d), kind: c.kind, n: c.walkers.length })),
+    monks: list(MKCELL, monkLine, (m) => ({ wx: Math.round(m.wx), d: Math.round(m.d), n: m.walkers.length, gate: [Math.round(m.gate.wx), Math.round(m.gate.d)] })),
+    wheelWalls: list(PWCELL, wheelWall, (p) => ({ wx: Math.round(p.wx), d: Math.round(p.d), len: Math.round(p.len), gate: p.gate ? [Math.round(p.gate.wx), Math.round(p.gate.d)] : null })),
+    lodges: list(LDCELL, lodge, (l) => ({ wx: Math.round(l.wx), d: Math.round(l.d) })),
+    camps: list(NCCELL, camp, (c) => ({ wx: Math.round(c.wx), d: Math.round(c.d), tents: c.tents.length, horses: c.horses.length })),
+    schools: list(SHCELL, school, (s) => ({ wx: Math.round(s.wx), d: Math.round(s.d), kids: s.kids.length })),
+    orchards: list(HCELL, hamlet, (h) => { const e = hamletExtras(W, h); return { wx: Math.round(h.wx), d: Math.round(h.d), orchard: e.orchard.length ? [Math.round(e.orchard[0].wx), Math.round(e.orchard[0].d)] : null, field: e.field ? [Math.round((e.field.x0 + e.field.x1) / 2), Math.round((e.field.d0 + e.field.d1) / 2)] : null, gate: e.gate ? [Math.round(e.gate.wx), Math.round(e.gate.d)] : null }; }),
+    birds: list(BDCELL, birdFlock, (b) => ({ wx: Math.round(b.wx), d: Math.round(b.d), y: Math.round(b.y), n: b.birds.length })),
+    icefalls: list(ICCELL, icefall, (f) => ({ wx: Math.round(f.wx), d: Math.round(f.pts[f.pts.length >> 1][0]), y: Math.round(f.pts[f.pts.length >> 1][1]), H: Math.round(f.H) })),
+    hangingGlaciers: list(HGCELL, hangingIce, (f) => ({ wx: Math.round(f.wx), d: Math.round(f.pts[f.pts.length >> 1][0]), y: Math.round(f.pts[f.pts.length >> 1][1]), w: Math.round(f.w) })),
+    lakes: list(LKCELL, lake, (l) => ({ wx: Math.round(l.wx), d: Math.round(l.d), y: Math.round(l.y), rx: Math.round(l.rx) })),
+    forts: list(FTCELL, fort, (f) => ({ wx: Math.round(f.wx), d: Math.round(f.d), y: Math.round(f.parts[0].base) })),
+    snow: (() => { const res = []; let on = false; for (let x = x0; x <= x1; x += 100) { const a = snowAmt(W, x) > 0.05; if (a !== on) { res.push(Math.round(x)); on = a; } } return res; })(),
   };
 }
-export const _debug = { world, at, layout, valleyAt, heightAt, footAt, WL, surface, village, gompa, hamlet, flagSite, herd, sheepGroup, bridge };
+export const _debug = { world, at, layout, valleyAt, heightAt, footAt, WL, surface, village, gompa, hamlet, flagSite, herd, sheepGroup, bridge, caravan, monkLine, wheelWall, lodge, camp, school, birdFlock, icefall, lake, fort, snowAmt, hamletExtras, hangingIce };

@@ -299,23 +299,35 @@ export function* blob(ctx, out, x, y, d, rx, ry, rz, opts = {}) {
   const c0 = opts.color || ctx.palette.foliage || [0.2, 0.32, 0.14];
   const area = 2 * Math.PI * (rx * ry + ry * rz + rx * rz) / 3 * 1.2;
   // never let one splat be much bigger than the thing it draws (a far tree is 3 splats, not a smear)
-  const s = opts.size || Math.min(Math.sqrt(area / n) * 0.75, Math.min(rx, ry, rz) * 0.85);
+  // (and never under about 0.0006 * d, unless the blob itself is smaller: the GPU dims splats much
+  // under a pixel, and a far crown of specks turns into a faint haze)
+  const s = opts.size || Math.max(Math.min(Math.sqrt(area / n) * 0.75, Math.min(rx, ry, rz) * 0.85), Math.min(0.0006 * d, Math.min(rx, ry, rz)));
   const inner = opts.inner != null ? opts.inner : 0.35, kind = opts.kind != null ? opts.kind : KIND.TREE;
   const amb = opts.amb != null ? opts.amb : 0.62;
   const salt = opts.salt != null ? opts.salt : Math.floor(rng() * 1000);
   const clump = opts.clump != null ? opts.clump : 0.5;       // leaf-clump light and shadow, 0..1
+  // A blob of only a few splats keeps them close enough to overlap (pulled in toward the centre), so
+  // a far tree is one soft lump rather than three loose dots; with many splats this is 1.
+  const rMin = Math.min(rx, ry, rz);
+  const pull = n <= 4 ? clamp(1 - 0.6 * s / rMin, 0.45, 1) : 1;
+  // A dark, opaque core (in place of the first surface splat, which still draws its random numbers
+  // so everything placed after the blob from the same rng stays where it was), so the sky never
+  // shows through between the surface splats at the sides of the frame, where the camera-side bias
+  // leaves the flanks thinner.
+  const core = n >= 24 && !(opts.opacity < 0.9) ? mul3(shade(c0, 0, 0.3, 0.6, amb, 0.6), 1 - inner * 0.6) : null;
   for (let i = 0; i < n; i++) {
     // random direction, biased toward the camera side and the top
     let ux = rng() * 2 - 1, uy = rng() * 2 - 1, uz = rng() * 2 - 1;
     const l = Math.hypot(ux, uy, uz) || 1; ux /= l; uy /= l; uz /= l;
     if (uz < -0.3 && rng() < 0.7) uz = -uz;
-    const rad = Math.pow(rng(), 0.35);          // mostly near the surface
+    const rad0 = Math.pow(rng(), 0.35), rad = rad0 * pull;   // mostly near the surface
     let c = shade(c0, ux, uy, uz, amb, 0.6);
     // clumps: a few lobes of foliage catch the light, the gaps between them are in shade
     const cl = clump ? noise2(ux * 2.3 + 7, uy * 2.3 + uz * 1.7, salt) : 0.5;
-    c = mul3(c, ((1 - inner) + inner * rad) * (1 - clump * 0.45 + clump * 0.9 * cl));
+    c = mul3(c, ((1 - inner) + inner * rad0) * (1 - clump * 0.45 + clump * 0.9 * cl));
     c = jitter(c, rng, 0.12);
-    const ss = s * (0.6 + 0.7 * rng());
+    const ss = s * (0.6 + 0.7 * rng()) / Math.sqrt(pull);
+    if (i === 0 && core) { out(x, y, -d, rx * 0.42, ry * 0.42, rz * 0.42, core[0], core[1], core[2], 1, 0, 0, 0, 1, kind); continue; }
     out(x + ux * rx * rad, y + uy * ry * rad, -(d - uz * rz * rad), ss, ss * 0.8, ss, c[0], c[1], c[2], opts.opacity || 0.95, 0, 0, 0, 1, kind);
     if (out.due()) yield;
   }
@@ -333,7 +345,7 @@ export function* stick(ctx, out, x, y, d, h, r, opts = {}) {
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n * h;
     const k = opts.shadeTop ? 0.85 + 0.25 * (t / h) : 1;
-    out(x + lx * t, y + t, -(d + ld * t), r, seg * 0.6, r, c[0] * k, c[1] * k, c[2] * k, opts.opacity || 1, 0, 0, 0, 1, kind);
+    out(x + lx * t, y + t, -(d + ld * t), r, seg * 0.8, r, c[0] * k, c[1] * k, c[2] * k, opts.opacity || 1, 0, 0, 0, 1, kind);
     if (out.due()) yield;
   }
 }
@@ -349,7 +361,7 @@ export function* broadleaf(ctx, out, x, d, opts = {}) {
   const color = opts.color || ctx.palette.foliage || [0.2, 0.32, 0.14];
   const kind = opts.kind != null ? opts.kind : KIND.TREE;
   const trunkH = H - W * 0.55;
-  const trunkR = Math.max(0.12, H * 0.022);
+  const trunkR = Math.max(0.12, H * 0.022, 0.0005 * d);   // never thinner than the GPU can draw at this distance
   if (n >= 12) yield* stick(ctx, out, x, y0, d, trunkH, trunkR, { color: opts.trunk || [0.2, 0.17, 0.13], n: Math.max(1, Math.round(n * 0.05)), kind });
   const lumps = n < 20 ? 1 : 3 + Math.floor(rng() * 3);
   const cy = y0 + H - W * 0.5 * (opts.squash || 0.85);
@@ -379,7 +391,7 @@ export function* conifer(ctx, out, x, d, opts = {}) {
     const f = (t + 0.5) / tiers;                     // 0 bottom .. 1 top
     const ty = y0 + H * (0.15 + 0.8 * f);
     const tw = W * (1 - f * 0.85) * 0.5;
-    yield* blob(ctx, out, x, ty, d, tw, H / tiers * 0.45, tw, { n: Math.round(n / tiers), color: mul3(color, 0.9 + 0.25 * f), rng, kind, inner: 0.45, amb: 0.55 });
+    yield* blob(ctx, out, x, ty, d, tw, H / tiers * 0.55, tw, { n: Math.round(n / tiers), color: mul3(color, 0.9 + 0.25 * f), rng, kind, inner: 0.45, amb: 0.55 });
   }
 }
 
@@ -575,13 +587,24 @@ export function* tower(ctx, out, x, d, opts = {}) {
   }
   if (opts.spire) {
     const sh = opts.spire, sc = opts.spireColor || [0.36, 0.37, 0.39];
+    // Rings of splats laid round the cone, each turned along its ring and overlapping its
+    // neighbours, three quarters of the way round so the flanks are there when the train sees the
+    // spire from the side (random splats on the front half left it speckled, and open at the sides).
     const n = Math.max(6, Math.round(sh / (s * 1.5)) * 3);
+    const rows = clamp(Math.round(sh / (s * 1.5)), 2, Math.floor(n / 3));
+    const per = Math.floor(n / rows);
     for (let i = 0; i < n; i++) {
-      const f = Math.pow(rng(), 0.8), r = (w / 2) * (1 - f) * 0.95;
-      const a = (rng() - 0.5) * Math.PI;
+      const j0 = rng(), j1 = rng();                  // two draws a splat, as before, so what follows from rng stays put
+      const row = Math.min(rows - 1, Math.floor(i / per)), k = i - row * per, m = row === rows - 1 ? n - row * per : per;
+      const f = (row + 0.3 + 0.4 * j0) / rows, R = (w / 2) * (1 - f) * 0.95;
+      const a = ((k + 0.5) / m - 0.5) * Math.PI * 1.55 + (j1 - 0.5) * 0.3 / m;
+      const arc = (R * Math.PI * 1.55) / m;
+      const sw = Math.min(Math.max(s * 0.6 * (1 - f * 0.6) + 0.04, arc * 0.62), R * 0.5 + 0.05);
+      const r = Math.max(0, R - sw * 0.5);           // set in by the splat's own width, so the cone keeps its edge
       const [px, py, pz] = P(Math.sin(a) * r, h + f * sh, Math.cos(a) * r);
       const c = shade(sc, Math.sin(a), 0.4, Math.cos(a), 0.6, 0.5);
-      out(px, py, pz, s * 0.9 * (1 - f * 0.6) + 0.05, s, s * 0.6, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+      const qa = quatMul(q, quatYaw(a));
+      out(px, py, pz, sw, Math.max(s * 0.7, (sh / rows) * 0.62), s * 0.4, c[0], c[1], c[2], 1, qa[0], qa[1], qa[2], qa[3], kind);
       if (out.due()) yield;
     }
   }
@@ -615,12 +638,12 @@ export function* mast(ctx, out, x, d, opts = {}) {
   const seg = 0.3;
   for (let t = 0.3; t < H; t += seg) {
     const k = 0.85 + 0.2 * (t / H);
-    out(x, y0 + t, -d, 0.11, seg * 0.62, 0.07, col[0] * k, col[1] * k, col[2] * k, 1, 0, 0, 0, 1, KIND.MAST);
-    out(x, y0 + t, -(d + 0.16), 0.11, seg * 0.62, 0.05, col[0] * k * 0.8, col[1] * k * 0.8, col[2] * k * 0.8, 1, 0, 0, 0, 1, KIND.MAST);
+    out(x, y0 + t, -d, 0.11, seg * 0.8, 0.07, col[0] * k, col[1] * k, col[2] * k, 1, 0, 0, 0, 1, KIND.MAST);
+    out(x, y0 + t, -(d + 0.16), 0.11, seg * 0.8, 0.05, col[0] * k * 0.8, col[1] * k * 0.8, col[2] * k * 0.8, 1, 0, 0, 0, 1, KIND.MAST);
   }
   // the cantilever arm toward the track (mostly above the window), stopping short of 2.5 m
   const armY = y0 + H - 0.6;
-  for (let dd = d - 0.2; dd > 2.6; dd -= 0.35) out(x, armY, -dd, 0.05, 0.05, 0.2, col[0] * 0.8, col[1] * 0.8, col[2] * 0.8, 1, 0, 0, 0, 1, KIND.MAST);
+  for (let dd = d - 0.2; dd > 2.6; dd -= 0.35) out(x, armY, -dd, 0.05, 0.05, 0.28, col[0] * 0.8, col[1] * 0.8, col[2] * 0.8, 1, 0, 0, 0, 1, KIND.MAST);
   // insulators where the field-side wires hang
   for (const wy of opts.wireYs || []) out(x, wy + 0.1, -(d + 0.25), 0.05, 0.14, 0.05, 0.55, 0.42, 0.3, 1, 0, 0, 0, 1, KIND.MAST);
   if (out.due()) yield;
@@ -639,7 +662,7 @@ export function* wires(ctx, out, span, list, opts = {}) {
       const y = w.y - w.sag * 4 * u * (1 - u);
       const slope = -w.sag * 4 * (1 - 2 * u) / span;
       const q = quatRoll(Math.atan(slope));
-      out(x, y, -w.d, step * 0.65, r, r, col[0], col[1], col[2], w.opacity || 1, q[0], q[1], q[2], q[3], KIND.WIRE);
+      out(x, y, -w.d, step * 0.8, r, r, col[0], col[1], col[2], w.opacity || 1, q[0], q[1], q[2], q[3], KIND.WIRE);
       if (out.due()) yield;
     }
   }
@@ -667,7 +690,7 @@ export function* fence(ctx, out, d, opts = {}) {
     const px = x + (h - 0.5) * 0.3, y0 = groundY(ctx, px, d);
     for (let t = 0.1; t < H; t += 0.22) {
       const k = 0.85 + 0.25 * (t / H);
-      out(px, y0 + t, -d, 0.045, 0.13, 0.045, pc[0] * k, pc[1] * k, pc[2] * k, 1, 0, 0, 0, 1, KIND.FENCE);
+      out(px, y0 + t, -d, 0.045, 0.16, 0.045, pc[0] * k, pc[1] * k, pc[2] * k, 1, 0, 0, 0, 1, KIND.FENCE);
     }
     if (out.due()) yield;
   }
@@ -676,7 +699,7 @@ export function* fence(ctx, out, d, opts = {}) {
     const fy = 0.3 + (H - 0.35) * (s + 0.5) / strands;
     for (let x = step / 2; x < ctx.length; x += step) {
       const y = groundY(ctx, x, d) + fy;
-      out(x, y, -d, step * 0.65, 0.008, 0.008, wc[0], wc[1], wc[2], 0.9, 0, 0, 0, 1, KIND.FENCE);
+      out(x, y, -d, step * 0.8, 0.008, 0.008, wc[0], wc[1], wc[2], 0.9, 0, 0, 0, 1, KIND.FENCE);
       if (out.due()) yield;
     }
   }

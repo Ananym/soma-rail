@@ -28,7 +28,7 @@
 import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, detail, shade, jitter,
-  mul3, mix3, smooth, clamp, lerp, broadleaf, blob, stick, overheadLine, quatPitch,
+  mul3, mix3, smooth, clamp, lerp, broadleaf, blob, stick, overheadLine, quatPitch, strut,
 } from './kit.js';
 
 const PAL = {
@@ -326,7 +326,7 @@ export function* shopFront(ctx, out, x, df, base, w, id, shop) {
     if (shop.gaps && shop.gaps(i, ln)) continue;
     const px = x - fw / 2 + (i + 0.5) * fw / ln;
     const wob = 0.12 * Math.sin(i * 2.1 + id);
-    if (lit) light(out, px, ny + wob, df - 0.12, fw / ln * 0.42, 0.22, 0.05, nc, 0.95);
+    if (lit) light(out, px, ny + wob, df - 0.12, fw / ln * 0.7, 0.22, 0.05, nc, 0.95);   // overlapping, so the letters read as a line of neon, not beads
     else out(px, ny, -(df - 0.12), fw / ln * 0.55, 0.3, 0.05, nc[0] * 0.6, nc[1] * 0.6, nc[2] * 0.6, 1, 0, 0, 0, 1, KIND.BUILDING);
   }
   if (lit) light(out, x, ny, df - 0.2, fw * 0.6, 0.9, 0.3, nc, 0.12);    // the glow on the wall round it
@@ -367,17 +367,54 @@ export function* car(ctx, out, x, d, color, dir = 1, lights = 0) {
 }
 
 // A tower crane: lattice mast, jib along the track, red lamps at the top and the jib tip.
+// Built of thin kit struts with members on every face (as pinewood's pylon): it used to be a stack
+// of round blobs with a row of fat beads for the jib, a yellow fuzz from either side.
 export function* crane(ctx, out, x, d, H, jib, rng) {
   const L = out.L || lightState(ctx, out);
   const y0 = groundY(ctx, x, d);
-  const s = Math.max(0.6, detail(out, d, 1.2));
-  const col = [0.62, 0.5, 0.2];
-  yield* stick(ctx, out, x, y0, d, H, s * 0.8, { color: col, kind: KIND.OTHER, n: Math.max(4, Math.round(H / (s * 2.5))) });
+  const col = [0.62, 0.5, 0.2], dark = [0.3, 0.29, 0.27];
+  const r = Math.max(0.07, 0.0005 * d), rb = r * 0.7;
+  const a = 0.9;                                  // half-width of the mast
+  const z = -d, K = KIND.OTHER;
+  const seg = (len) => Math.max(1, Math.round(len / 8));
+  const lace = d < 1400;                          // bracing only where it can be told apart
+  const cs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  for (const [cx, cz] of cs) strut(out, x + cx * a, y0 - 0.3, z + cz * a, x + cx * a, y0 + H, z + cz * a, r, col, seg(H), 1, K);
+  if (lace) {
+    const st = 3.2;
+    for (let f = 0; f < 4; f++) {
+      const [ax, az] = cs[f], [bx, bz] = cs[(f + 1) % 4];
+      for (let y = 0, k = 0; y + st <= H; y += st, k++) {
+        const [px, pz, qx, qz] = k & 1 ? [ax, az, bx, bz] : [bx, bz, ax, az];
+        strut(out, x + px * a, y0 + y, z + pz * a, x + qx * a, y0 + y + st, z + qz * a, rb, col, 1, 1, K);
+      }
+    }
+  }
+  if (out.due()) yield;
+  // the jib along the line and the counter-jib behind: a triangular truss, two bottom chords and a
+  // top chord, laced on each face; the cab and the counterweight; the A-frame and its ties
   const dir = rng() < 0.5 ? -1 : 1;
-  for (let t = -jib * 0.28; t < jib; t += s * 2) out(x + dir * t, y0 + H, -d, s * 1.3, s * 0.6, s * 0.6, col[0], col[1], col[2], 1, 0, 0, 0, 1, KIND.OTHER);
+  const yj = y0 + H, back = jib * 0.28, th = 1.8;
+  const X = (t) => x + dir * t;
+  for (const sz of [-0.8, 0.8]) strut(out, X(-back), yj, z + sz, X(jib), yj, z + sz, r, col, seg(jib + back), 1, K);
+  strut(out, X(-back), yj + th, z, X(jib), yj + 0.4, z, r, col, seg(jib + back), 1, K);
+  if (lace) {
+    const st = 3;
+    for (let t = -back, k = 0; t + st <= jib; t += st, k++) {
+      const h0 = th - (th - 0.4) * Math.max(0, t) / jib, h1 = th - (th - 0.4) * Math.max(0, t + st) / jib;
+      for (const sz of [-0.8, 0.8]) strut(out, X(t + (k & 1 ? 0 : st)), yj, z + sz, X(t + (k & 1 ? st : 0)), yj + (k & 1 ? h1 : h0), z, rb, col, 1, 1, K);
+      strut(out, X(t), yj, z - 0.8, X(t + st), yj, z + 0.8, rb, col, 1, 1, K);
+    }
+  }
+  const cab = Math.max(1.1, r * 2);
+  out(X(1.6), yj - 1.2, z, cab, 1.1, 1.0, col[0] * 0.8, col[1] * 0.8, col[2] * 0.8, 1, 0, 0, 0, 1, K);
+  out(X(-back + 2.5), yj - 0.6, z, 2.2, 1.4, 1.2, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, K);
+  for (const sz of [-0.6, 0.6]) strut(out, x, yj, z + sz, x, yj + 6, z, r, col, 1, 1, K);
+  strut(out, x, yj + 6, z, X(jib * 0.65), yj + th * 0.5, z, rb, dark, 2, 1, K);
+  strut(out, x, yj + 6, z, X(-back), yj + th, z, rb, dark, 1, 1, K);
   if (L.lamps || L.night > 0.1) {
     const rc = Math.max(0.3, 0.0022 * d);
-    glowPoint(out, x, y0 + H + 4, d, RED, rc, 0.2);
+    glowPoint(out, x, y0 + H + 6.5, d, RED, rc, 0.2);
     glowPoint(out, x + dir * jib, y0 + H, d, RED, rc, 0.2);
   }
   if (out.due()) yield;
@@ -1133,4 +1170,34 @@ export const nightcityBiome = {
   hazeDist: 6500,
   hours: [20, 2],
   generators: { trackside, near, mid, far },
+};
+
+// For scripts that look things up: pass { terrain } for a world (see scripts/pass-strip.mjs).
+export const _debug = {
+  layout, rowAt, crossX, crossIn, crossW, riverAt,
+  // tower cranes whose world x lies in [a, b): { x, d, H }
+  cranes(ctx, a, b) {
+    const res = [];
+    for (let i = Math.floor(a / 420); i < b / 420; i++) {
+      const r = worldRng(ctx, 711, i);
+      if (r() > 0.4) continue;
+      const d = 400 + r() * 2200;
+      res.push({ x: i * 420 + r() * 420, d, H: 45 + 35 * r() });
+    }
+    return res;
+  },
+  // the near band's blocks: { k, j, type, xa, xb, da, db }
+  blocks(ctx, a, b) {
+    const L = layout(ctx), res = [];
+    for (let k = 0; k + 1 < L.rows.length && L.rows[k].D < 300; k++) {
+      for (let j = Math.floor(a / CW); j < b / CW; j++) {
+        const q = L.rows[k], qn = L.rows[k + 1];
+        const r = worldRng(ctx, 601, k, j), u = r();
+        const da = q.D + q.w / 2 + 3, db = qn.D - qn.w / 2 - 3, grow = smooth(40, 300, da);
+        const type = u < 0.55 - 0.4 * grow ? 'terrace' : u < 0.78 ? 'flats' : u < 0.9 ? 'shops' : u < 0.96 ? 'yard' : 'park';
+        res.push({ k, j, type, xa: crossX(L, j), xb: crossX(L, j + 1), da, db });
+      }
+    }
+    return res;
+  },
 };

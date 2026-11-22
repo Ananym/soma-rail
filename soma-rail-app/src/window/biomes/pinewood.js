@@ -17,7 +17,8 @@
 //   scale     spruces of impossible height among the others; far mountains that keep going up
 //   topology  floating islands of forest; a lake standing upright like a wall
 //   logic     the same red cabin and jetty repeating along the line, each time slightly wrong
-import { hashInts, makeRng, noise1, noise2, fbm2 } from '../rng.js';
+import { hashInts, hashString, makeRng, noise1, noise2, fbm2 } from '../rng.js';
+import { makeTerrain } from '../terrain.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, house, church,
   overheadLine, fence, lamp, floatingIsland, wires, jitter, mul3, mix3, shade, smooth, clamp, lerp,
@@ -439,7 +440,7 @@ export function* spruce(ctx, out, x, d, opts = {}) {
   // trunk, seen only below the skirt
   const trunkN = n >= 30 ? Math.max(2, Math.round(n * 0.025)) : 0;
   if (trunkN) {
-    const tr = Math.max(0.06, H * 0.012), th = cb + H * 0.12;
+    const tr = Math.max(0.06, H * 0.012, 0.0005 * d), th = cb + H * 0.12;
     for (let i = 0; i < trunkN; i++) {
       const t = (i + 0.5) / trunkN * th;
       const c = mul3(C.barkGrey, 0.7 + 0.3 * t / th);
@@ -447,7 +448,7 @@ export function* spruce(ctx, out, x, d, opts = {}) {
     }
   }
   // dark core
-  const coreN = Math.max(1, Math.round(n * 0.08));
+  const coreN = Math.max(1, Math.round(n * (n < 120 ? 0.14 : 0.08)));   // more core when the branches are few
   for (let i = 0; i < coreN; i++) {
     const t = 1 - Math.sqrt(rng());
     const R = W * 0.5 * (1 - t);
@@ -473,7 +474,7 @@ export function* spruce(ctx, out, x, d, opts = {}) {
     const by = yk - droop * rr - tierH * 0.25 * rng();
     const q = quatXTo(ca, -droop, sa);
     const len = Math.min(Rk * 0.55, Math.max(s0 * 1.5, rr * 0.4));
-    const th = Math.max(s0 * 0.45, len * 0.28);
+    const th = Math.max(s0 * (n < 120 ? 0.62 : 0.45), len * 0.28);   // few splats: fatter, so the tiers still close up
     const lit = Math.max(0, ca * SUN[0] + 0.45 * SUN[1] + sa * SUN[2]);
     let c = mix3(col, tip, f * f * (0.25 + 0.75 * lit));
     c = mul3(c, (0.55 + 0.5 * f) * (0.72 + 0.5 * lit) * tierS[k]);
@@ -500,7 +501,7 @@ export function* scotsPine(ctx, out, x, d, opts = {}) {
   const cb = H * (H < 9 || opts.open ? 0.15 + 0.2 * rng() : 0.5 + 0.14 * rng());
   const lx = (rng() - 0.5) * 0.06, lx2 = (rng() - 0.5) * 0.08;   // lean, and a kink higher up
   const tx = (t) => x + lx * t + (t > cb * 0.6 ? lx2 * (t - cb * 0.6) : 0);
-  const tr = Math.max(0.05, H * 0.011);
+  const tr = Math.max(0.05, H * 0.011, 0.0005 * d);   // trunks never thinner than the GPU can draw
   if (n <= 4) {
     const c = shade(col, 0, 1, 0.3, 0.6, 0.5);
     if (n >= 2) out(tx(cb * 0.5), y0 + cb * 0.5, -d, Math.max(tr, 0.02 * d * 0 + tr), cb * 0.45, tr, C.pineBark[0] * 0.7, C.pineBark[1] * 0.7, C.pineBark[2] * 0.7, 1, 0, 0, 0, 1, kind);
@@ -521,26 +522,32 @@ export function* scotsPine(ctx, out, x, d, opts = {}) {
     if (n > 60 && i % 2 === 0) out(tx(t) - r * 0.45, y0 + t, -(d - r * 0.3), r * 0.5, th / trunkN * 0.7, r * 0.5, c[0] * 1.25, c[1] * 1.2, c[2] * 1.1, 1, 0, 0, 0, 1, kind);
   }
   // crown: flattened clumps spread across the top, each lit on top and dark underneath
-  const K = 6 + Math.floor(rng() * 4);
+  // Clumps get at least about six splats each: a small budget makes fewer, bigger clumps that still
+  // touch, instead of a scatter of single splats round the crown.
   const crownN = n - trunkN;
+  const Knom = 6 + Math.floor(rng() * 4);
+  const K = clamp(Math.min(Knom, Math.floor(crownN / 6)), 1, Knom);
+  const grow = Math.sqrt(Knom / K);
   const ctop = tx(H);
   for (let k = 0; k < K; k++) {
     // clumps fill a crown that is widest near its flat top and narrows downward, overlapping
-    const vf = k === 0 ? 0.92 : Math.pow(rng(), 0.6);
+    const vf = K === 1 ? 0.6 : k === 0 ? 0.92 : Math.pow(rng(), 0.6);
     const hw = Wc * 0.5 * (0.45 + 0.55 * vf);
     const cxk = ctop + (rng() * 2 - 1) * hw * 0.8;
     const cyk = y0 + cb + (H - cb) * (0.12 + 0.72 * vf);
     const cdk = d + (rng() - 0.5) * hw * 0.8;
-    const rx = Wc * (0.16 + 0.1 * rng()), ry = rx * (0.6 + 0.3 * rng());
+    const rx = Math.min(Wc * 0.5, Wc * (0.16 + 0.1 * rng()) * grow), ry = rx * (0.6 + 0.3 * rng());
     const m = Math.round(crownN / K);
-    // the bough to this clump
+    // the bough to this clump: a strut from the trunk (at the trunk's own distance) up into the
+    // clump. It was one splat as long as the bough on each side of its centre, lying at the clump's
+    // distance, so from the side it floated free of the trunk and stuck out past both ends.
     if (n > 80) {
-      const bx0 = tx(cyk - y0 - ry * 2), dx = cxk - bx0, dy = ry * 2;
-      const q = quatXTo(...norm3(dx, dy, 0));
-      const bc = mul3(C.pineBark, 0.45);
-      out((bx0 + cxk) / 2, cyk - ry, -cdk, Math.hypot(dx, dy) / 2, tr * 0.5, tr * 0.5, bc[0], bc[1], bc[2], 1, q[0], q[1], q[2], q[3], kind);
+      const hb = Math.max(cb * 0.8, cyk - y0 - ry * 2.2);
+      strut(out, tx(hb), y0 + hb, -d, cxk, cyk - ry * 0.3, -cdk, Math.max(0.04, tr * 0.5), mul3(C.pineBark, 0.45), 2, 1, kind);
     }
     const ss = Math.sqrt((rx * rx * 2.2) / Math.max(1, m)) * 1.1;
+    // a dark core in each clump, so the sky does not show through it from the side
+    // (in place of the clump's first splat, whose random numbers are still drawn)
     for (let i = 0; i < m; i++) {
       let ux = rng() * 2 - 1, uy = rng() * 2 - 1, uz = rng() * 2 - 1;
       const l = Math.hypot(ux, uy, uz) || 1; ux /= l; uy /= l; uz /= l;
@@ -550,6 +557,7 @@ export function* scotsPine(ctx, out, x, d, opts = {}) {
       c = mul3(c, 0.6 + 0.4 * rad);
       c = jitter(c, rng, 0.12);
       const s = ss * (0.6 + 0.6 * rng());
+      if (i === 0 && m >= 6) { const cc = mul3(col, 0.55); out(cxk, cyk - ry * 0.1, -cdk, rx * 0.55, ry * 0.5, rx * 0.45, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, kind); continue; }
       out(cxk + ux * rx * rad, cyk + uy * ry * rad, -(cdk - uz * rx * 0.7 * rad), s * 1.2, s * 0.65, s, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
       if (out.due()) yield;
     }
@@ -566,7 +574,7 @@ export function* birch(ctx, out, x, d, opts = {}) {
   const leaf = opts.color || C.birchLeaf;
   const n = Math.max(1, Math.round(opts.n || coniferSplats(out, d, H, Wc) * 0.8));
   const lean = (rng() - 0.5) * 0.08;
-  const tr = Math.max(0.035, H * 0.011);
+  const tr = Math.max(0.035, H * 0.011, 0.0005 * d);
   const cb = H * (0.3 + 0.12 * rng());
   if (n <= 4) {
     out(x + lean * cb * 0.5, y0 + cb * 0.5, -d, tr * 1.2, cb * 0.45, tr, C.birchBark[0] * 0.85, C.birchBark[1] * 0.85, C.birchBark[2] * 0.85, 1, 0, 0, 0, 1, kind);
@@ -593,9 +601,15 @@ export function* birch(ctx, out, x, d, opts = {}) {
     const cx = x + lean * (cy - y0) + (rng() - 0.5) * w * 0.4;
     const m = Math.round(crownN / K);
     const ss = Math.sqrt((w * w * 3) / Math.max(1, m)) * 0.7;
-    // foliage hangs from the twigs in short strands, so the crown reads as a soft drapery with
-    // gaps rather than a ball
+    // foliage hangs from the twigs in short strands, so the crown reads as a soft drapery rather
+    // than a ball. Each lump has a darker core, and the strands are fat enough to touch: thin
+    // strands with sky between them came apart into a cloud of loose leaves at the sides of the frame.
     const per = m >= 24 ? 4 : 1;
+    const core = m >= 8;     // drawn in place of the first strand, whose random numbers are still drawn
+    if (core) {
+      const cc = mul3(shade(leaf, 0, 0.3, 0.6, 0.55, 0.6), 0.62);
+      out(cx, cy - w * 0.1, -d, w * 0.42, w * 0.36, w * 0.3, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, kind);
+    }
     for (let i = 0; i < m; i += per) {
       let ux = rng() * 2 - 1, uy = rng() * 2 - 1, uz = rng() * 2 - 1;
       const l = Math.hypot(ux, uy, uz) || 1; ux /= l; uy /= l; uz /= l;
@@ -608,7 +622,8 @@ export function* birch(ctx, out, x, d, opts = {}) {
       for (let j = 0; j < per; j++) {
         const cc = jitter(mul3(c, 1 - 0.12 * j), rng, 0.12);
         const s = ss * (0.6 + 0.5 * rng());
-        out(px + ux * j * len * 0.08, py - j * len / per, -pd, s * 0.6, per > 1 ? Math.max(s, len / per * 0.6) : s, s * 0.6, cc[0], cc[1], cc[2], 0.8, 0, 0, 0, 1, kind);
+        if (core && i === 0) continue;
+        out(px + ux * j * len * 0.08, py - j * len / per, -pd, s * 0.85, per > 1 ? Math.max(s, len / per * 0.85) : s, s * 0.75, cc[0], cc[1], cc[2], 0.92, 0, 0, 0, 1, kind);
       }
       if (out.due()) yield;
     }
@@ -863,7 +878,10 @@ function* sidingProps(ctx, out, W, sd) {
         const c = jitter(mul3(end, 0.8 + 0.2 * (y / hgt)), rng, 0.12);
         const jx = (rng() - 0.5) * 0.05, jy = (rng() - 0.5) * 0.05;
         if (out.density < 0.5) { out(x + jx, y0 + y + jy, -dd, rr * 0.9, rr * 0.9, 0.04, c[0] * 0.85, c[1] * 0.85, c[2] * 0.85, 1, 0, 0, 0, 1, KIND.OTHER); continue; }
-        out(x + jx, y0 + y + jy, -(dd + 0.04), rr * 1.05, rr * 1.05, 0.04, 0.24, 0.16, 0.1, 1, 0, 0, 0, 1, KIND.OTHER);
+        // the log itself running back from its cut end (it was a flat dark disc, so from the side the
+        // pile had no depth): bark, a little lighter up the pile, its front just behind the pale end
+        const bk = 0.8 + 0.35 * (y / hgt);
+        out(x + jx, y0 + y + jy, -(dd + 1.05), rr * 1.05, rr * 1.05, 0.5, 0.27 * bk, 0.18 * bk, 0.11 * bk, 1, 0, 0, 0, 1, KIND.OTHER);
         out(x + jx, y0 + y + jy, -dd, rr * 0.62, rr * 0.62, 0.03, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
         if (row % 2 === 0) out(x + 0.16, y0 + y + 0.13, -(dd + 0.3), 0.17, 0.15, 0.05, 0.08, 0.065, 0.05, 1, 0, 0, 0, 1, KIND.OTHER);
       }
@@ -895,7 +913,7 @@ function* cabin(ctx, out, W, wx, d, rng, opts = {}) {
   // white corner boards and window frames read from afar on a red house
   const trim = [0.74, 0.73, 0.68];
   const [ex, ez] = [Math.cos(yaw), -Math.sin(yaw)];
-  for (const sg of [-1, 1]) for (let t = 0.3; t < h; t += 0.4) out(x + ex * sg * w / 2, y + 0.4 + t, -(d - dep / 2 - 0.05) + ez * sg * w / 2, 0.09, 0.22, 0.05, trim[0], trim[1], trim[2], 1, 0, 0, 0, 1, opts.kind != null ? opts.kind : KIND.BUILDING);
+  for (const sg of [-1, 1]) for (let t = 0.3; t < h; t += 0.4) out(x + ex * sg * w / 2, y + 0.4 + t, -(d - dep / 2 - 0.05) + ez * sg * w / 2, 0.09, 0.3, 0.07, trim[0], trim[1], trim[2], 1, 0, 0, 0, 1, opts.kind != null ? opts.kind : KIND.BUILDING);
   // a lit window at night
   const hour = ctx.hour;
   if (hour != null && (hour < 6.5 || hour > 19) && (opts.lit || rng() < 0.6)) {
@@ -906,7 +924,7 @@ function* jetty(ctx, out, wx, d0, d1, y, rng) {
   const x = wx - ctx.x0;
   for (let d = d0; d > d1; d -= 0.5) {
     const c = jitter([0.36, 0.3, 0.23], rng, 0.1);
-    out(x, y + 0.5, -d, 0.75, 0.06, 0.28, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
+    out(x, y + 0.5, -d, 0.75, 0.06, 0.36, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);   // boards 0.5 m apart, 0.36 m: they overlap
     if (Math.round(d * 2) % 4 === 0) for (const sx of [-0.7, 0.7]) out(x + sx, y + 0.1, -d, 0.06, 0.45, 0.06, 0.15, 0.12, 0.1, 1, 0, 0, 0, 1, KIND.OTHER);
   }
   if (out.due()) yield;
@@ -1454,4 +1472,32 @@ export const pinewoodBiome = {
 };
 
 // for scripts that inspect the layout
-export const _debug = { world, lakeIn, surface, LAKE_FAMS, TN: Object.keys(T) };
+//   _debug.layout('7', 0, 20000) -> { lakes, cabins, sites, cuttings, sidings, pylons }: world x and
+//   distance of things worth a pass strip (scripts/pass-strip.mjs)
+function debugLayout(seedStr, x0, x1) {
+  const terrain = makeTerrain(hashString(String(seedStr)), TERRAIN);
+  const W = world({ terrain });
+  const res = { lakes: [], cabins: [], sites: [], cuttings: [], sidings: [], pylons: [] };
+  for (let f = 0; f < 2; f++) {
+    const c = LAKE_FAMS[f].cell;
+    for (let i = Math.floor(x0 / c); i <= Math.floor(x1 / c); i++) {
+      const lk = lakeIn(W, f, i);
+      if (!lk) continue;
+      res.lakes.push({ x: Math.round(lk.cx), d: Math.round(lk.dc), rx: Math.round(lk.rx), rd: Math.round(lk.rd) });
+      if (lk.cabin < 0.55 && lk.dc < 600) {
+        const wx = lk.cx + (lk.cabinU - 0.5) * lk.rx * 0.9, sd = farShore(W, lk, wx);
+        if (sd != null) res.cabins.push({ x: Math.round(wx), d: Math.round(sd + 7), jetty: { x: Math.round(wx + 3), d: Math.round(sd - 5) } });
+      }
+    }
+  }
+  for (let i = Math.floor(x0 / SCELL); i <= Math.floor(x1 / SCELL); i++) { const s = site(W, i); if (s) res.sites.push({ x: Math.round(s.cx), d: Math.round(s.dc), mill: s.mill }); }
+  for (let i = Math.floor(x0 / RCELL); i <= Math.floor(x1 / RCELL); i++) { const c = cutting(W, i); if (c) res.cuttings.push({ x0: Math.round(c.x0), x1: Math.round(c.x1), h: +c.h.toFixed(1) }); }
+  for (let i = Math.floor(x0 / LCELL); i <= Math.floor(x1 / LCELL); i++) { const s = siding(W, i); if (s) res.sidings.push({ x0: Math.round(s.x0), x1: Math.round(s.x1) }); }
+  for (let i = Math.floor((x0 - 3000) / PCELL); i <= Math.floor((x1 + 3000) / PCELL); i++) {
+    const L = powerLine(W, i);
+    if (!L) continue;
+    for (let k = 0; k < 10; k++) { const d = 60 + k * 320, wx = L.wx0 + L.slope * d; if (wx >= x0 && wx <= x1) res.pylons.push({ x: Math.round(wx), d }); }
+  }
+  return res;
+}
+export const _debug = { world, lakeIn, surface, LAKE_FAMS, TN: Object.keys(T), layout: debugLayout, props: { cabin, jetty, snowFence, boulder, pylon } };
