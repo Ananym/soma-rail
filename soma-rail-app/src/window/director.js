@@ -113,12 +113,35 @@ export function createDirector({ params, reducedMotion = false }) {
 
   // Ask for a change of scenery. It happens out of sight, inside a tunnel.
   function queueTransition(next) {
-    // A tunnel whose mouth has not been reached yet simply takes the newer destination; one we are
-    // already inside finishes first, and the change follows in a tunnel of its own.
-    if (state.tunnel) { if (state.tunnel.phase === 'approach') state.tunnel.next = next; else state.queued = next; return; }
+    // A tunnel that has not yet swapped the world takes the newer destination. One that has, but
+    // whose far portal is still out of sight, swaps again: the world behind the wall is built
+    // afresh and the tunnel runs on until it is ready. Only once the train is leaving the tunnel,
+    // with the new country about to show, is it too late: then the change follows in a tunnel of
+    // its own.
+    const t = state.tunnel;
+    if (t) {
+      if (t.phase === 'approach') t.next = next;
+      else if (t.phase === 'inside') {
+        if (recent[recent.length - 1] === state.biome) recent.pop();   // never shown, so not "seen lately"
+        t.next = next;
+        swap(t);
+      } else state.queued = next;
+      return;
+    }
     const x0 = state.travelled + TUNNEL_LEAD;
     const len = Math.max(180, state.cruise * TUNNEL_MIN_SECONDS);
     state.tunnel = { x0, x1: x0 + len, phase: 'approach', next, ready: false };
+  }
+
+  // The moment of change, out of sight in the tunnel: the director's state becomes the destination
+  // and the engine is told to build that world (it answers with worldReady()).
+  function swap(t) {
+    state.seed = t.next.seed; state.biome = t.next.biome; state.level = t.next.level;
+    seen(state.biome);
+    state.dials = { ...LEVELS[state.level] };
+    placeHour();
+    t.ready = false;
+    for (const fn of listeners.swap) fn(t.next);
   }
 
   return {
@@ -204,11 +227,7 @@ export function createDirector({ params, reducedMotion = false }) {
       if (t) {
         if (t.phase === 'approach' && state.travelled > t.x0 + 12) {
           t.phase = 'inside';
-          state.seed = t.next.seed; state.biome = t.next.biome; state.level = t.next.level;
-          seen(state.biome);
-          state.dials = { ...LEVELS[state.level] };
-          placeHour();
-          for (const fn of listeners.swap) fn(t.next);
+          swap(t);
         }
         if (t.phase === 'inside') {
           // keep the far portal out of sight until the new world exists

@@ -268,6 +268,49 @@ const outDir = process.argv[2] || '.';
       const controls = { before: c0, nextBiome: c1.wantBiome, dreamlike: c2.wantLevel, fpsCap: c3.fpsCap, rateWhileCheating: c4.rate,
         ok: c1.wantBiome !== c0.wantBiome && c2.wantLevel === 1 - c1.wantLevel && c0.fpsCap === 60 && c3.fpsCap === 30 && c4.rate === 1 && credits.open && credits.items >= 8 && credits.soma && creditsClosed, credits };
       brake.controls = controls; brake.ok = brake.ok && controls.ok;
+      // Next, pressed again while a change is on its way, changes the destination: before the swap by
+      // re-aiming the tunnel, after it (still inside) by building the world again, and only when the
+      // train is leaving the tunnel by booking a tunnel of its own. The train is carried along by
+      // hand: this renderer is far too slow to ride a tunnel.
+      const R = await page.evaluate(async () => {
+        const d = window.__trainWindow.director.state;
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const tick = async (cond, n = 80) => { for (let i = 0; i < n && !cond(); i++) await wait(250); return cond(); };
+        const row = () => [...document.querySelectorAll('.view-controls .row')].find((r) => r.querySelector('.label').textContent.trim() === 'Scenery');
+        const label = () => row().querySelector('.value').textContent.trim();
+        const next = async () => { row().querySelector('button').click(); await wait(700); };
+        const out = {};
+        // first, out into the open
+        for (let i = 0; i < 12 && (d.tunnel || d.queued); i++) {
+          const t = d.tunnel;
+          if (!t) { await wait(500); continue; }
+          if (t.phase === 'approach') { d.travelled = t.x0 + 13; await tick(() => d.tunnel && d.tunnel.phase === 'inside'); }
+          else if (t.phase === 'inside') { await tick(() => d.tunnel && d.tunnel.ready, 480); d.travelled = d.tunnel.x1 - 11; await tick(() => d.tunnel && d.tunnel.phase === 'leaving'); }
+          else { d.travelled = t.x1 + 21; await tick(() => d.tunnel !== t); }
+        }
+        out.open = !d.tunnel && !d.queued; await wait(900);
+        const home = d.biome; out.openLabel = label();
+        await next();
+        out.a = d.tunnel && d.tunnel.phase === 'approach' ? d.tunnel.next.biome : null; out.aLabel = label();
+        await next();
+        out.b = d.tunnel && d.tunnel.phase === 'approach' ? d.tunnel.next.biome : null; out.bLabel = label();
+        out.stillHome = d.biome === home;
+        d.travelled = d.tunnel.x0 + 13;
+        out.swapped = await tick(() => d.tunnel && d.tunnel.phase === 'inside');
+        out.insideBiome = d.biome;
+        await next();
+        out.c = d.biome; out.cLabel = label(); out.noQueueInside = !d.queued; out.oneTunnel = !!d.tunnel && d.tunnel.phase === 'inside';
+        out.rebuilt = await tick(() => d.tunnel && d.tunnel.ready, 240);
+        d.travelled = d.tunnel.x1 - 11;
+        out.leaving = await tick(() => d.tunnel && d.tunnel.phase === 'leaving');
+        await next();
+        out.queuedAfter = d.queued ? d.queued.biome : null; out.keptC = d.biome === out.c; out.dLabel = label();
+        return out;
+      });
+      R.ok = R.open && R.openLabel && !R.openLabel.startsWith('→') && !!R.a && R.aLabel.startsWith('→ ') && !!R.b && R.b !== R.a && R.bLabel.startsWith('→ ') && R.bLabel !== R.aLabel && R.stillHome
+        && R.swapped && R.insideBiome === R.b && R.c !== R.b && R.noQueueInside && R.oneTunnel && R.cLabel.startsWith('→ ') && R.cLabel !== R.bLabel
+        && R.rebuilt && R.leaving && !!R.queuedAfter && R.queuedAfter !== R.c && R.keptC && R.dLabel.startsWith('→ ');
+      brake.reroll = R; brake.ok = brake.ok && R.ok;
     }
     await page.screenshot({ path: path.join(outDir, `app-${name}.png`), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
     // Only the case that breaks the streams on purpose may log load failures.

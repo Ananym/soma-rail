@@ -80,13 +80,14 @@ const NAMES = {
 };
 const nameOf = (b) => NAMES[b] || b || '';
 
-// The current scenery's name; "Queued" from the moment a change is asked for until the train is out
-// of the tunnel that brings it; then the new name.
-const changing = computed(() => { const v = props.view; return !!v && (!!v.next || v.inTunnel); });
+// The current scenery's name. From the moment a change of scenery is asked for until the train is
+// out of the tunnel that brings it: an arrow and the name of what is coming (pressing Next again
+// changes it, for as long as that is still possible); then that name alone.
 const sceneryText = computed(() => {
   const v = props.view;
   if (!v) return '';
-  return changing.value ? 'Queued' : nameOf(v.biome);
+  if (v.heading) return `→ ${nameOf(v.heading)}`;
+  return nameOf(v.biome);
 });
 // what the listener has asked for: the pending level if a change is on its way
 const dreamWanted = computed(() => { const v = props.view; return !!v && (v.next ? v.next.level : v.level) === 1; });

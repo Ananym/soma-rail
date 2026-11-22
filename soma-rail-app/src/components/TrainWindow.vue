@@ -224,6 +224,8 @@ function pending() {
   if (t && t.phase === 'approach') return t.next;
   return { seed: s.seed, biome: s.biome, level: s.level };
 }
+// The scenery last seen in the open: what a change in progress is a change from.
+let openBiome = null;
 function toggleDreamlike() {
   if (!engine) return;
   const p = pending();
@@ -231,11 +233,16 @@ function toggleDreamlike() {
   engine.director.queueTransition({ seed: p.seed, biome: p.biome, level: p.level ? 0 : 1 });
   publish();
 }
+// Next: the kind of scenery after the one that is coming (or, with nothing coming, after the one
+// outside), passing over the one last seen in the open. Pressed again while a change is on its way
+// it changes the destination; the director says until when that is possible (see queueTransition).
 function nextBiome() {
   if (!engine) return;
   const p = pending(), names = engine.biomeNames();
   const seed = (Math.random() * 0xffffffff) >>> 0;
-  engine.director.queueTransition({ seed, biome: names[(names.indexOf(p.biome) + 1) % names.length], level: p.level });
+  let i = (names.indexOf(p.biome) + 1) % names.length;
+  if (names[i] === openBiome && names.length > 2) i = (i + 1) % names.length;
+  engine.director.queueTransition({ seed, biome: names[i], level: p.level });
   publish();
 }
 // What the overlay shows: where we are and what is coming.
@@ -245,7 +252,11 @@ function publish() {
   const s = engine.director.state, p = pending();
   const next = (p.biome !== s.biome || p.level !== s.level || p.seed !== s.seed) ? { biome: p.biome, level: p.level } : null;
   if (budgetQueued && !s.tunnel && !s.queued) budgetQueued = false;
-  const state = { biome: s.biome, level: s.level, inTunnel: !!s.tunnel, next, budgetQueued, budgetFixed: !!params.budgetGiven };
+  if (!s.tunnel || openBiome === null) openBiome = s.biome;
+  // `heading`: the scenery a change in progress leads to, when it is a different kind from the one
+  // last seen in the open (a change of level or of splat budget keeps the kind)
+  const heading = (s.tunnel || s.queued) && p.biome !== openBiome ? p.biome : null;
+  const state = { biome: s.biome, level: s.level, inTunnel: !!s.tunnel, next, heading, budgetQueued, budgetFixed: !!params.budgetGiven };
   const key = JSON.stringify(state);
   if (key !== lastPublished) { lastPublished = key; emit('state', state); }
 }
