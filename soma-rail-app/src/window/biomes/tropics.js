@@ -1857,6 +1857,101 @@ function* villages(ctx, out, W, dLo, dHi, night) {
     }
   }
 }
+// A big cat walking along the forest edge: a tiger (orange, striped, white beneath) or, now and
+// then, a black panther. Long body, low head, a long tail curling up at the tip. Tagged MOVE.BEAT.
+function bigCat(out, x, y0, d, r) {
+  const K = KIND.OTHER, S = 1.75, dir = r() < 0.5 ? -1 : 1, z = -d, black = r() < 0.2;
+  const c = black ? [0.07, 0.07, 0.08] : jitter([0.74, 0.4, 0.09], r, 0.08), dark = black ? [0.04, 0.04, 0.05] : [0.1, 0.07, 0.05];
+  const pale = black ? [0.12, 0.12, 0.13] : [0.76, 0.72, 0.62], shade = mul3(c, 0.72);
+  const X = (u) => x + dir * u * S, lr = limb(0.055 * S, d);
+  // legs, mid-stride: the far pair a little darker
+  for (const [lx, fx, side] of [[0.62, 0.74, -1], [-0.6, -0.76, -1], [0.56, 0.4, 1], [-0.66, -0.5, 1]]) {
+    strutM(out, X(lx), y0 + 0.62 * S, z + side * 0.13 * S, X((lx + fx) / 2 + 0.03), y0 + 0.32 * S, z + side * 0.13 * S, lr * 1.25, side < 0 ? shade : c, 2, K, B);
+    strutM(out, X((lx + fx) / 2 + 0.03), y0 + 0.32 * S, z + side * 0.13 * S, X(fx), y0 + 0.03, z + side * 0.13 * S, lr, side < 0 ? shade : c, 2, K, B);
+  }
+  // belly first (pale), then the body over it, the shoulders and the haunch
+  if (!black) ell(out, X(0), y0 + 0.6 * S, z + 0.02, 0.48 * S, 0.1 * S, 0.14 * S, dir, 0, 0, pale, K, B);
+  ell(out, X(0), y0 + 0.74 * S, z, 0.5 * S, 0.17 * S, 0.17 * S, dir, 0.03, 0, c, K, B);
+  ell(out, X(0.5), y0 + 0.78 * S, z, 0.24 * S, 0.2 * S, 0.18 * S, dir, 0.1, 0, c, K, B);
+  ell(out, X(-0.52), y0 + 0.76 * S, z, 0.24 * S, 0.19 * S, 0.18 * S, dir, -0.1, 0, c, K, B);
+  // stripes: thin dark bands round the body, closer on the haunch
+  if (!black) for (const u of [0.62, 0.42, 0.24, 0.07, -0.1, -0.27, -0.42, -0.56, -0.68]) {
+    ell(out, X(u + (r() - 0.5) * 0.04), y0 + 0.78 * S, z + 0.03, 0.022 * S, 0.17 * S * (0.75 + 0.3 * r()), 0.17 * S, dir, (r() - 0.5) * 0.5, 0, dark, K, B);
+  }
+  // neck and head, carried low and forward; white muzzle and cheeks, dark ears
+  ell(out, X(0.82), y0 + 0.78 * S, z, 0.2 * S, 0.13 * S, 0.13 * S, dir, -0.05, 0, c, K, B);
+  ell(out, X(1.06), y0 + 0.76 * S, z, 0.15 * S, 0.13 * S, 0.13 * S, dir, 0, 0, c, K, B);
+  ell(out, X(1.18), y0 + 0.71 * S, z + 0.02, 0.07 * S, 0.06 * S, 0.09 * S, dir, 0, 0, pale, K, B);
+  for (const sg of [-1, 1]) ell(out, X(1.0), y0 + 0.9 * S, z + sg * 0.09 * S, 0.035 * S, 0.045 * S, 0.035 * S, 0, 1, 0, dark, K, B);
+  if (!black) for (const u of [0.92, 1.02]) ell(out, X(u), y0 + 0.82 * S, z + 0.03, 0.016 * S, 0.08 * S, 0.12 * S, dir, 0.3, 0, dark, K, B);
+  // the tail: down behind the hocks, then curling up, dark towards the tip
+  strutM(out, X(-0.74), y0 + 0.74 * S, z, X(-1.08), y0 + 0.36 * S, z, lr * 0.9, c, 3, K, B);
+  strutM(out, X(-1.08), y0 + 0.36 * S, z, X(-1.38), y0 + 0.3 * S, z, lr * 0.8, c, 2, K, B);
+  strutM(out, X(-1.38), y0 + 0.3 * S, z, X(-1.52), y0 + 0.5 * S, z, lr * 0.8, dark, 2, K, B);
+}
+// A crocodile: basking on the bank (belly down, legs splayed, sometimes gaping) or lying in the
+// river with only its back, head and eyes above the water. Tagged MOVE.BEAT.
+function crocodile(out, x, y0, d, r, afloat) {
+  const K = KIND.OTHER, S = 1.9, dir = r() < 0.5 ? -1 : 1, z = -d, bend = (r() - 0.5) * 0.5;
+  const c = jitter([0.3, 0.37, 0.17], r, 0.1), dark = mul3(c, 0.68), pale = [0.66, 0.64, 0.42];
+  const X = (u) => x + dir * u * S, Z = (u) => z + bend * u * u * 0.25 * S, lr = limb(0.05 * S, d);
+  // the back's height above the ground or the water (well clear of it: the flat discs of the
+  // surface are sorted with these splats and would otherwise lie over the body)
+  const h = afloat ? 0.2 * S : 0.3 * S;
+  if (!afloat) {
+    ell(out, X(0), y0 + 0.1 * S, Z(0), 0.62 * S, 0.06 * S, 0.2 * S, dir, 0, 0, pale, K, B);          // the pale flank low down
+    for (const [u, sg] of [[0.5, 1], [0.5, -1], [-0.55, 1], [-0.55, -1]]) strutM(out, X(u), y0 + 0.12 * S, Z(u), X(u + 0.12), y0 + 0.02, Z(u) + sg * 0.42 * S, lr, c, 2, K, B);
+  }
+  ell(out, X(0), y0 + h, Z(0) + 0.3, 0.66 * S, afloat ? 0.14 * S : 0.18 * S, 0.24 * S, dir, 0, 0, c, K, B);
+  ell(out, X(0), y0 + h * 0.6, Z(0) + 0.16 * S, 0.6 * S, 0.05 * S, 0.06 * S, dir, 0, 0, pale, K, B);        // the pale edge of the flank towards us
+  // the tail, tapering, a third of the animal; the ridge of scutes along the back
+  strutM(out, X(-0.9), y0 + h * 0.9, Z(-0.9) + 0.3, X(-1.75), y0 + h * 0.6, Z(-1.75) + 0.3, Math.max(0.12 * S, lr), c, 4, K, B);
+  strutM(out, X(-1.75), y0 + h * 0.6, Z(-1.75) + 0.3, X(-2.45), y0 + h * 0.35, Z(-2.45) + 0.3, Math.max(0.06 * S, lr), dark, 3, K, B);
+  for (let u = -0.55; u <= 0.6; u += 0.23) ell(out, X(u), y0 + h + (afloat ? 0.12 : 0.16) * S, Z(u) + 0.3, 0.07 * S, 0.035 * S, 0.06 * S, dir, 0, 0, dark, K, B);
+  // the head: broad at the back, a long snout, eyes and nostrils standing proud
+  const gape = !afloat && r() < 0.4 ? 0.2 : 0;
+  ell(out, X(1.02), y0 + h * 0.95, Z(1.02) + 0.3, 0.26 * S, 0.12 * S, 0.19 * S, dir, 0, 0, c, K, B);
+  if (gape) {
+    ell(out, X(1.5), y0 + h * 0.55, Z(1.5), 0.3 * S, 0.035 * S, 0.1 * S, dir, 0, 0, pale, K, B);           // the lower jaw and the pale mouth
+    ell(out, X(1.46), y0 + h * 0.95 + gape * 0.5 * S, Z(1.46), 0.3 * S, 0.045 * S, 0.1 * S, dir, gape * 1.4, 0, c, K, B);
+  } else { ell(out, X(1.5), y0 + h * 0.85, Z(1.5) + 0.3, 0.32 * S, 0.08 * S, 0.12 * S, dir, 0, 0, c, K, B); ell(out, X(1.5), y0 + h * 0.55, Z(1.5) + 0.07 * S, 0.3 * S, 0.025 * S, 0.03 * S, dir, 0, 0, pale, K, B); }
+  for (const sg of [-1, 1]) ell(out, X(1.0), y0 + h + 0.1 * S, Z(1.0) + sg * 0.09 * S, 0.045 * S, 0.04 * S, 0.04 * S, 1, 0, 0, dark, K, B);
+  if (afloat) out(x, y0 + 0.01, z + 0.25, 2.6 * S, 0.02, 0.5 * S, 0.5, 0.46, 0.34, 0.5, 0, 0, 0, 1, KIND.GROUND);   // the water parting round it
+}
+// The rarer animals: a big cat at the forest edge now and then, crocodiles on and in the river.
+function* rareAnimals(ctx, out, W, X, dLo, dHi) {
+  const log = globalThis.__tropicsLog;                     // for scripts that look for them
+  for (const { i, wx0 } of cellsAround(ctx, 1100, 10)) {
+    const r = makeRng(hashInts(W.ws, 461, i));
+    if (r() > 0.4) continue;
+    const wx = wx0 + 1100 * r(), x = wx - ctx.x0;
+    if (x < 0 || x >= ctx.length) continue;
+    if (xv(X, 'coast', wx) > 0.45) continue;
+    const d = xv(X, 'edge', wx) - 4 - 5 * r();
+    if (d < 34 || d > 130 || d < dLo || d >= dHi) continue;
+    const rn = xv(X, 'river', wx);
+    if (rn && d > rn - 3 && d < rn + xv(X, 'riverW', wx) + 3) continue;      // not in the river
+    bigCat(out, x, W.H(wx, d) - 0.03, d, r);
+    if (log) log.push({ kind: 'cat', wx: Math.round(wx), d: Math.round(d) });
+  }
+  for (const { i, wx0 } of cellsAround(ctx, 90, 6)) {
+    const r = makeRng(hashInts(W.ws, 462, i));
+    if (r() > 0.3) continue;
+    const wx = wx0 + 90 * r(), x = wx - ctx.x0;
+    if (x < 0 || x >= ctx.length) continue;
+    const rn = xv(X, 'river', wx);
+    if (!rn) continue;
+    const rw = xv(X, 'riverW', wx), n = 1 + Math.floor(r() * 3);
+    for (let k = 0; k < n; k++) {
+      const afloat = r() < 0.5, cx = x + (r() - 0.5) * 14;
+      const d = afloat ? rn + rw * (0.12 + 0.45 * r()) : rn - 1.6 - 1.6 * r();
+      if (d < dLo || d >= dHi || d < 31) continue;
+      crocodile(out, cx, afloat ? W.H(ctx.x0 + cx, d) - 0.9 + 0.03 : W.H(ctx.x0 + cx, d) - 0.02, d, r, afloat);
+      if (log) log.push({ kind: afloat ? 'croc in the river' : 'croc on the bank', wx: Math.round(ctx.x0 + cx), d: Math.round(d) });
+    }
+    if (out.due()) yield;
+  }
+}
 // Animals at the forest edge and in the air: troops of monkeys, parrots flying across the clearings.
 function* wildlife(ctx, out, W, X, dLo, dHi) {
   for (const { i, wx0 } of cellsAround(ctx, 150, 10)) {
@@ -2263,6 +2358,7 @@ function* near(ctx0, emit) {
   yield* fields(ctx, out, W, X, 29, hi);
   yield* riverSide(ctx, out, W, X, lo, hi);
   yield* wildlife(ctx, out, W, X, lo, hi);
+  yield* rareAnimals(ctx, out, W, X, lo, hi);
   // level 1
   if ((dz.scale || 0) > 0) yield* tallPalms(ctx, out, W, lo, hi, dz.scale);
   if ((dz.logic || 0) > 0) yield* skyFish(ctx, out, W, X, lo, hi, dz.logic);
