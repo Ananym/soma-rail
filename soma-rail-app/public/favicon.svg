@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Soma Rail</title>
+  <defs><clipPath id="t"><rect x="4" y="4" width="56" height="56" rx="14"/></clipPath></defs>
+  <g clip-path="url(#t)">
+    <rect x="0" y="0" width="64" height="64" fill="#14203a"/>
+    <circle cx="32" cy="18" r="9" fill="#f2b54a"/>
+    <path d="M2 37V33L11 24L17 30L26 21L33 29L41 23L47 29L54 22L62 31V37Z" fill="#33508a"/>
+    <path d="M26 21L29.5 25L26 26.5L23 24.2ZM54 22L57.5 26L54 27L51.4 24.8ZM11 24L13.6 26.7L11 27.6L8.6 26.4Z" fill="#f3e6c8" opacity=".8"/>
+    <path d="M2 37V33Q12 27 22 33Q32 36 42 33Q52 27 62 32V37Z" fill="#3f7f7a"/>
+    <rect x="2" y="36" width="60" height="26" fill="#0f1930"/>
+    <rect x="23" y="41" width="18" height="2" fill="#f3e6c8" opacity=".35"/>
+    <rect x="16.4" y="47.5" width="31.2" height="3.2" fill="#f3e6c8" opacity=".42"/>
+    <rect x="8.4" y="55.5" width="47.2" height="4.5" fill="#f3e6c8" opacity=".5"/>
+    <path d="M28.6 36L8 62H21L31 36ZM35.4 36L56 62H43L33 36Z" fill="#f3e6c8"/>
+  </g>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="none" stroke="#4a6aa3" stroke-width="4"/>
+</svg>
