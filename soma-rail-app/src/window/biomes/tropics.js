@@ -34,7 +34,7 @@ import { hashInts, hashString, makeRng, noise1, noise2 } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, cellsAround, detail, shade, jitter, mul3, mix3, smooth, clamp, lerp, norm3,
-  quatYaw, quatPitch, quatMul, quatXTo, strut, lamp, blob, treeSplats, wires,
+  quatYaw, quatPitch, quatMul, quatXTo, strut, lamp, blob, treeSplats, wires, flightCell, flyBody, flyWing, Q_ID,
 } from './kit.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -1388,35 +1388,31 @@ function* hammock(out, a, b, d, r) {
   if (out.due()) yield;
 }
 // A frigatebird soaring (black, long angled wings, forked tail) or a pelican flying low (heavy body,
-// broad wings, long pale bill). Tagged MOVE.BEAT.
-// Birds on the wing all fly the way the train is going (+x). Nothing in the world moves on its own,
-// so every bird slides back through the window at the same rate: the only reading of that which
-// makes sense is that the train is overtaking them all, and it only works if none faces backwards.
-function* seabird(out, x, y, d, r, type) {
-  const K = KIND.OTHER, dir = 1, z = -d, S = 1.3;
-  r();   // (keeps the random sequence, and so every other bird's place, as it was)
+// broad wings, long pale bill). They fly (MOVE.FLY): `dir` is the way their flight cell goes, from
+// kit flightCell(), and their wings are drawn up, to be flapped by the shader.
+function* seabird(out, x, y, d, r, type, dir) {
+  const K = KIND.OTHER, z = -d, S = 1.3, qd = Q_ID;
   if (type === 'frigate') {
     const c = [0.08, 0.08, 0.09];
-    ell(out, x, y, z, 0.45 * S, 0.1 * S, 0.1 * S, dir, 0, 0, c, K, B);
+    flyBody(out, x, y, z, 0.45 * S, 0.1 * S, c, qd, K);
     for (const sg of [-1, 1]) {
       const ix = x - dir * 0.1, iz = z + sg * 0.75 * S, ox = x - dir * 0.6 * S, oz = z + sg * 1.6 * S;
-      strutM(out, x, y, z, ix, y + 0.25 * S, iz, limb(0.08, d), c, 2, K, B);
-      strutM(out, ix, y + 0.25 * S, iz, ox, y - 0.05, oz, limb(0.06, d), c, 2, K, B);
-      strutM(out, x - dir * 0.4 * S, y, z, x - dir * 1.0 * S, y - 0.05, z + sg * 0.18, limb(0.025, d), c, 1, K, B);
+      flyWing(out, x, y, z, ix, y + 0.3 * S, iz, limb(0.08, d), c, 2, y, K);
+      flyWing(out, ix, y + 0.3 * S, iz, ox, y + 0.12 * S, oz, limb(0.06, d), c, 2, y, K);
+      flyBody(out, x - dir * 0.7 * S, y - 0.02, z + sg * 0.09, 0.3 * S, limb(0.025, d), c, qd, K);   // the forked tail
     }
-    // seen from the side the wings would vanish: a little dihedral lifts them into view
-    ell(out, x + dir * 0.45 * S, y + 0.02, z, 0.15 * S, 0.05, 0.05, dir, 0, 0, [0.5, 0.48, 0.46], K, B);
+    flyBody(out, x + dir * 0.45 * S, y + 0.02, z, 0.15 * S, 0.05, [0.5, 0.48, 0.46], qd, K);
   } else {
     const c = [0.6, 0.58, 0.54], w = [0.4, 0.38, 0.35];
-    ell(out, x, y, z, 0.55 * S, 0.22 * S, 0.22 * S, dir, 0, 0, c, K, B);
-    ell(out, x + dir * 0.55 * S, y + 0.1 * S, z, 0.14 * S, 0.12 * S, 0.12 * S, 0, 1, 0, [0.72, 0.7, 0.62], K, B);
-    ell(out, x + dir * 0.95 * S, y + 0.02 * S, z, 0.36 * S, 0.06 * S, 0.06 * S, dir, -0.25, 0, [0.75, 0.6, 0.28], K, B);
-    const flap = r() < 0.5 ? 0.35 : -0.2;
+    flyBody(out, x, y, z, 0.55 * S, 0.22 * S, c, qd, K);
+    flyBody(out, x + dir * 0.55 * S, y + 0.1 * S, z, 0.14 * S, 0.12 * S, [0.72, 0.7, 0.62], qd, K);
+    flyBody(out, x + dir * 0.95 * S, y + 0.02 * S, z, 0.36 * S, 0.06 * S, [0.75, 0.6, 0.28], qd, K);
     for (const sg of [-1, 1]) {
-      strutM(out, x, y + 0.05, z, x - dir * 0.1, y + flap * S, z + sg * 1.2 * S, limb(0.14, d), w, 2, K, B);
-      strutM(out, x - dir * 0.1, y + flap * S, z + sg * 1.2 * S, x - dir * 0.3, y + flap * 0.4 * S, z + sg * 2.1 * S, limb(0.1, d), mul3(w, 0.6), 2, K, B);
+      flyWing(out, x, y + 0.05, z, x - dir * 0.1, y + 0.4 * S, z + sg * 1.2 * S, limb(0.14, d), w, 2, y + 0.05, K);
+      flyWing(out, x - dir * 0.1, y + 0.4 * S, z + sg * 1.2 * S, x - dir * 0.3, y + 0.55 * S, z + sg * 2.1 * S, limb(0.1, d), mul3(w, 0.6), 2, y + 0.05, K);
     }
   }
+  void r;
 }
 // A water buffalo: a heavy dark body on four legs, head low, swept-back horns.
 function* buffalo(out, x, y0, d, r, wet) {
@@ -1450,15 +1446,13 @@ function monkey(out, x, y0, d, r) {
   strutM(out, x - dir * 0.55 * S, y0 + 0.08 * S, z, x - dir * 0.7 * S, y0 + 0.4 * S, z, limb(0.025, d), c, 2, K, B);
   strutM(out, x + dir * 0.1 * S, y0 + 0.35 * S, z, x + dir * 0.2 * S, y0 + 0.05, z, limb(0.03, d), c, 1, K, B);
 }
-// A parrot (macaw) in flight: bright body, long tail, wings up or down.
-function parrot(out, x, y, d, r) {
-  const K = KIND.OTHER, S = 1.3, dir = 1, z = -d;
-  r();   // (as for seabirds: all fly the train's way)
+// A parrot (macaw) in flight: bright body, long tail, wings up (the shader flaps them). MOVE.FLY.
+function parrot(out, x, y, d, r, dir) {
+  const K = KIND.OTHER, S = 1.3, z = -d;
   const pal = [[[0.75, 0.1, 0.06], [0.15, 0.3, 0.7]], [[0.2, 0.55, 0.12], [0.75, 0.55, 0.06]], [[0.15, 0.35, 0.72], [0.8, 0.62, 0.1]]][Math.floor(r() * 3)];
-  ell(out, x, y, z, 0.25 * S, 0.08 * S, 0.08 * S, dir, 0, 0, pal[0], K, B);
-  strutM(out, x - dir * 0.2 * S, y, z, x - dir * 0.75 * S, y - 0.12, z, limb(0.04, d), pal[0], 2, K, B);
-  const up = r() < 0.5 ? 0.35 : -0.2;
-  for (const sg of [-1, 1]) strutM(out, x, y, z, x - dir * 0.15 * S, y + up * S, z + sg * 0.55 * S, limb(0.07, d), pal[1], 2, K, B);
+  flyBody(out, x, y, z, 0.25 * S, 0.08 * S, pal[0], Q_ID, K);
+  flyBody(out, x - dir * 0.5 * S, y - 0.06, z, 0.3 * S, limb(0.04, d), pal[0], Q_ID, K);       // the long tail
+  for (const sg of [-1, 1]) flyWing(out, x, y, z, x - dir * 0.15 * S, y + 0.4 * S, z + sg * 0.55 * S, limb(0.07, d), pal[1], 2, y, K);
 }
 // A market stall: a table of fruit under a striped awning on four poles, a vendor and a customer.
 function* marketStall(ctx, out, W, x, d, r) {
@@ -1658,20 +1652,22 @@ function* beachLife(ctx, out, W, X, dLo, dHi, night) {
     else yield* fishingBoat(ctx, out, x, SEA + air, d, r, night, air ? { kind: KIND.SURREAL } : {});
   }
   // birds: frigatebirds soaring high, pelicans in a line low over the water
-  for (const { i, wx0 } of cellsAround(ctx, 130, 10)) {
+  for (const { i, wx0 } of cellsAround(ctx, 130, 40)) {
     const r = makeRng(hashInts(W.ws, 414, i));
     if (r() > 0.5) continue;
-    const wx = wx0 + 130 * r(), x = wx - ctx.x0;
-    if (x < -10 || x > ctx.length + 10) continue;
+    const fc = flightCell(wx0 + 130 * r());                 // each flock in its own flight cell
+    const wx = fc.wx, x = wx - ctx.x0;
+    if (x < -40 || x > ctx.length + 40) continue;
     const cw = Math.min(ctx.x0 + ctx.length, Math.max(ctx.x0, wx));
     if (xv(X, 'coast', cw) < 0.5) continue;
     const sd = xv(X, 'shore', cw);
     if (r() < 0.5) {
       const n = 1 + Math.floor(r() * 3);
-      for (let k = 0; k < n; k++) { const d = 60 + 150 * r(); if (d >= dLo && d < dHi) yield* seabird(out, x + (r() - 0.5) * 30, 20 + 30 * r(), d, r, 'frigate'); }
+      for (let k = 0; k < n; k++) { const d = 60 + 110 * r(); if (d >= dLo && d < dHi) yield* seabird(out, x + (r() - 0.5) * 18, 20 + 30 * r(), d, r, 'frigate', fc.dir); }
     } else {
-      const n = 3 + Math.floor(r() * 4), d = sd + 20 + 120 * r(), y = SEA + 3 + 3 * r();
-      if (d >= dLo && d < dHi) for (let k = 0; k < n; k++) yield* seabird(out, x + k * 3.2, y + 0.3 * k, d + k * 0.8, r, 'pelican');
+      const n = 3 + Math.floor(r() * 4), d = Math.min(150, sd + 20 + 120 * r()), y = SEA + 3 + 3 * r();
+      // a line astern, the leader in front
+      if (d >= dLo && d < dHi) for (let k = 0; k < n; k++) yield* seabird(out, x + fc.dir * (8 - k * 3.1), y + 0.3 * k, d + k * 0.8, r, 'pelican', fc.dir);
     }
   }
 }
@@ -1954,10 +1950,10 @@ function* rareAnimals(ctx, out, W, X, dLo, dHi) {
 }
 // Animals at the forest edge and in the air: troops of monkeys, parrots flying across the clearings.
 function* wildlife(ctx, out, W, X, dLo, dHi) {
-  for (const { i, wx0 } of cellsAround(ctx, 150, 10)) {
+  for (const { i, wx0 } of cellsAround(ctx, 150, 30)) {
     const r = makeRng(hashInts(W.ws, 441, i));
     const wx = wx0 + 150 * r(), x = wx - ctx.x0;
-    if (x < -10 || x > ctx.length + 10) continue;
+    if (x < -30 || x > ctx.length + 30) continue;
     const cw = Math.min(ctx.x0 + ctx.length, Math.max(ctx.x0, wx));
     if (xv(X, 'coast', cw) > 0.45) continue;
     const edge = xv(X, 'edge', cw);
@@ -1967,7 +1963,7 @@ function* wildlife(ctx, out, W, X, dLo, dHi) {
     }
     if (r() < 0.45) {
       const d = 40 + Math.max(10, Math.min(edge, 150) - 40) * r();
-      if (d >= dLo && d < dHi) { const n = 2 + Math.floor(r() * 4), y = W.H(wx, d) + 9 + 10 * r(); for (let k = 0; k < n; k++) parrot(out, x + k * 1.8 + r(), y + (r() - 0.5) * 1.5, d + (r() - 0.5) * 3, r); }
+      if (d >= dLo && d < dHi) { const n = 2 + Math.floor(r() * 4), y = W.H(wx, d) + 9 + 10 * r(); const fc = flightCell(wx); for (let k = 0; k < n; k++) parrot(out, fc.wx - ctx.x0 + fc.dir * (4 - k * 1.8 - r()), y + (r() - 0.5) * 1.5, d + (r() - 0.5) * 3, r, fc.dir); }
     }
     if (out.due()) yield;
   }

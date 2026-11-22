@@ -24,6 +24,7 @@ export const PATCH_UNIFORMS = () => ({
   uFlowWith: { value: null },       // THREE.Vector3: per-lane pattern offsets (m) for traffic going the train's way
   uFlowAgainst: { value: null },    // ... and for traffic coming the other way
   uFall: { value: null },           // THREE.Vector2: metres fallen by snow (x) and rain (y), wrapped at 16
+  uFly: { value: 0 },               // metres travelled, wrapped at 2048 flight cells of 24 m
   uMoveDebug: { value: 0 },         // 1 paints each motion class a flat colour, to check the tagging
 });
 
@@ -49,13 +50,15 @@ uniform float uTravel;
 uniform float uMoveDebug;
 uniform vec3 uFlowWith;
 uniform vec3 uFlowAgainst;
-uniform vec2 uFall;`,
+uniform vec2 uFall;
+uniform float uFly;`,
   },
   {
     // scatter and breathe, before the splat is moved into view space
     anchor: 'rgba.rgb = max(rgba.rgb, vec3(0.0));',
     insert: `
     // Motion class: three bits carried in the lowest bit of each colour channel (see tagLast below).
+    float mvBlur = 1.0;   // how much of the world's motion blur this splat takes
     ivec3 mvBits = ivec3(floor(rgba.rgb * 255.0 + 0.5)) & 1;
     int mv = mvBits.r | (mvBits.g << 1) | (mvBits.b << 2);
     if (uMove > 0.0 && mv != 0) {
@@ -73,14 +76,36 @@ uniform vec2 uFall;`,
             center.x += amp * 1.1 * sin(ph);
             center.y += amp * 0.3 * sin(1.7 * ph + 1.3);
             scales.x *= 1.0 + 0.35 * min(uMove, 1.0) * gust * sin(1.3 * ph + 2.0);
+        } else if (mv == 4 && max(rgba.r, max(rgba.g, rgba.b)) < 0.86) {
+            // Flight (class 4 on a splat that is not a light: see kit.js flightCell, flyBody, flyWing).
+            // A bird, or a flock, lives in one 24 m cell of the line and flies along it: with the
+            // train in even cells, against it in odd ones. Its place is a matter of where the train
+            // is, not of the clock: level with its cell it is at home, and before and after it is
+            // carried a fraction k of the way the train has still to come or has gone, which is
+            // exactly a bird flying at k times the train's speed. So it slides back through the
+            // window more slowly than the land (or faster, flying the other way), never jumps, and
+            // stops when the train does. Its wings have two frames: a wing piece carries its height
+            // above the wing root in its thin axis (a fiftieth of it), and in bursts the pieces drop
+            // below the root and come back.
+            float cellI = floor((center.x + uFly) / 24.0 + 0.5);
+            float home = cellI * 24.0 - uFly;                           // the cell's middle, from the eye
+            float hf = fract(sin(mod(cellI, 2048.0) * 12.9898) * 43758.5453);   // the same cell either side of uFly's wrap
+            float kf = (mod(cellI, 2.0) < 0.5 ? 1.0 : -1.0) * (0.24 + 0.12 * hf) * min(uMove, 1.0);
+            center.x -= kf * home;
+            mvBlur = 1.0 - kf;
+            float lift = scales.z * 50.0;
+            scales.z = scales.y;
+            float ph = 6.2832 * hf;
+            float flap = step(0.15, sin(0.9 * uMoveT + ph)) * step(0.0, sin(11.0 * uMoveT + 3.0 * ph));
+            center.y -= 1.7 * lift * flap * min(uMove, 1.0);
         } else if (mv <= 4 && max(rgba.r, max(rgba.g, rgba.b)) < 0.86) {
-            // Spin (classes 2 to 4 on a splat that is not a light: see kit.js blade()). The splat is a
+            // Spin (classes 2 and 3 on a splat that is not a light: see kit.js blade()). The splat is a
             // piece of a blade on a rotor that faces the track. Its long axis points away from the
             // hub, and its thin axis carries the distance to the hub (a hundredth of it), so the hub
             // can be found again here; the piece is carried round it and turned with it.
             vec3 ax = quatVec(quaternion, vec3(1.0, 0.0, 0.0));
             vec3 off = ax * scales.z * 100.0;
-            float ang = min(uMove, 1.0) * uMoveT * (mv == 2 ? 1.4 : (mv == 3 ? 2.6 : 0.9));
+            float ang = min(uMove, 1.0) * uMoveT * (mv == 2 ? 1.4 : 2.6);
             float cs = cos(ang), sn = sin(ang);
             center += vec3(cs * off.x - sn * off.y, sn * off.x + cs * off.y, off.z) - off;
             quaternion = quatQuat(vec4(0.0, 0.0, sin(0.5 * ang), cos(0.5 * ang)), quaternion);
@@ -195,7 +220,7 @@ uniform vec2 uFall;`,
     insert: `
     float adjNoMotion = sqrt(max(0.0, detOrig / det));
     {
-        float mpx = focal.x * uMotionMetres / max(-viewCenter.z, 0.05);
+        float mpx = focal.x * uMotionMetres * abs(mvBlur) / max(-viewCenter.z, 0.05);
         a += mpx * mpx / 12.0;
         det = a * d - b * b;
     }`,

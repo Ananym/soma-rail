@@ -59,7 +59,10 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             Must be KIND.LIGHT, about 1.2 m apart, with no gaps (a gap swallows vehicles).
 //   SPIN_n    (the same numbers as TRAFFIC_n, on a splat that is NOT a light) a piece of a blade on
 //             a rotor facing the track: it turns about the rotor's hub. Only through blade() below.
-//             SPIN: a big wind turbine (13 turns a minute); SPIN_FAST: a wind pump; SPIN_SLOW.
+//             SPIN: a big wind turbine (13 turns a minute); SPIN_FAST: a wind pump.
+//   FLY       (the same number as TRAFFIC_2, on a splat that is NOT a light) a flying thing: it moves
+//             along the line relative to the land and flaps. Only through flightCell(), flyBody()
+//             and flyWing() below.
 //   VAPOUR    billows slowly (plumes, mist, cloud streamers, smoke)
 //   BEAT      does not move, but swells and brightens on each beat of the music. By default
 //             everything above eye level answers the beat; a biome that sets beatKinds (a list
@@ -70,7 +73,7 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
 //             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, SPIN_SLOW: 4, VAPOUR: 5, BEAT: 6, FALL: 7 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7 };
 
 // Direction toward the sun for baked shading: high, to the left (-x) and on the camera's side
 // (+z), so the faces the window sees are lit and tops are brightest.
@@ -140,6 +143,31 @@ export function blade(out, hx, hy, z, len, angle, r0, r1, c, n = 3, kind = KIND.
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n, rho = len * t;
     out(hx + ca * rho, hy + sa * rho, z, (len / n) * 0.62, r0 + (r1 - r0) * t, rho / 100, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, 0, 0, qz, qw, kind, move);
+  }
+}
+// Things that fly (MOVE.FLY). A bird or a flock lives in one 24 m cell of the line: flightCell(wx)
+// gives the cell's middle (stand the bird or the flock's middle there, everything within 10 m of
+// it) and `dir`, the way everything in that cell flies and so must face: +1 with the train, -1
+// against it. The shader then carries the cell's splats along the line at about a third of the
+// train's speed, so they pass more slowly than the land (or faster, flying the other way).
+export const FLY_CELL = 24;
+export function flightCell(wx) {
+  const c = Math.round(wx / FLY_CELL);
+  return { wx: c * FLY_CELL, dir: (((c % 2) + 2) % 2) === 0 ? 1 : -1 };
+}
+// A piece of a flying thing's body: an ellipsoid sx long (along x) and sy high. Keep colours natural.
+export function flyBody(out, x, y, z, sx, sy, c, q = Q_ID, kind = KIND.OTHER) {
+  out(x, y, z, sx, sy, 0.0004, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.FLY);
+}
+// A piece of wing from a to b, r thick, drawn with the wings UP: rootY is the height of the wing
+// root on the body. In bursts the shader drops each piece as far below the root as it stands above
+// it (the second frame of the flap) and brings it back.
+export function flyWing(out, ax, ay, az, bx, by, bz, r, c, n, rootY, kind = KIND.OTHER) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 1e-6;
+  const q = quatXTo(dx / len, dy / len, dz / len), sl = (len / n) * 0.5;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, y = ay + dy * t;
+    out(ax + dx * t, y, az + dz * t, sl, r, Math.max(0.02, y - rootY) / 50, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.FLY);
   }
 }
 export function rotY(x, z, a) { const c = Math.cos(a), s = Math.sin(a); return [c * x + s * z, -s * x + c * z]; }
