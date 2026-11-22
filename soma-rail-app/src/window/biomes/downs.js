@@ -15,7 +15,7 @@ import { hashInts, hashString, makeRng, noise1, noise2 } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, strip, blob, broadleaf, conifer,
-  bush, hedge, house, treeSplats, church, overheadLine, fence, floatingIsland, monolith, stick, jitter, mul3, mix3, shade, smooth, clamp, lerp,
+  bush, hedge, house, treeSplats, church, overheadLine, fence, floatingIsland, monolith, stick, jitter, mul3, mix3, shade, smooth, clamp, lerp, MOVE,
 } from './kit.js';
 
 const PAL = {
@@ -312,11 +312,21 @@ function* fieldContents(ctx, out, L, dLo, dHi, margin, opts = {}) {
           const wx = fx + rng.gauss() * 14, d = fd + rng.gauss() * 6;
           if (d < dLo || d >= dHi) continue;
           const x = wx - ctx.x0, y = groundY(ctx, x, d);
-          const sheep = f.flock === 1;
+          // An animal: body, head (down to graze, or up), four legs where they can be seen. Drawn
+          // a third over life size so a flock reads from the train, and it answers the beat.
+          const sheep = f.flock === 1, B = MOVE.BEAT, S = 1.35;
           const c = sheep ? [0.74, 0.72, 0.64] : rng() < 0.5 ? [0.12, 0.1, 0.09] : [0.38, 0.24, 0.15];
-          const bl = sheep ? 0.55 : 1.0, bh = sheep ? 0.35 : 0.6;
-          out(x, y + bh * 1.3, -d, bl, bh, bh * 0.9, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
-          out(x + (rng() < 0.5 ? -1 : 1) * bl * 1.1, y + bh * 1.5, -d, bh * 0.5, bh * 0.45, bh * 0.45, c[0] * 0.5, c[1] * 0.5, c[2] * 0.5, 1, 0, 0, 0, 1, KIND.OTHER);
+          const bl = (sheep ? 0.55 : 1.0) * S, bh = (sheep ? 0.36 : 0.58) * S, leg = (sheep ? 0.36 : 0.68) * S;
+          const dir = rng() < 0.5 ? -1 : 1, grazing = rng() < 0.6;
+          const hc = sheep ? [0.16, 0.14, 0.13] : [c[0] * 0.8, c[1] * 0.8, c[2] * 0.8];
+          out(x, y + leg + bh * 0.85, -d, bl, bh, bh * 0.9, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER, B);
+          out(x + dir * bl * 1.1, y + leg + (grazing ? -0.15 * leg : bh * 1.5), -d, bh * 0.55, bh * 0.45, bh * 0.42, hc[0], hc[1], hc[2], 1, 0, 0, 0, 1, KIND.OTHER, B);
+          if (!sheep && rng() < 0.4) out(x - dir * bl * 0.2, y + leg + bh * 0.95, -(d - bh * 0.5), bl * 0.45, bh * 0.6, bh * 0.4, 0.76, 0.75, 0.72, 1, 0, 0, 0, 1, KIND.OTHER, B);   // a white flank
+          if (d < 260) {
+            const lr = Math.max(sheep ? 0.05 : 0.08, 0.0012 * d);
+            for (const lx of [-0.62, 0.62]) for (const lz of [-0.45, 0.45])
+              out(x + lx * bl, y + leg * 0.5, -(d + lz * bh), lr, leg * 0.55, lr, hc[0] * 0.8, hc[1] * 0.8, hc[2] * 0.8, 1, 0, 0, 0, 1, KIND.OTHER, B);
+          }
         }
         if (out.due()) yield;
       }

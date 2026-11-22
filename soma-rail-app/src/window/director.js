@@ -54,7 +54,7 @@ export function createDirector({ params, reducedMotion = false }) {
   };
   const listeners = { swap: [] };
   const recent = [];   // the kinds of scenery shown lately, newest last (see chooseBiome)
-  const seen = (b) => { if (recent[recent.length - 1] !== b) { recent.push(b); if (recent.length > 4) recent.shift(); } };
+  const seen = (b) => { if (recent[recent.length - 1] !== b) { recent.push(b); if (recent.length > 6) recent.shift(); } };
   let hourDir = 1;   // which way the clock runs for a biome that holds it inside its hours
 
   // Each change of scenery arrives at a time of day drawn from these slots, so journeys spend real
@@ -82,33 +82,47 @@ export function createDirector({ params, reducedMotion = false }) {
   placeHour();
   seen(state.biome);
 
-  // Which scenery next. The channel's profile lists the kinds that suit its music, best fit first
-  // (weights 3, 2, 1, 1). Kinds close in character to those (NEIGHBOURS) join at weight 1, so that
-  // even a channel with one kind has somewhere else to go. With `fresh`, anything seen in the last
-  // few changes is left out, as far as the list allows: the last three, else two, else one.
+  // Which scenery next.
+  // Where a channel starts: its profile lists the kinds that suit its music, best fit first
+  // (weights 3, 2, 1, 1), and kinds close in character to those (NEIGHBOURS) join at weight 1.
+  // A change of track (`fresh`) is different: every kind of scenery is as likely as any other, on
+  // every channel, so the whole list can be explored wherever you listen. Only what was seen lately
+  // is held back: the last three kinds are left out altogether (as far as the list allows: else
+  // two, else one), and the three before those come back gradually, at a quarter, a half and three
+  // quarters of their weight. So the same country does not return for at least three changes and
+  // is unlikely for six.
   function chooseBiome(seed, fresh = false) {
     if (params.biome && BIOMES[params.biome]) return params.biome;
+    const all = Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1);
     const pool = (state.profile && state.profile.biomes && state.profile.biomes.filter((b) => BIOMES[b])) || [];
     let names, weights;
     if (pool.length) {
       names = [...pool]; weights = pool.map((_, i) => Math.max(1, 3 - i));
       for (const b of pool) for (const n of NEIGHBOURS[b] || []) if (BIOMES[n] && !names.includes(n)) { names.push(n); weights.push(1); }
     } else {
-      names = Object.keys(BIOMES).filter((b) => b !== 'placeholder' || Object.keys(BIOMES).length === 1);
-      weights = names.map(() => 1);
+      names = [...all]; weights = names.map(() => 1);
     }
-    let keep = names.map(() => true);
-    if (fresh) {
-      for (let back = Math.min(3, recent.length); back >= 1; back--) {
-        const avoid = recent.slice(-back);
-        const k = names.map((n) => !avoid.includes(n));
-        if (k.some(Boolean)) { keep = k; break; }
-      }
+    if (!fresh) {
+      const total = weights.reduce((x, w) => x + w, 0);
+      let pick = seed % total;
+      for (let i = 0; i < names.length; i++) { if (pick < weights[i]) return names[i]; pick -= weights[i]; }
+      return names[0];
     }
-    const total = weights.reduce((x, w, i) => x + (keep[i] ? w : 0), 0);
-    let pick = seed % total;
-    for (let i = 0; i < names.length; i++) { if (!keep[i]) continue; if (pick < weights[i]) return names[i]; pick -= weights[i]; }
-    return names[0];
+    names = [...all]; weights = names.map(() => 1);
+    let w = weights;
+    for (let out = Math.min(3, recent.length); out >= 0; out--) {
+      w = names.map((n, i) => {
+        const back = recent.length - recent.lastIndexOf(n);      // 1 = the scenery outside now; past the list = not seen lately
+        if (recent.lastIndexOf(n) < 0) return weights[i];
+        if (back <= out) return 0;
+        return weights[i] * Math.min(1, (back - out) * 0.25);
+      });
+      if (w.some((x) => x > 0)) break;
+    }
+    const total = w.reduce((x, y) => x + y, 0);
+    let pick = (((seed >>> 0) % 1000003) / 1000003) * total;
+    for (let i = 0; i < names.length; i++) { if (w[i] <= 0) continue; if (pick < w[i]) return names[i]; pick -= w[i]; }
+    return names[w.findIndex((x) => x > 0)];
   }
 
   // Ask for a change of scenery. It happens out of sight, inside a tunnel.

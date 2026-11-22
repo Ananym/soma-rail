@@ -406,7 +406,11 @@ export function* broadleaf(ctx, out, x, d, opts = {}) {
   const kind = opts.kind != null ? opts.kind : KIND.TREE;
   const trunkH = H - W * 0.55;
   const trunkR = Math.max(0.12, H * 0.022, 0.0005 * d);   // never thinner than the GPU can draw at this distance
-  if (n >= 12) yield* stick(ctx, out, x, y0, d, trunkH, trunkR, { color: opts.trunk || [0.2, 0.17, 0.13], n: Math.max(1, Math.round(n * 0.05)), kind });
+  // The trunk's pieces are soft-ended and each reaches well past its own length, so a trunk drawn
+  // as one or two long pieces pokes out of the top of the crown as a thin spike. Enough pieces that
+  // none is longer than 0.6 of the crown's width keeps its top inside the leaves.
+  const trunkN = Math.max(1, Math.round(n * 0.05), Math.ceil(trunkH / Math.max(0.5, 0.6 * W)));
+  if (n >= 12) yield* stick(ctx, out, x, y0, d, trunkH, trunkR, { color: opts.trunk || [0.2, 0.17, 0.13], n: trunkN, kind });
   const lumps = n < 20 ? 1 : 3 + Math.floor(rng() * 3);
   const cy = y0 + H - W * 0.5 * (opts.squash || 0.85);
   const leafN = n - (n >= 12 ? Math.max(1, Math.round(n * 0.05)) : 0);

@@ -90,7 +90,11 @@ uniform float uFly;`,
             float cellI = floor((center.x + uFly) / 24.0 + 0.5);
             float home = cellI * 24.0 - uFly;                           // the cell's middle, from the eye
             float hf = fract(sin(mod(cellI, 2048.0) * 12.9898) * 43758.5453);   // the same cell either side of uFly's wrap
-            float kf = (mod(cellI, 2.0) < 0.5 ? 1.0 : -1.0) * (0.24 + 0.12 * hf) * min(uMove, 1.0);
+            // with the train: 0.45 to 0.58 of its speed, so the bird drifts back at about half the land's
+            // rate; against it: 0.7 to 1.2, so it whips past at about twice. (A bird going the train's way
+            // is in view for longer than its chunk of the world exists unless it stays within
+            // 324 * (1 - k) metres of the track: 136 m at the fastest. The flocks keep inside 120.)
+            float kf = (mod(cellI, 2.0) < 0.5 ? 0.45 + 0.13 * hf : -(0.7 + 0.5 * hf)) * min(uMove, 1.0);
             center.x -= kf * home;
             mvBlur = 1.0 - kf;
             float lift = scales.z * 50.0;
@@ -184,13 +188,15 @@ uniform float uFly;`,
     // breath to everything. The treble makes raised things shimmer and lights twinkle (see below).
     // A biome whose high ground is the scenery itself (limestone towers, dunes) turns the raised rule
     // off and names what should answer the beat instead (class 6, see kit.js MOVE.BEAT and a biome's
-    // beatKinds). A swell alone hardly shows on a mass of overlapping splats, so the chosen things
-    // also brighten for the length of the beat: still below the level that would make them lights.
+    // beatKinds). The chosen things swell by a good deal, since a small swell hardly shows on a mass
+    // of overlapping splats, and rise by a part of their own height so that the growth goes upward
+    // and not into the ground. They brighten only a little: a flash reads as a light, not as life.
     float raised = uBeatRaised * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
     float picked = mv == 6 ? 1.0 : 0.0;
-    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.16 * picked);
-    float shimmer = 1.0 + 0.38 * uBeat * picked * (1.0 - isLight);
+    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.42 * picked * (1.0 - isLight));
+    center.y += 0.3 * scales.y * uBeat * picked * (1.0 - isLight);
+    float shimmer = 1.0 + 0.1 * uBeat * picked * (1.0 - isLight);
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
         shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, picked) + 0.6 * isLight);

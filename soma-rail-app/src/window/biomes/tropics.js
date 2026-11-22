@@ -1654,7 +1654,7 @@ function* beachLife(ctx, out, W, X, dLo, dHi, night) {
   // birds: frigatebirds soaring high, pelicans in a line low over the water
   for (const { i, wx0 } of cellsAround(ctx, 130, 40)) {
     const r = makeRng(hashInts(W.ws, 414, i));
-    if (r() > 0.5) continue;
+    if (r() > 0.85) continue;
     const fc = flightCell(wx0 + 130 * r());                 // each flock in its own flight cell
     const wx = fc.wx, x = wx - ctx.x0;
     if (x < -40 || x > ctx.length + 40) continue;
@@ -1663,9 +1663,10 @@ function* beachLife(ctx, out, W, X, dLo, dHi, night) {
     const sd = xv(X, 'shore', cw);
     if (r() < 0.5) {
       const n = 1 + Math.floor(r() * 3);
-      for (let k = 0; k < n; k++) { const d = 60 + 110 * r(); if (d >= dLo && d < dHi) yield* seabird(out, x + (r() - 0.5) * 18, 20 + 30 * r(), d, r, 'frigate', fc.dir); }
+      // (birds on the wing keep within 120 m of the track: see the flight class in sparkPatch.js)
+      for (let k = 0; k < n; k++) { const d = 55 + 65 * r(); if (d >= dLo && d < dHi) yield* seabird(out, x + (r() - 0.5) * 18, Math.min(20 + 30 * r(), 2 + 0.38 * d), d, r, 'frigate', fc.dir); }
     } else {
-      const n = 3 + Math.floor(r() * 4), d = Math.min(150, sd + 20 + 120 * r()), y = SEA + 3 + 3 * r();
+      const n = 3 + Math.floor(r() * 4), d = Math.min(118, sd + 15 + 80 * r()), y = SEA + 3 + 3 * r();
       // a line astern, the leader in front
       if (d >= dLo && d < dHi) for (let k = 0; k < n; k++) yield* seabird(out, x + fc.dir * (8 - k * 3.1), y + 0.3 * k, d + k * 0.8, r, 'pelican', fc.dir);
     }
@@ -1961,9 +1962,9 @@ function* wildlife(ctx, out, W, X, dLo, dHi) {
       const d = edge - 3 - 3 * r();
       if (d >= dLo && d < dHi && d > 30) { const n = 3 + Math.floor(r() * 4); for (let k = 0; k < n; k++) monkey(out, x + (r() - 0.5) * 12, W.H(wx, d) - 0.05, d + (r() - 0.5) * 3, r); }
     }
-    if (r() < 0.45) {
+    if (r() < 0.8) {
       // in the open, well clear of the forest wall, whose crowns would swallow them
-      const d = 33 + Math.max(0, Math.min(edge, 150) - 45) * r();
+      const d = Math.min(118, 33 + Math.max(0, Math.min(edge, 150) - 45) * r());
       if (edge >= 45 && d >= dLo && d < dHi) { const n = 2 + Math.floor(r() * 4), y = W.H(wx, d) + 7 + 9 * r(); const fc = flightCell(wx); for (let k = 0; k < n; k++) parrot(out, fc.wx - ctx.x0 + fc.dir * (4 - k * 1.8 - r()), y + (r() - 0.5) * 1.5, d + (r() - 0.5) * 3, r, fc.dir); }
     }
     if (out.due()) yield;
