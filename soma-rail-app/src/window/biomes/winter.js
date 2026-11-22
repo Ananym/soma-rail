@@ -203,7 +203,7 @@ function cache(W, type, i, make) {
   if (v === undefined) { v = make(); if (W.misc.size > 60000) W.misc.clear(); W.misc.set(key, v); }
   return v;
 }
-const ST = { LAKE: 1, POND: 2, SLED: 3, SKI: 4, VILLAGE: 5, FARM: 6, BROOK: 7, HALT: 8, DEER: 9, SLEIGH: 10, SNOWMAN: 11, HEDGE: 12, MISC: 13 };
+const ST = { LAKE: 1, POND: 2, SLED: 3, SKI: 4, VILLAGE: 5, FARM: 6, BROOK: 7, HALT: 8, DEER: 9, SLEIGH: 10, SNOWMAN: 11, HEDGE: 12, MISC: 13, HERD: 14 };
 
 // --- the frozen river: a broad band in stretches; elsewhere it swings far off ---
 function riverN(W, wx) {
@@ -1972,6 +1972,42 @@ function* deer(ctx, out, W, dLo, dHi) {
   }
 }
 
+// A reindeer herd crossing open snow: fifteen to thirty-five animals strung out along the way they
+// are going (the train's way or against it, the whole herd alike), most walking, some stopped to
+// dig for lichen, calves among them, the antlers a thicket against the white.
+const RHCELL = 1500;
+function reindeerHerd(W, i) {
+  return cache(W, ST.HERD, i, () => {
+    const r = makeRng(hashInts(W.ws, 565, i));
+    if (r() > 0.6) return null;
+    const wx = (i + 0.15 + 0.7 * r()) * RHCELL, d = 58 + 70 * r();
+    if (surface(W, wx, d).t !== T.SNOW) return null;
+    const n = 15 + Math.floor(r() * 21), dir = r() < 0.5 ? 0 : Math.PI, len = 26 + 1.6 * n, slant = (r() - 0.5) * 0.5;
+    const list = [];
+    for (let k = 0; k < n; k++) {
+      // a long, loose column, densest at the front
+      const u = Math.pow(r(), 1.4) - 0.35, v = (r() - 0.5) * (9 + 0.25 * n) * (1 - 0.5 * Math.abs(u));
+      const ax = wx + (dir ? -1 : 1) * u * len, ad = d + v + slant * u * len;
+      const calf = r() < 0.2;
+      list.push({ wx: ax, d: ad, yaw: dir + (r() - 0.5) * 0.5, k: FIG * (calf ? 0.62 : 0.9 + 0.2 * r()), graze: r() < 0.3, ant: !calf && r() < 0.85, col: Math.floor(r() * 3), ph: r() });
+    }
+    return { i, wx, d, n, list };
+  });
+}
+function* herds(ctx, out, W, dLo, dHi) {
+  const i0 = Math.floor((ctx.x0 - 120) / RHCELL), i1 = Math.floor((ctx.x0 + ctx.length + 120) / RHCELL);
+  for (let i = i0; i <= i1; i++) {
+    const g = reindeerHerd(W, i);
+    if (!g) continue;
+    for (const a of g.list) {
+      if (!inD(a.d, dLo, dHi) || !inX(ctx, a.wx, 3)) continue;
+      if (surface(W, a.wx, a.d).t !== T.SNOW) continue;       // not on the ice, the lane or in the trees
+      yield* beast(ctx, out, a.wx, W.H(a.wx, a.d) - 0.05, a.d, { type: 'reindeer', yaw: a.yaw, k: a.k, col: ANIMAL_COL.reindeer[a.col], graze: a.graze, antlers: a.ant, walk: !a.graze, ph: a.ph });
+      shadowStripe(out, W, ctx, a.wx + 0.5, a.d, 5, 1.1, 0.3);
+    }
+  }
+}
+
 // Sleighs on the lane (where there is one).
 const SLCELL = 800;
 function* sleighs(ctx, out, W, dLo, dHi) {
@@ -2300,6 +2336,7 @@ function* near(ctx0, emit) {
   yield* sledHills(ctx, out, W, lo, hi);
   yield* skiHills(ctx, out, W, lo, hi, plan);
   yield* deer(ctx, out, W, lo, hi);
+  yield* herds(ctx, out, W, lo, hi);
   yield* sleighs(ctx, out, W, lo, hi);
   yield* laneProps(ctx, out, W, lo, hi);
   yield* bridges(ctx, out, W, lo, hi);
@@ -2570,6 +2607,7 @@ function layout(seedStr, x0, x1) {
     brooks: list(BCELL, brook, (b) => ({ wx: R(b.x0), d: R(laneD(W, b.x0)), lane: laneOn(W, b.x0) })),
     halts: list(HCELL, halt, (h) => ({ wx: R(h.x0 + h.len / 2), d: 6 })),
     deer: list(DCELL, deerGroup, (g) => ({ wx: R(g.wx), d: R(g.d), type: g.type, n: g.n })),
+    herds: list(RHCELL, reindeerHerd, (g) => ({ wx: R(g.wx), d: R(g.d), n: g.n })),
     sleighs: list(SLCELL, (W2, i) => {
       const r = worldRng(ctx, 571, i);
       if (r() > 0.55) return null;
