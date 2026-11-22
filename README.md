@@ -29,7 +29,7 @@ Where the main pointer is a finger there is no distraction mechanic: touching th
 - **Pause** brakes the train to a stop and silences the radio; play pulls away again.
 - **In the background** (another app, another tab, the screen locked) the radio stops at once. It starts again by itself when you come back, or asks for a tap where the browser insists on one.
 - **Keep screen on** (off unless you switch it on) stops the phone sleeping while the train is running, where the browser allows it.
-- The window works **both ways up**. Held upright it is a tall window: about the same width of country, with more sky above and more ground below.
+- The window works **both ways up**. Held upright it is a tall window: a narrower stretch of country than on its side, with much more sky above it and some more ground below.
 - A phone draws half as many splats as a desktop unless `budget` says otherwise. That figure is a guess, not a measurement.
 
 ## Running Locally

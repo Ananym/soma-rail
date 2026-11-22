@@ -199,7 +199,8 @@ const outDir = process.argv[2] || '.';
       const c4 = await D();
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
       await press('.view-controls .row:nth-child(5) button', 'Credits');
-      await page.waitForTimeout(1500);
+      // the photo credits are fetched when the panel opens: wait for them, not for a fixed moment
+      await page.waitForFunction(() => document.querySelectorAll('.credits li').length >= 8, null, { timeout: 20000 }).catch(() => {});
       const credits = await page.evaluate(() => ({ open: !!document.querySelector('.credits'), items: document.querySelectorAll('.credits li').length, soma: !!document.querySelector('.credits a[href*="somafm.com"]') }));
       await press('.credits .close');
       const creditsClosed = await page.evaluate(() => !document.querySelector('.credits'));

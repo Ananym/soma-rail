@@ -275,10 +275,13 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   }
   // A change of biome changes the target inside the tunnel; the shift eases to it over a second or
   // so (see tick), so the tunnel's own lamps do not jump.
-  let horizonTarget = 0;
+  // An upright window adds a shift of its own (horizonExtra, set in resize): its extra height would
+  // otherwise go half to sky and half to the bare ground beside the track, which has nothing in it.
+  let horizonTarget = 0, horizonBase = 0, horizonExtra = 0;
   function setHorizon(b, now = false) {
     const h = params.horizon >= 0 ? params.horizon : (b.horizon || 0);
-    horizonTarget = Math.max(0, Math.min(0.6, h));
+    horizonBase = Math.max(0, Math.min(0.6, h));
+    horizonTarget = Math.min(0.6, horizonBase + horizonExtra);
     if (now) { horizonShift = horizonTarget; applyHorizon(); }
   }
   let resScale = Math.min(1, params.scale);
@@ -291,6 +294,11 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     camera.aspect = width / height;
     fovNow = fovFor(camera.aspect); camera.fov = fovNow;
     camera.updateProjectionMatrix();
+    {   // 0 in a landscape window, up to 0.25 where the view has been widened to its limit
+      const base = Math.tan((params.fov * Math.PI) / 360), now = Math.tan((fovNow * Math.PI) / 360);
+      horizonExtra = params.horizon >= 0 ? 0 : 0.25 * Math.max(0, Math.min(1, (now - base) / (TAN_TALL_MAX - base)));
+      horizonTarget = Math.min(0.6, horizonBase + horizonExtra);   // eased to in tick
+    }
     applyHorizon();
     tanHalfHfov = Math.tan((fovNow * Math.PI) / 360) * camera.aspect;
     frame.resize(camera.aspect, fovNow);
