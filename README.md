@@ -79,6 +79,7 @@ Developer scripts, run from `soma-rail-app/`. The ones that take screenshots nee
 | `node scripts/motion-frames.cjs outDir "biome=motorway&hour=1&kmh=0" --n 24 --dt 0.1` | Capture a run of frames with the motion clock stepped by hand, to look at moving things on a machine too slow to play them |
 | `node scripts/biome-preview.mjs out.png "biome=downs&jump=4000&kmh=0"` | Draw the code-made scenery on the CPU in a few seconds, for iterating on a biome |
 | `node scripts/check-biomes.mjs` | Test the scenery generators |
+| `node scripts/check-rng.mjs` | Check the hash and noise helpers still return exactly the values every world is built from |
 | `node scripts/check-audio.mjs` | Test the music analysis |
 | `node scripts/check-sky.mjs out.png` | Render the sky at a range of hours |
 | `node scripts/build-profiles.mjs` | Regenerate the channel profiles from SomaFM's channel list |

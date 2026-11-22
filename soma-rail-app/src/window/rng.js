@@ -6,13 +6,38 @@ export function hashString(s) {
   return h >>> 0;
 }
 
-export function hashInts(...ints) {
-  let h = 0x9e3779b9;
-  for (const n of ints) {
-    h ^= (n | 0) + 0x9e3779b9 + (h << 6) + (h >>> 2);
-    h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
-    h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
-    h ^= h >>> 15;
+// hashInts(...ints) folds any number of integers into one unsigned 32-bit hash: start from H0 and
+// apply mix() once per argument, in order. It takes five named parameters and reads
+// arguments.length, where it used to take a rest parameter, so that a call builds no array. Up to
+// five arguments take the unrolled path; more take the loop.
+// The arithmetic is the layout of every world: changing a single output value rearranges all of
+// them. scripts/check-rng.mjs keeps the original rest-argument form and compares.
+const H0 = 0x9e3779b9;
+function mix(h, n) {
+  h ^= (n | 0) + 0x9e3779b9 + (h << 6) + (h >>> 2);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+  return h ^ (h >>> 15);
+}
+export function hashInts(a, b, c, d, e) {
+  const n = arguments.length;
+  let h = H0;
+  if (n > 5) {
+    for (let i = 0; i < n; i++) h = mix(h, arguments[i]);
+    return h >>> 0;
+  }
+  if (n > 0) {
+    h = mix(h, a);
+    if (n > 1) {
+      h = mix(h, b);
+      if (n > 2) {
+        h = mix(h, c);
+        if (n > 3) {
+          h = mix(h, d);
+          if (n > 4) h = mix(h, e);
+        }
+      }
+    }
   }
   return h >>> 0;
 }
@@ -35,17 +60,20 @@ export function makeRng(seed) {
   return next;
 }
 
-// Value noise in 1D and 2D, smooth and cheap; used for terrain.
+// Value noise in 1D and 2D, smooth and cheap; used for terrain. The lattice values are
+// hashInts(i, seed) and hashInts(ix, iy, seed) scaled to 0..1, written out as mix() rounds so
+// that nothing is allocated; in 2D the round for each column is shared by its two rows.
 function fade(t) { return t * t * (3 - 2 * t); }
 export function noise1(x, seed = 0) {
   const i = Math.floor(x), f = x - i;
-  const a = hashInts(i, seed) / 4294967296, b = hashInts(i + 1, seed) / 4294967296;
+  const a = (mix(mix(H0, i), seed) >>> 0) / 4294967296, b = (mix(mix(H0, i + 1), seed) >>> 0) / 4294967296;
   return a + (b - a) * fade(f);
 }
 export function noise2(x, y, seed = 0) {
   const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
-  const h = (i, j) => hashInts(i, j, seed) / 4294967296;
-  const a = h(ix, iy), b = h(ix + 1, iy), c = h(ix, iy + 1), d = h(ix + 1, iy + 1);
+  const h0 = mix(H0, ix), h1 = mix(H0, ix + 1);
+  const a = (mix(mix(h0, iy), seed) >>> 0) / 4294967296, b = (mix(mix(h1, iy), seed) >>> 0) / 4294967296;
+  const c = (mix(mix(h0, iy + 1), seed) >>> 0) / 4294967296, d = (mix(mix(h1, iy + 1), seed) >>> 0) / 4294967296;
   const u = fade(fx), v = fade(fy);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
