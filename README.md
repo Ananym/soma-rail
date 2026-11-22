@@ -14,10 +14,10 @@ Fidget enough and the train stands still, the view sharp and silent. Stay settle
 
 While the mouse is moving an overlay shows the channel list, what is playing, and a few controls for the view:
 
-- **Scenery / Next** queues a tunnel into the next kind of scenery.
+- **Scenery / Next** queues a tunnel into the next kind of scenery (the label reads "Queued" until the train is out of it).
 - **Dreamlike** switches the surreal version on or off (through a tunnel). Once touched, the channel no longer decides it.
 - **Ignore distraction** keeps the train at speed and the music up whatever you do; the overlay still comes and goes with the mouse.
-- **Frame rate** caps the view at 30, 60 or 120 frames a second (60 unless you change it).
+- **Max frame rate** caps the view at 30, 60 or 120 frames a second (60 unless you change it).
 
 The pointer is a small soft light that dims as you settle and is gone when your distraction reaches zero.
 

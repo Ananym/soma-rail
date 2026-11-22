@@ -14,13 +14,13 @@
     </div>
     <div class="row">
       <span class="label">Ignore distraction</span>
-      <span class="value">{{ cheat ? 'train and music carry on' : '' }}</span>
+      <span class="value"></span>
       <button type="button" class="switch" :class="{ on: cheat }" :aria-pressed="cheat" @click="$emit('update:cheat', !cheat)">
         {{ cheat ? 'On' : 'Off' }}
       </button>
     </div>
     <div class="row">
-      <span class="label">Frame rate</span>
+      <span class="label">Max frame rate</span>
       <span class="group">
         <button v-for="n in [30, 60, 120]" :key="n" type="button" :class="{ on: fps === n }" :aria-pressed="fps === n" @click="$emit('update:fps', n)">{{ n }}</button>
       </span>
@@ -39,7 +39,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { CONFIG } from '../config';
 
 const props = defineProps({
-  // { biome, level, next: { biome, level } | null } from the train window, or null before it starts
+  // { biome, level, inTunnel, next: { biome, level } | null } from the train window, or null before it starts
   view: { type: Object, default: null },
   cheat: { type: Boolean, default: false },
   fps: { type: Number, default: 60 },
@@ -54,19 +54,17 @@ const NAMES = {
 };
 const nameOf = (b) => NAMES[b] || b || '';
 
+// The current scenery's name; "Queued" from the moment a change is asked for until the train is out
+// of the tunnel that brings it; then the new name.
+const changing = computed(() => { const v = props.view; return !!v && (!!v.next || v.inTunnel); });
 const sceneryText = computed(() => {
   const v = props.view;
-  if (!v) return 'starting';
-  if (v.next && v.next.biome !== v.biome) return `${nameOf(v.biome)}, ${nameOf(v.next.biome)} after the tunnel`;
-  if (v.next) return `${nameOf(v.biome)}, new stretch after the tunnel`;
-  return nameOf(v.biome);
+  if (!v) return '';
+  return changing.value ? 'Queued' : nameOf(v.biome);
 });
 // what the listener has asked for: the pending level if a change is on its way
 const dreamWanted = computed(() => { const v = props.view; return !!v && (v.next ? v.next.level : v.level) === 1; });
-const dreamText = computed(() => {
-  const v = props.view;
-  return v && v.next && v.next.level !== v.level ? 'after the tunnel' : '';
-});
+const dreamText = computed(() => { const v = props.view; return v && v.next && v.next.level !== v.level ? 'Queued' : ''; });
 
 const currentTime = ref(Date.now());
 let intervalId = null;

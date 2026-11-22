@@ -231,7 +231,7 @@ function publish() {
   if (!engine) return;
   const s = engine.director.state, p = pending();
   const next = (p.biome !== s.biome || p.level !== s.level || p.seed !== s.seed) ? { biome: p.biome, level: p.level } : null;
-  const state = { biome: s.biome, level: s.level, next };
+  const state = { biome: s.biome, level: s.level, inTunnel: !!s.tunnel, next };
   const key = JSON.stringify(state);
   if (key !== lastPublished) { lastPublished = key; emit('state', state); }
 }
