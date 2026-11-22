@@ -1962,8 +1962,9 @@ function* wildlife(ctx, out, W, X, dLo, dHi) {
       if (d >= dLo && d < dHi && d > 30) { const n = 3 + Math.floor(r() * 4); for (let k = 0; k < n; k++) monkey(out, x + (r() - 0.5) * 12, W.H(wx, d) - 0.05, d + (r() - 0.5) * 3, r); }
     }
     if (r() < 0.45) {
-      const d = 40 + Math.max(10, Math.min(edge, 150) - 40) * r();
-      if (d >= dLo && d < dHi) { const n = 2 + Math.floor(r() * 4), y = W.H(wx, d) + 9 + 10 * r(); const fc = flightCell(wx); for (let k = 0; k < n; k++) parrot(out, fc.wx - ctx.x0 + fc.dir * (4 - k * 1.8 - r()), y + (r() - 0.5) * 1.5, d + (r() - 0.5) * 3, r, fc.dir); }
+      // in the open, well clear of the forest wall, whose crowns would swallow them
+      const d = 33 + Math.max(0, Math.min(edge, 150) - 45) * r();
+      if (edge >= 45 && d >= dLo && d < dHi) { const n = 2 + Math.floor(r() * 4), y = W.H(wx, d) + 7 + 9 * r(); const fc = flightCell(wx); for (let k = 0; k < n; k++) parrot(out, fc.wx - ctx.x0 + fc.dir * (4 - k * 1.8 - r()), y + (r() - 0.5) * 1.5, d + (r() - 0.5) * 3, r, fc.dir); }
     }
     if (out.due()) yield;
   }
