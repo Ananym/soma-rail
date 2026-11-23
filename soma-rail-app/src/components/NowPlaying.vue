@@ -43,6 +43,13 @@
       />
       <span class="volume-value">{{ Math.round(volume * 100) }}%</span>
     </div>
+
+    <!-- With a mouse this line heads the channel list; on a touch screen that list is a modal of
+         its own, so the line lives here, where it is seen every time the overlay comes up. -->
+    <p v-if="touch" class="support">
+      Enjoying Soma FM?
+      <a href="https://somafm.com/support/" target="_blank" rel="noopener">Please consider supporting them</a>
+    </p>
   </div>
 </template>
 
@@ -262,7 +269,7 @@ function handleVolumeChange(event) {
 /* touch: one strip: the channel's art, what is playing, the pause button; the speed bar beneath */
 .now-playing.touch {
   display: grid;
-  grid-template: "art info pause" auto "bar bar bar" auto / auto minmax(0, 1fr) auto;
+  grid-template: "art info pause" auto "bar bar bar" auto "support support support" auto / auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 12px;
   row-gap: 10px;
@@ -278,6 +285,18 @@ function handleVolumeChange(event) {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .now-playing.touch .playback-indicator { grid-area: bar; }
+.support {
+  grid-area: support;
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 13px;
+  font-weight: 300;
+  line-height: 1.35;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.8);
+}
+.support a { color: #66d9ef; font-weight: 500; text-decoration: none; }
 .pause {
   grid-area: pause;
   width: 52px;

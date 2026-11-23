@@ -5,8 +5,8 @@ import { CONFIG } from '../config';
 // the overlay is asked for, not a lapse of attention. There the score follows `running` (a ref:
 // whether the journey should be under way) instead: not running, it climbs and the train brakes;
 // running, it falls and the train pulls away. Taps bring the overlay up and put it away.
-const PANELS = '.now-playing, .channel-selector, .channel-modal, .view-controls, .hide-bar, .credits-backdrop, .start-overlay, .resume-overlay';
-const TOUCH_FADE_DELAY = 5000;    // ms without a touch before the overlay fades on a touch screen
+const PANELS = '.now-playing, .channel-selector, .channel-modal, .view-controls, .hide-bar, .slow-notice, .credits-backdrop, .start-overlay, .resume-overlay';
+const TOUCH_FADE_DELAY = 7500;    // ms without a touch before the overlay fades on a touch screen
 
 export function useInteraction({ touch = null, running = null } = {}) {
   const isTouch = () => !!(touch && touch.value);

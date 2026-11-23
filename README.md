@@ -26,7 +26,7 @@ The pointer is a small soft light that dims as you settle and is gone when your 
 
 Where the main pointer is a finger there is no distraction mechanic: touching the screen is how you ask for the controls, not a lapse of attention.
 
-- **Tap** the glass for the overlay. It is laid out as one sheet: what is playing with a **pause** button at the top, the view's controls at the bottom, and under them a **Hide** bar that puts the overlay away at once. A tap on the glass between them does the same, and left alone it fades after five seconds.
+- **Tap** the glass for the overlay. It is laid out as one sheet: what is playing with a **pause** button at the top, the view's controls at the bottom, and under them a **Hide** bar that puts the overlay away at once. A tap on the glass between them does the same, and left alone it fades after seven or eight seconds. The line about supporting SomaFM sits under what is playing.
 - **Channel / Change** opens the channel list as a dialog of its own; choosing a channel closes it.
 - **Pause** brakes the train to a stop and silences the radio; play pulls away again.
 - **In the background** (another app, another tab, the screen locked) the radio stops at once. It starts again by itself when you come back, or asks for a tap where the browser insists on one.
@@ -46,7 +46,7 @@ Open http://localhost:5173
 
 ## The train window
 
-The view is a landscape of Gaussian splats sliding past, under a shader sky, behind a carriage window frame. It needs a browser with WebGL2; without it the page says so and the radio plays on. The design is in [`docs/procedural-train-window.md`](docs/procedural-train-window.md).
+The view is a landscape of Gaussian splats sliding past, under a shader sky, behind a carriage window frame. It needs a browser with WebGL2 and a graphics card behind it. Without WebGL2 the start screen says the view cannot be drawn; where the browser can only draw in software (hardware acceleration switched off or blocked, as on some work laptops and remote desktops) it warns that the view will be very slow and says what to change. Once running, a view that stays under 14 frames a second for ten seconds puts up a notice offering fewer splats. The radio plays on in every case. The design is in [`docs/procedural-train-window.md`](docs/procedural-train-window.md).
 
 What it does today:
 

@@ -3,6 +3,18 @@
     <div class="start-button">
       {{ touch ? 'Tap to Start' : 'Click to Start' }}
     </div>
+    <!-- Said before the listener starts, not after: a view that cannot be drawn, or only by the
+         processor, otherwise just looks broken. -->
+    <div v-if="graphics && !graphics.webgl2" class="start-warning" role="alert">
+      <strong>The train window cannot be drawn here.</strong>
+      This browser does not offer WebGL2, which the view needs. The radio will still play.
+    </div>
+    <div v-else-if="graphics && graphics.software" class="start-warning" role="alert">
+      <strong>The train window will be very slow here.</strong>
+      This browser is drawing without a graphics card: hardware acceleration is switched off or
+      not available on this machine. Turning it on in the browser's settings, or using another
+      browser or device, should fix it. The radio will still play.
+    </div>
   </div>
 </template>
 
@@ -21,6 +33,11 @@ const props = defineProps({
   touch: {
     type: Boolean,
     default: false
+  },
+  // what will draw the view: { webgl2, software, renderer } (window/graphics.js)
+  graphics: {
+    type: Object,
+    default: null
   }
 });
 
@@ -55,11 +72,27 @@ function handleStart() {
   height: 100dvh;
   background: rgba(0, 0, 0, 0.8);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 28px;
   z-index: 10000;
   cursor: pointer;
 }
+
+.start-warning {
+  max-width: min(520px, 86vw);
+  padding: 14px 18px;
+  border: 1px solid rgba(255, 196, 96, 0.55);
+  border-radius: 8px;
+  background: rgba(60, 40, 8, 0.55);
+  color: rgba(255, 236, 200, 0.95);
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 1.45;
+  text-align: center;
+}
+.start-warning strong { display: block; margin-bottom: 4px; font-weight: 500; }
 
 .start-button {
   background: rgba(255, 255, 255, 0.1);

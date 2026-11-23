@@ -14,6 +14,7 @@ import { useInteraction } from './composables/useInteraction';
 import { usePlaybackControl } from './composables/usePlaybackControl';
 import { useLocalStorage } from './composables/useLocalStorage';
 import { readParams, audioWanted } from './window/params';
+import { probeGraphics } from './window/graphics';
 
 // Soma FM integration
 const {
@@ -70,6 +71,14 @@ const savedBudget = useLocalStorage('splatBudget', 0);
 // What the train window is showing and what is coming, for the overlay.
 const viewState = ref(null);
 const showCredits = ref(false);
+
+// What will draw the view (asked once: the start screen warns when it is nothing, or the
+// processor), and a notice for a view that turns out to be struggling once it is running.
+const graphics = probeGraphics();
+const slowDismissed = ref(false);
+const showSlow = computed(() => hasStarted.value && !viewFailed.value && !slowDismissed.value && !!(viewState.value && viewState.value.struggling));
+const canLighten = computed(() => !(viewState.value && viewState.value.budgetFixed) && splatBudget.value > 300000);
+function lighten() { savedBudget.value = 300000; slowDismissed.value = true; }
 const showChannels = ref(false);    // touch: the channel list as a dialog
 
 // Playback control
@@ -265,6 +274,7 @@ onMounted(() => {
       :song="currentSong"
       :fps-cap="fpsCap"
       :budget="splatBudget"
+      :graphics="graphics"
       @failed="handleWindowFailed"
       @state="viewState = $event"
     />
@@ -289,8 +299,15 @@ onMounted(() => {
       :audio-element="audioElement"
       :view="windowRef"
       :touch="touch"
+      :graphics="graphics"
       @started="handleStarted"
     />
+
+    <div v-if="showSlow" class="slow-notice" :class="{ touch }" role="status">
+      <span>The view is running slowly on this device.</span>
+      <button v-if="canLighten" type="button" @click="lighten">Use fewer splats</button>
+      <button type="button" @click="slowDismissed = true">Dismiss</button>
+    </div>
 
     <div v-if="touch && hasStarted && needsTap" class="resume-overlay" @click="handleResumeTap">
       <div class="resume-button">Tap to resume</div>
@@ -464,6 +481,36 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   z-index: 10000;
+}
+.slow-notice {
+  position: fixed;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  max-width: min(560px, 92vw);
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 196, 96, 0.5);
+  border-radius: 8px;
+  background: rgba(30, 22, 8, 0.82);
+  color: rgba(255, 236, 200, 0.95);
+  font-size: 14px;
+  font-weight: 300;
+}
+.slow-notice.touch { top: 36%; }
+.slow-notice button {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
 }
 .resume-button {
   background: rgba(255, 255, 255, 0.1);

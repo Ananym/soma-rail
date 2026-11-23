@@ -56,6 +56,22 @@ const outDir = process.argv[2] || '.';
     if (!c.early) await page.waitForFunction(() => { const a = document.querySelector('audio'); return a && a.src; }, null, { timeout: 30000 });
     if (c.settle) await page.waitForTimeout(c.settle);     // let the CORS fallback run before Start
     if (c.touch) c.startText = (await page.textContent('.start-button')).trim();
+    // The start screen says so when the view cannot be drawn, or only in software (which is what
+    // this headless browser normally has): the warning must match what the browser really offers.
+    const warn = await page.evaluate(() => {
+      const w = document.querySelector('.start-warning'), text = w ? w.textContent.replace(/\s+/g, ' ').trim() : '';
+      let gl = null, software = false;
+      try { gl = document.createElement('canvas').getContext('webgl2'); } catch { /* none */ }
+      if (gl) {
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        const renderer = String((ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) || '');
+        let caveat = false;
+        try { caveat = !document.createElement('canvas').getContext('webgl2', { failIfMajorPerformanceCaveat: true }); } catch { caveat = true; }
+        software = caveat || /swiftshader|llvmpipe|softpipe|software|basic render|warp/i.test(renderer);
+      }
+      return { text, webgl2: !!gl, software };
+    });
+    const warnOk = !warn.webgl2 ? /cannot be drawn/.test(warn.text) : warn.software ? /very slow/.test(warn.text) : warn.text === '';
     await page.click('.start-overlay');
     await page.waitForTimeout(400);
     const goneAtOnce = await page.evaluate(() => !document.querySelector('.start-overlay'));
@@ -141,6 +157,7 @@ const outDir = process.argv[2] || '.';
       T.wakeLockOffered = await page.evaluate(() => 'wakeLock' in navigator);
       T.controlsOk = !T.rows.includes('Ignore distraction') && T.rows.includes('Scenery') && T.rows[0] === 'Channel' && (!T.wakeLockOffered || T.rows.includes('Keep screen on'));
       T.noVolume = await page.evaluate(() => !document.querySelector('.volume-control'));
+      T.supportLine = await page.evaluate(() => !!document.querySelector('.now-playing .support a[href*="somafm.com/support"]'));
       // pause brakes the train and silences the radio; play brings both back
       T.overlayBeforePause = await shown();
       await press('.pause');
@@ -207,7 +224,7 @@ const outDir = process.argv[2] || '.';
       T.dialogClosedByChoice = await until(() => page.evaluate(() => !document.querySelector('.channel-modal')), 3000);
       T.choicePlays = await until(async () => (await playing()) !== srcWas && !(await audioPaused()), 60000);
       const lay = (l) => l.inside && l.apart && l.canvas[0] === l.view[0] && l.canvas[1] === l.view[1];
-      T.ok = T.mediaQuery && T.touchClass && T.noDistraction && T.hiddenAtFirst && T.shownAfterTap && T.tapPressedNothing && T.hiddenAfterSecondTap && T.controlsOk && T.noVolume
+      T.ok = T.mediaQuery && T.touchClass && T.noDistraction && T.hiddenAtFirst && T.shownAfterTap && T.tapPressedNothing && T.hiddenAfterSecondTap && T.controlsOk && T.noVolume && T.supportLine
         && T.pausedAudio && T.pausedTrain && T.playsAgain && T.silentInBackground && T.stillSilent && T.resumesOnReturn && T.noResumePrompt
         && lay(T.portrait) && lay(T.landscape) && Math.abs(T.engineAspect - 844 / 390) < 0.05
         && T.shownByThirdTap && T.noSplatsRowWithUrlBudget && T.shownBeforeHide && T.hideBarHides && T.noListInSheet && !!T.channelDialog && T.channelDialog.items > 10 && T.channelDialog.close && T.dialogClosedByChoice && T.choicePlays;
@@ -324,7 +341,7 @@ const outDir = process.argv[2] || '.';
     // through a proxy: a connection reset on a request that is simply made again. Nothing else is excused.
     if (process.env.IDLE === '1' || c.distraction) for (let i = ours.length - 1; i >= 0; i--) if (/net::ERR_CONNECTION_RESET/.test(ours[i])) ours.splice(i, 1);
     if (youtube.length) ours.push(`requests to YouTube hosts: ${youtube.length}`);
-    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log(c.touch ? 'touch:' : c.budgetControl ? 'budget:' : 'brake:', JSON.stringify(brake));
+    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); console.log('start warning:', JSON.stringify(warn)); if (brake) console.log(c.touch ? 'touch:' : c.budgetControl ? 'budget:' : 'brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }
     const audioOk = state.audio && !state.audio.paused && state.audio.time > 0.5;
     const viewOk = c.expect === 'notice'
@@ -333,8 +350,8 @@ const outDir = process.argv[2] || '.';
     const tapOk = c.tap === undefined ? true
       : c.tap ? !!(state.tap && (c.tap === 'attached' || state.tap.active) && state.tap.context === 'running' && state.audio.crossOrigin === 'anonymous')
         : !state.tap && state.audio.crossOrigin === null;
-    const ok = state.startGone && state.goneAtOnce && audioOk && viewOk && tapOk && !ours.length && (!brake || brake.ok);
-    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, at once ${state.goneAtOnce}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk})`); if (!ok) failed = true;
+    const ok = state.startGone && state.goneAtOnce && audioOk && viewOk && tapOk && warnOk && !ours.length && (!brake || brake.ok);
+    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, at once ${state.goneAtOnce}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk}, start warning ${warnOk})`); if (!ok) failed = true;
     await ctx.close();
   }
   await browser.close(); server.httpServer.close();

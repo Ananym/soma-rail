@@ -25,6 +25,7 @@ const props = defineProps({
   audioCors: { type: Boolean, default: false },   // true when the stream was loaded with CORS, so it can be analysed
   channel: { type: Object, default: null },
   song: { type: Object, default: null },
+  graphics: { type: Object, default: null },   // what draws the view (window/graphics.js), for the debug readout
   fpsCap: { type: Number, default: 60 },          // frames a second at most (the overlay's setting)
   budget: { type: Number, default: 600000 },      // splats in all (the overlay's setting); budget= in the URL overrides it
 });
@@ -120,6 +121,7 @@ function readout(s) {
   const w = s.worst;
   lines.push(`hitches (10 s): ${s.hitches}   worst frame: ${w.ms} ms` + (w.ms > 25 ? ` = generate ${w.gen} + render ${w.render} + other ${Math.max(0, w.cpu - w.gen - w.render)} ms on the main thread${w.ms - w.cpu > 8 ? `, ${w.ms - w.cpu} ms elsewhere (GPU or browser)` : ''}${w.note ? '; ' + w.note : ''}` : ''));
   if (!s.patched) lines.push('WARNING: shader patch not applied (no blur or haze)');
+  if (props.graphics) lines.push(`graphics: ${props.graphics.renderer || 'unknown'}${props.graphics.software ? '   SOFTWARE RENDERER' : ''}`);
   return lines.join('\n');
 }
 function onDebugKey(e) {
@@ -247,16 +249,28 @@ function nextBiome() {
 }
 // What the overlay shows: where we are and what is coming.
 let lastPublished = '';
+// Is the view struggling? Ten seconds on end at under 14 frames a second, with the resolution
+// already turned down as far as the engine will take it, while the train is moving in the open
+// and the page is in front. Once said it stays said: the app offers the remedy once.
+let slowTicks = 0, struggling = false;
+function watchSpeed(s) {
+  if (struggling) return;
+  const st = engine.stats();
+  const fair = typeof document !== 'undefined' && document.visibilityState === 'visible' && !st.idle && st.kmh > 5 && !s.tunnel && st.pending === 0;
+  slowTicks = fair && st.fps < 14 && st.resScale <= 0.45 ? slowTicks + 1 : 0;
+  if (slowTicks >= 25) struggling = true;
+}
 function publish() {
   if (!engine) return;
   const s = engine.director.state, p = pending();
+  watchSpeed(s);
   const next = (p.biome !== s.biome || p.level !== s.level || p.seed !== s.seed) ? { biome: p.biome, level: p.level } : null;
   if (budgetQueued && !s.tunnel && !s.queued) budgetQueued = false;
   if (!s.tunnel || openBiome === null) openBiome = s.biome;
   // `heading`: the scenery a change in progress leads to, when it is a different kind from the one
   // last seen in the open (a change of level or of splat budget keeps the kind)
   const heading = (s.tunnel || s.queued) && p.biome !== openBiome ? p.biome : null;
-  const state = { biome: s.biome, level: s.level, inTunnel: !!s.tunnel, next, heading, budgetQueued, budgetFixed: !!params.budgetGiven };
+  const state = { biome: s.biome, level: s.level, inTunnel: !!s.tunnel, next, heading, budgetQueued, budgetFixed: !!params.budgetGiven, struggling };
   const key = JSON.stringify(state);
   if (key !== lastPublished) { lastPublished = key; emit('state', state); }
 }
