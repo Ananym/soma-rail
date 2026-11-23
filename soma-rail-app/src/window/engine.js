@@ -317,6 +317,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   document.addEventListener('visibilitychange', onVisible);
 
   let frames = 0, acc = 0, fps = 60, slowFor = 0, fastFor = 0;
+  let beatSeq = 0, lastBeatSeen = 0;
   // motion clock (seconds) and its wraps: 200 pi for phases, 4096 cells of 48 m for traffic
   let moveT = 0;
   const MOVE_WRAP = 200 * Math.PI, FLOW_WRAP = 48 * 4096, LANE_SPEED = [33, 29.5, 25];   // m/s, fast lane first
@@ -411,6 +412,10 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     uniforms.uDissolve.value = S.dissolve;
     uniforms.uBreath.value = S.breath;
     uniforms.uBeat.value = params.beatPin >= 0 ? params.beatPin : S.beat;
+    // each new beat gets a number, so that the chorus groups (kit.js chorus()) take turns
+    if (S.beat > lastBeatSeen + 0.25) beatSeq = (beatSeq + 1) % 1024;
+    lastBeatSeen = S.beat;
+    uniforms.uBeatSeq.value = params.beatSeq >= 0 ? params.beatSeq : beatSeq;
     uniforms.uBeatRaised.value = biome.beatKinds ? 0 : 1;
     uniforms.uSparkle.value = S.sparkle;
     uniforms.uClock.value = S.time % 1000;

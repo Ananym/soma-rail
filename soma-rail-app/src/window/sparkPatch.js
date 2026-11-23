@@ -15,6 +15,7 @@ export const PATCH_UNIFORMS = () => ({
   uDissolve: { value: 0 },          // 0..1, scatters splats ("matter" dial)
   uBreath: { value: 0 },            // small scale pulse from the bass
   uBeat: { value: 0 },              // 0..1, jumps on each onset (kick, snare) and decays in a fraction of a second
+  uBeatSeq: { value: 0 },           // counts the beats (wrapped at 1024): which chorus groups answer this one
   uSparkle: { value: 0 },           // 0..1, follows the treble (hi-hats, cymbals, air)
   uClock: { value: 0 },             // seconds, for the sparkle's flicker
   uBeatRaised: { value: 1 },        // 1: everything above eye level swells on the beat; 0: only splats tagged for it
@@ -41,6 +42,7 @@ uniform vec3 uLightTint;
 uniform float uDissolve;
 uniform float uBreath;
 uniform float uBeat;
+uniform float uBeatSeq;
 uniform float uSparkle;
 uniform float uClock;
 uniform float uBeatRaised;
@@ -63,7 +65,8 @@ uniform float uFly;`,
     float mvBlur = 1.0;   // how much of the world's motion blur this splat takes
     ivec3 mvBits = ivec3(floor(rgba.rgb * 255.0 + 0.5)) & 1;
     int mv = mvBits.r | (mvBits.g << 1) | (mvBits.b << 2);
-    bool mvHi = (int(floor(rgba.a * 127.5 + 0.5)) & 1) == 1;      // classes 8 and up: see kit.js MOVE
+    int mvA = int(floor(rgba.a * 127.5 + 0.5));
+    bool mvHi = (mvA & 1) == 1;                                   // classes 8 and up: see kit.js MOVE
     if (mvHi) {
         if (uMove > 0.0 && mv == 1) {
             // Riders (class 9: see kit.js rideCell). Like flight, without wings and much slower:
@@ -215,12 +218,21 @@ uniform float uFly;`,
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
     float picked = (!mvHi && mv == 6) ? 1.0 : 0.0;
     float flashed = (mvHi && mv <= 1) ? 1.0 - isLight : 0.0;
-    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.42 * picked * (1.0 - isLight));
-    center.y += 0.3 * scales.y * uBeat * picked * (1.0 - isLight);
-    float shimmer = 1.0 + uBeat * (0.1 * picked * (1.0 - isLight) + 0.42 * flashed);
+    // A chorus (class 11: see kit.js chorus()): the splat belongs to one of eight groups, carried in
+    // three more bits of its opacity byte, and on each beat a different three or so of the eight
+    // answer, all the members of a group together: every flower of one colour across a meadow.
+    // They swell and rise like the picked things, and brighten a little more.
+    float chorus = 0.0;
+    if (mvHi && mv == 3) {
+        chorus = step(fract(float((mvA >> 1) & 7) * 0.125 + uBeatSeq * 0.382), 0.4);
+        rgba.a = 1.0;                                              // the group bits are not opacity
+    }
+    scales *= 1.0 + uBreath + uBeat * (0.1 * raised * (1.0 - step(0.5, float(mvHi && mv == 3))) + 0.32 * isLight + 0.42 * picked * (1.0 - isLight) + 0.55 * chorus);
+    center.y += 0.3 * scales.y * uBeat * (picked * (1.0 - isLight) + chorus);
+    float shimmer = 1.0 + uBeat * (0.1 * picked * (1.0 - isLight) + 0.42 * flashed + 0.22 * chorus);
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
-        shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, max(picked, flashed)) + 0.6 * isLight);
+        shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, max(picked, max(flashed, chorus))) + 0.6 * isLight);
     }`,
   },
   {
@@ -236,7 +248,7 @@ uniform float uFly;`,
         vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
         vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow) * shimmer, hazeCol, hz * (1.0 - 0.5 * glow));
         if (uMoveDebug > 0.5) {
-            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : vec3(0.55, 0.4, 1.0))
+            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : mv == 2 ? vec3(0.55, 0.4, 1.0) : 0.25 + 0.75 * vec3(float((mvA >> 1) & 1), float((mvA >> 2) & 1), float((mvA >> 3) & 1)))
                 : mv == 0 ? vRgba.rgb * 0.35 : vec3(float(mv & 1), float((mv >> 1) & 1), float((mv >> 2) & 1)) * 0.8 + 0.2;
         }
     }`,
@@ -271,14 +283,16 @@ export function buildVertexShader(defaultShader) {
 }
 
 // ---- motion tags ----
-// A splat's motion class (kit.js MOVE, 0..15) rides in the lowest bit of its red, green and blue
+// A splat's motion class (kit.js MOVE, 0..15, in the low four bits of the number passed) rides in the lowest bit of its red, green and blue
 // bytes (a change of at most 1/255 in colour) and, for its fourth bit, in the second-lowest bit of
 // its opacity byte. The renderer halves opacity on its way to the shader, so the opacity byte is
 // kept even, which makes the halving exact, and capped at 254: a change of at most 3/255 in
 // opacity. Every splat that reaches the renderer must therefore have those bits set on purpose:
 // tagLast() after each push, clearTags() for splats loaded from a file.
+// A chorus splat (class 11) also carries its group, 0..7, in the next three bits of the opacity
+// byte, with the top three set: it is drawn opaque. The group arrives as cls >> 4.
 const tagWord = (w, cls) => {
-  const a8 = (Math.min(w >>> 24, 254) & 0xfc) | (((cls >> 3) & 1) << 1);
+  const a8 = (cls & 15) === 11 ? (0xe2 | (((cls >> 4) & 7) << 2)) : (Math.min(w >>> 24, 254) & 0xfc) | (((cls >> 3) & 1) << 1);
   return (((w & 0x00fefefe) | (cls & 1) | (((cls >> 1) & 1) << 8) | (((cls >> 2) & 1) << 16)) | (a8 << 24)) >>> 0;
 };
 export function tagLast(packed, cls = 0) {

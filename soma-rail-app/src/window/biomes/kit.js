@@ -73,6 +73,10 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //   SOLID     does not move, and is not scattered by the dreamlike level's "matter" dial (which
 //             throws every other splat about, further the further away it is, when the music is
 //             loud). For things that hang alone against the sky, where a scatter leaves specks.
+//   CHORUS    many small things that answer the beat in groups: each splat names one of eight groups
+//             (pass chorus(g), below, not MOVE.CHORUS itself) and on every beat a different three
+//             or so of the eight swell, rise and brighten, every member of a group together. For
+//             a meadow's flowers, one group per colour. A chorus splat is always drawn opaque.
 //   RIDE      a rider on the ground (a cyclist): carried along the line at about a sixth of the
 //             train's speed, and brightens on the beat like FLASH. Only through rideCell() below.
 //   FALL      falls, and comes round again at the top of a 16 m column about the eye's height: a
@@ -80,7 +84,9 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
 //             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11 };
+// A chorus tag for group g (0..7): pass chorus(g) as the motion class.
+export const chorus = (g) => MOVE.CHORUS | ((g & 7) << 4);
 
 // Direction toward the sun for baked shading: high, to the left (-x) and on the camera's side
 // (+z), so the faces the window sees are lit and tops are brightest.

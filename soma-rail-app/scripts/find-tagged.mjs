@@ -18,7 +18,7 @@ for (let index = 0; index < Math.ceil(20000 / layer.chunkLen); index++) {
     zNear: layer.zNear, zFar: layer.zFar, count, index, terrain, palette: biome.palette, dials: { ...LEVELS[Number(level)] }, level: Number(level), beatMetres: 56, layer: layer.name, seed, hour: 12,
   };
   const emit = (x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind, move = 0) => {
-    if (move !== want) return;
+    if ((move & 15) !== want) return;
     const key = `${Math.round((ctx.x0 + x) / 30) * 30}:${Math.round(-z / 15) * 15}`;
     spots.set(key, (spots.get(key) || 0) + 1);
   };

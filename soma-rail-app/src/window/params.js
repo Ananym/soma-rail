@@ -22,6 +22,7 @@ const NUM = {
   sparkle: 1,        // strength of the treble shimmer (0 = off)
   move: 1,           // strength of the moving things (flags, traffic, vapour); 0 = everything still
   beatPin: -1,       // pins the beat pulse at this value 0..1 (screenshot scripts); -1 lets the music drive it
+  beatSeq: -1,       // pins the beat counter (screenshot scripts): which chorus groups answer; -1 lets it count
   moveT: -1,         // pins the motion clock at this many seconds (screenshot scripts); -1 lets it run
   tags: 0,           // 1 paints each motion class a flat colour and dims the rest (to check the tagging)
   touch: -1,         // touch-screen behaviour: 1 on, 0 off, -1 automatic (on where the main pointer is a finger)
