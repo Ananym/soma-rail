@@ -280,6 +280,10 @@ const outDir = process.argv[2] || '.';
         const label = () => row().querySelector('.value').textContent.trim();
         const next = async () => { row().querySelector('button').click(); await wait(700); };
         const out = {};
+        // A real change of track during this scenario would re-aim the tunnel too (that is the
+        // feature), so the radio's track changes are held off while it runs.
+        const director = window.__trainWindow.director, onTrack = director.onTrack;
+        director.onTrack = () => {};
         // first, out into the open
         for (let i = 0; i < 12 && (d.tunnel || d.queued); i++) {
           const t = d.tunnel;
@@ -305,6 +309,7 @@ const outDir = process.argv[2] || '.';
         out.leaving = await tick(() => d.tunnel && d.tunnel.phase === 'leaving');
         await next();
         out.queuedAfter = d.queued ? d.queued.biome : null; out.keptC = d.biome === out.c; out.dLabel = label();
+        director.onTrack = onTrack;
         return out;
       });
       R.ok = R.open && R.openLabel && !R.openLabel.startsWith('→') && !!R.a && R.aLabel.startsWith('→ ') && !!R.b && R.b !== R.a && R.bLabel.startsWith('→ ') && R.bLabel !== R.aLabel && R.stillHome
