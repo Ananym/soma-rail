@@ -13,8 +13,8 @@
 // so a tower cut by a chunk border is generated identically by both chunks and the halves meet.
 //
 // The beat: the towers and hills stay still (beatKinds below); houses, pagodas, temples, trees,
-// boats, people, buffalo and village lanterns answer it. Mist and kitchen smoke billow
-// (MOVE.VAPOUR), washing and boat pennants flutter (MOVE.FLAG).
+// boats, carts and village lanterns swell with it; people and animals brighten (MOVE.FLASH). Mist
+// and kitchen smoke billow (MOVE.VAPOUR), washing and boat pennants flutter (MOVE.FLAG).
 //
 // The country is worked and lived in (see "People and working animals"): buffalo ploughing,
 // wallowing, grazing, led and ridden; planters bent in rows; people on the bunds with carrying
@@ -33,6 +33,8 @@
 //             (a river running level through the air was tried and removed: from the train it
 //             read as a flat grey slab, not as water)
 //   logic     the same pagoda on the same mound repeating along the line, each copy slightly wrong
+// and, at the dreamlike level, a red and gold dragon weaving among the towers of the middle
+// distance, chasing its flaming pearl (see "the dragon" near the end of the file).
 import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
 import {
   KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, groundY, detail, shade, jitter, mul3, mix3, smooth,
@@ -1317,10 +1319,16 @@ export function* archBridge(ctx, out, x, d, opts = {}) {
 // People and working animals. Drawn larger than life (people 1.5 times, buffalo 1.6 times, and
 // larger again beyond 90 m) so that they read from a moving train; a fixed handful of shaped
 // splats each, whatever the budget; limbs, poles, cords and horns are struts sized from distance.
-// Every splat is tagged MOVE.BEAT. Each figure is built in its own frame: u along its heading,
-// h up, v to its left, in life-size metres times the frame's scale.
+// The people and animals are tagged MOVE.FLASH (they brighten on the beat; a swelling body looks
+// uncanny); what they carry, pull or ride in (poles, baskets, ploughs, carts, bicycles, ladders,
+// stalls) is MOVE.BEAT and swells. ell() and lim() take the class from MV, which living() sets to
+// FLASH while a person or an animal is drawn. Each figure is built in its own frame: u along its
+// heading, h up, v to its left, in life-size metres times the frame's scale.
 // ---------------------------------------------------------------------------------------------
-const BEAT = MOVE.BEAT, KO = KIND.OTHER;
+const BEAT = MOVE.BEAT, FLASH = MOVE.FLASH, KO = KIND.OTHER;
+let MV = BEAT;
+// Draws a person or an animal: every ell() and lim() inside it is tagged FLASH.
+function living(fn, args) { const m = MV; MV = FLASH; try { return fn(...args); } finally { MV = m; } }
 const PK = 1.5, BK = 1.6;
 const farK = (d) => 1 + 0.45 * smooth(45, 170, d);
 const CLOTH = [[0.16, 0.22, 0.42], [0.76, 0.75, 0.7], [0.66, 0.22, 0.18], [0.3, 0.45, 0.62], [0.46, 0.43, 0.28], [0.11, 0.11, 0.13], [0.72, 0.42, 0.46], [0.74, 0.6, 0.2]];
@@ -1340,18 +1348,19 @@ function frame(x, y, d, yaw, k) {
 // A frame standing at (u, v) of frame f, h above its base, turned by `turn`, at scale k.
 function sub(f, u, v, k = f.k, turn = 0, h = 0) { return frame(f.x + (u * f.ca - v * f.sa) * f.k, f.y + h * f.k, f.d + (u * f.sa + v * f.ca) * f.k, f.yaw + turn, k); }
 // An ellipsoid: ru along the heading (tilted up by `pitch`), rh up, rv across.
-function ell(out, f, u, h, v, ru, rh, rv, c, pitch = 0, move = BEAT, kind = KO) {
+function ell(out, f, u, h, v, ru, rh, rv, c, pitch = 0, move = MV, kind = KO) {
   const p = f.P(u, h, v), cp = Math.cos(pitch), q = quatXTo(f.ca * cp, Math.sin(pitch), -f.sa * cp);
   out(p[0], p[1], p[2], ru * f.k, rh * f.k, rv * f.k, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind, move);
 }
 // A limb, pole or cord from a to b (points from f.P), r thick in life-size metres.
-function lim(out, f, a, b, r, c, n = 2, move = BEAT) { strutM(out, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(r * f.k, f.thin), c, n, KO, move); }
+function lim(out, f, a, b, r, c, n = 2, move = MV) { strutM(out, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(r * f.k, f.thin), c, n, KO, move); }
 function ripple(out, x, y, d, rx, rz, c = [0.7, 0.73, 0.73], op = 0.6) { out(x, y + 0.03, -d, rx, 0.025, rz, c[0], c[1], c[2], op, 0, 0, 0, 1, KIND.GROUND); }
 
 // A person. o: { pose: 'stand' | 'walk' | 'bent' (planting, double) | 'squat' | 'sit', arms: 'down' |
 // 'swing' | 'fwd' | 'up' | 'low' | 'pole', hat (a conical straw hat; default yes for adults), wade
 // (metres of leg under water or crop, not drawn), seat (sitting height), shirt, child }
-function person(out, f, r, o = {}) {
+function person(...a) { return living(personBody, a); }
+function personBody(out, f, r, o = {}) {
   const pose = o.pose || 'stand', wade = o.wade || 0;
   const shirt = o.shirt || pick(o.child ? KIDS : CLOTH, r), trous = r() < 0.7 ? [0.13, 0.14, 0.18] : [0.3, 0.3, 0.34], skin = pick(SKIN, r);
   const hat = o.hat != null ? o.hat : !o.child, hd = o.child ? 1.25 : 1;
@@ -1404,7 +1413,8 @@ function shoulderPole(out, f, r, load = pick(LOADS, r)) {
 // A water buffalo: a heavy slate-grey body with a deep belly, the head carried low and forward,
 // and the great crescent horns swept back over the neck. o: { pose: 'stand' | 'graze' | 'wallow'
 // (only the back, the head and the horns above the water), wade, egret, col }
-function buffalo(out, f, r, o = {}) {
+function buffalo(...a) { return living(buffaloBody, a); }
+function buffaloBody(out, f, r, o = {}) {
   const pose = o.pose || 'stand', wade = o.wade || 0;
   const base = o.col || jitter([0.22, 0.21, 0.21], r, 0.12), hi = [base[0] * 1.5 + 0.04, base[1] * 1.5 + 0.04, base[2] * 1.5 + 0.05], lo = mul3(base, 0.72);
   const horns = (u, h, bu, bh) => {       // from the poll, sweeping out and back along (bu, bh)
@@ -1441,7 +1451,8 @@ function buffalo(out, f, r, o = {}) {
   if (o.egret) egret(out, sub(f, -0.3, 0, 1.7 * f.k / BK, 0, 1.3));
 }
 // A white egret (frame scale about 1.7).
-function egret(out, f) {
+function egret(...a) { return living(egretBody, a); }
+function egretBody(out, f) {
   const w = [0.8, 0.8, 0.77];
   for (const v of [-0.04, 0.04]) lim(out, f, f.P(0, 0.5, v), f.P(0.02, 0, v), 0.012, [0.14, 0.14, 0.12], 1);
   ell(out, f, -0.03, 0.6, 0, 0.21, 0.1, 0.1, w, 0.45);
@@ -1450,13 +1461,15 @@ function egret(out, f) {
   lim(out, f, f.P(0.24, 1.0, 0), f.P(0.4, 0.96, 0), 0.014, [0.78, 0.6, 0.16], 1);
 }
 // A duck on the water (frame scale about 1.8).
-function duck(out, f, c) {
+function duck(...a) { return living(duckBody, a); }
+function duckBody(out, f, c) {
   ell(out, f, 0, 0.11, 0, 0.2, 0.1, 0.13, c);
   ell(out, f, 0.19, 0.27, 0, 0.065, 0.065, 0.065, c);
   ell(out, f, 0.28, 0.25, 0, 0.05, 0.022, 0.035, [0.78, 0.5, 0.12]);
 }
 // A fishing cormorant, upright, hooked bill; `spread` holds its wings out to dry.
-function cormorant(out, f, spread) {
+function cormorant(...a) { return living(cormorantBody, a); }
+function cormorantBody(out, f, spread) {
   const c = [0.07, 0.07, 0.08];
   ell(out, f, 0, 0.32, 0, 0.21, 0.1, 0.1, c, 1.15);
   lim(out, f, f.P(0.07, 0.5, 0), f.P(0.1, 0.74, 0), 0.035, c, 1);
@@ -1476,6 +1489,7 @@ function* cyclist(ctx, out, f, r, load, night) {
   wheel(out, f, -0.52, 0.34, 0, 0.34, fc); wheel(out, f, 0.52, 0.34, 0, 0.34, fc);
   for (const [a, b] of [[[-0.52, 0.34], [-0.18, 0.9]], [[-0.18, 0.9], [0.36, 0.86]], [[0.36, 0.86], [0.52, 0.34]], [[-0.18, 0.9], [0.02, 0.32]], [[0.02, 0.32], [0.36, 0.86]], [[-0.52, 0.34], [0.02, 0.32]], [[0.36, 0.86], [0.34, 1.06]]]) lim(out, f, f.P(a[0], a[1], 0), f.P(b[0], b[1], 0), 0.02, fc, 1);
   const shirt = pick(CLOTH, r), trous = [0.14, 0.14, 0.18], skin = pick(SKIN, r);
+  const m0 = MV; MV = FLASH;        // the rider (the bicycle and the load stay BEAT)
   lim(out, f, f.P(-0.18, 0.98, 0.09), f.P(0.14, 0.7, 0.1), 0.065, trous); lim(out, f, f.P(0.14, 0.7, 0.1), f.P(0.04, 0.22, 0.1), 0.06, trous);
   lim(out, f, f.P(-0.18, 0.98, -0.09), f.P(0.1, 0.78, -0.1), 0.065, mul3(trous, 0.8)); lim(out, f, f.P(0.1, 0.78, -0.1), f.P(-0.02, 0.44, -0.1), 0.06, mul3(trous, 0.8));
   ell(out, f, -0.1, 1.28, 0, 0.3, 0.17, 0.19, shirt, 1.25);
@@ -1483,6 +1497,7 @@ function* cyclist(ctx, out, f, r, load, night) {
   ell(out, f, 0.04, 1.68, 0, 0.105, 0.11, 0.105, skin);
   if (r() < 0.75) { ell(out, f, 0.04, 1.8, 0, 0.3, 0.05, 0.3, STRAW); ell(out, f, 0.04, 1.88, 0, 0.14, 0.08, 0.14, mul3(STRAW, 0.9)); }
   else ell(out, f, 0.02, 1.76, 0, 0.11, 0.07, 0.11, [0.08, 0.07, 0.07]);
+  MV = m0;
   if (load) { const c = pick(LOADS, r); ell(out, f, -0.62, 1.08, 0, 0.26, 0.22, 0.3, c); ell(out, f, -0.6, 1.4, 0, 0.2, 0.14, 0.24, mul3(c, 0.85)); }
   if (night) { const p = f.P(0.5, 0.95, 0); yield* lamp(ctx, out, p[0], p[1], -p[2], [1, 0.9, 0.62], { size: 0.1, halo: 1 }); }
 }
@@ -1499,7 +1514,8 @@ function cart(out, f, r, R, reach, sh, load) {
   }
 }
 // A dog trotting.
-function dog(out, f, r) {
+function dog(...a) { return living(dogBody, a); }
+function dogBody(out, f, r) {
   const c = pick([[0.6, 0.45, 0.25], [0.2, 0.18, 0.16], [0.72, 0.7, 0.64]], r);
   for (const [u, v] of [[0.26, 0.07], [0.3, -0.07], [-0.26, 0.07], [-0.3, -0.07]]) lim(out, f, f.P(u, 0.34, v), f.P(u + 0.03, 0, v), 0.035, c, 1);
   ell(out, f, 0, 0.42, 0, 0.33, 0.14, 0.13, c);
@@ -1805,7 +1821,7 @@ function* villageScene(ctx, out, s, r) {
     const nh = 3 + Math.floor(r() * 4);
     for (let i = 0; i < nh; i++) {
       const g = frame(x + (r() - 0.5) * 7 * pk, s.y, s.d - 0.8 + (r() - 0.5) * 2.4, r() * 6.3, pk * 1.5), c = pick([[0.56, 0.3, 0.14], [0.76, 0.74, 0.68], [0.16, 0.14, 0.13]], r);
-      ell(out, g, 0, 0.17, 0, 0.13, 0.1, 0.09, c); ell(out, g, 0.12, 0.3, 0, 0.05, 0.05, 0.05, c); ell(out, g, 0.13, 0.36, 0, 0.03, 0.025, 0.02, [0.74, 0.14, 0.1]);
+      ell(out, g, 0, 0.17, 0, 0.13, 0.1, 0.09, c, 0, FLASH); ell(out, g, 0.12, 0.3, 0, 0.05, 0.05, 0.05, c, 0, FLASH); ell(out, g, 0.13, 0.36, 0, 0.03, 0.025, 0.02, [0.74, 0.14, 0.1], 0, FLASH);
     }
   }
   if (out.due()) yield;
@@ -3063,6 +3079,7 @@ function* mid(ctx, emit) {
   out.limit = Infinity;
   if ((dz.topology || 0) > 0) yield* floatingTowers(ctx, out, W, 1700, 800, 2600, dz.topology, 1);
   if ((dz.scale || 0) > 0) yield* needles(ctx, out, W, 2100, 900, 2800, dz.scale, 1);
+  if ((ctx.level || 0) >= 1) yield* dragons(ctx, out, W);
   // the landmarks: whole, and the towers below fit themselves to what is left
   yield* landmarks(ctx, out, W, ctx.zNear, ctx.zFar);
   out.limit = ctx.count * 0.9;
@@ -3206,6 +3223,249 @@ function* repeatingPagoda(ctx, out, W, logic) {
   }
 }
 
+// The dragon (level 1): a red and gold dragon weaving among the towers of the middle distance. One lives in
+// every DRCELL metres of line, its middle in the cell's middle third (so two are never in view at
+// once). Its spine is a pure function of the world (cached per world), weaving in depth and in
+// height in long S-curves, 850 to 1550 m out and wholly inside the mid band, so every mid chunk it
+// crosses draws only its own part and the towers' own depth order passes its coils in front of
+// some and behind others. Every splat is MOVE.SOLID (the matter dial would scatter a thing in the
+// sky into specks) but the tips of the mane's locks, the trailing half of the whiskers and the
+// tips of the tail tuft, which are MOVE.FLAG and ripple (kept small: a flag's flutter goes as its
+// own size, and a FLAG splat is scattered by the matter dial).
+// Only the eye and the flaming pearl it chases are lights.
+const DRCELL = 4600;
+const DRC = {
+  red: [0.72, 0.11, 0.06], redDeep: [0.48, 0.05, 0.04], gold: [0.8, 0.6, 0.15], goldPale: [0.8, 0.7, 0.38],
+  orange: [0.8, 0.36, 0.08], horn: [0.78, 0.7, 0.5], mouth: [0.3, 0.03, 0.04], tooth: [0.8, 0.78, 0.72],
+  eye: [1, 0.93, 0.45], pearl: [1, 0.92, 0.66], flame: [1, 0.56, 0.18],
+};
+const dragonCache = new WeakMap();
+function dragonOf(W, i) {
+  let m = dragonCache.get(W);
+  if (!m) { m = new Map(); dragonCache.set(W, m); }
+  return cache(m, i, () => makeDragon(W, i));
+}
+function makeDragon(W, i) {
+  const r = makeRng(hashInts(W.ws, 1501, i));
+  const wc = (i + 0.36 + 0.28 * r()) * DRCELL, dir = r() < 0.5 ? 1 : -1;
+  const dc = 850 + 700 * r();
+  const R = 0.0125 * dc * (0.92 + 0.2 * r());          // the chest's radius: 2.3 to 2.8 m across per 100 m out
+  const span = 360 + 140 * r();                        // metres of line between its head and its tail
+  const Ad = (90 + 80 * r()) * (dc / 1200), nd = 0.8 + 0.5 * r(), pd = r() * 6.283;
+  const Ay = 30 + 22 * r(), ny = 1.3 + 0.8 * r(), py = r() * 6.283;
+  // high enough to clear the trees by the line and fly among the tower tops: 10 to 14 degrees up
+  const yc = W.H(wc, dc) + (0.17 + 0.07 * r()) * dc;
+  const N = 480, X = new Float64Array(N + 1), Y = new Float64Array(N + 1), Z = new Float64Array(N + 1), S = new Float64Array(N + 1);
+  // (the weave flattened a little at a time until the whole body is at most 860 m long)
+  for (let kw = 1; ; kw *= 0.85) {
+    for (let k = 0; k <= N; k++) {
+      const t = k / N;      // 0 at the head
+      X[k] = wc + dir * (0.5 - t) * span;
+      Z[k] = -(dc + kw * Ad * Math.sin(6.283 * nd * t + pd));
+      // the head and neck carried high, the tail swinging lower
+      Y[k] = yc + kw * Ay * Math.sin(6.283 * ny * t + py) + 30 * Math.pow(1 - t, 3) - 25 * t * t;
+      if (k) S[k] = S[k - 1] + Math.hypot(X[k] - X[k - 1], Y[k] - Y[k - 1], Z[k] - Z[k - 1]);
+    }
+    if (S[N] <= 860 || kw < 0.3) break;
+  }
+  return { i, wc, dc, dir, R, span, X, Y, Z, S, L: S[N], N, x0: Math.min(X[0], X[N]) - 6 * R, x1: Math.max(X[0], X[N]) + 6 * R, seed: hashInts(W.ws, 1502, i) };
+}
+function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+const add3 = (p, a, ka, b = null, kb = 0, c = null, kc = 0) => [p[0] + a[0] * ka + (b ? b[0] * kb : 0) + (c ? c[0] * kc : 0), p[1] + a[1] * ka + (b ? b[1] * kb : 0) + (c ? c[1] * kc : 0), p[2] + a[2] * ka + (b ? b[2] * kb : 0) + (c ? c[2] * kc : 0)];
+// The spine at arc length s (0 = the back of the head): point p, unit tangent T (towards the tail),
+// N (up, square to T) and B = T x N.
+function dragonAt(g, s) {
+  s = clamp(s, 0, g.L);
+  let lo = 0, hi = g.N;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (g.S[m] <= s) lo = m; else hi = m; }
+  const f = (s - g.S[lo]) / Math.max(1e-6, g.S[hi] - g.S[lo]);
+  const p = [lerp(g.X[lo], g.X[hi], f), lerp(g.Y[lo], g.Y[hi], f), lerp(g.Z[lo], g.Z[hi], f)];
+  const T = norm3(g.X[hi] - g.X[lo], g.Y[hi] - g.Y[lo], g.Z[hi] - g.Z[lo]);
+  const N = norm3(-T[1] * T[0], 1 - T[1] * T[1], -T[1] * T[2]);
+  return { p, T, N, B: cross3(T, N) };
+}
+// Body radius along the spine (u = s / L): a slim neck behind the head, full at the chest, then
+// a long taper to the tail.
+function dragonR(g, u) { return g.R * (u < 0.14 ? lerp(0.66, 1, smooth(0, 0.14, u)) : lerp(1, 0.13, smooth(0.36, 1, u))); }
+// One splat at world point p (z = -d), its x axis along X and its y axis along Y (made square).
+function dsplat(out, x0, p, X, Y, sx, sy, sz, c, o, kind, move) {
+  const dt = Y[0] * X[0] + Y[1] * X[1] + Y[2] * X[2];
+  const Yn = norm3(Y[0] - dt * X[0], Y[1] - dt * X[1], Y[2] - dt * X[2]), Zn = cross3(X, Yn);
+  const q = quatBasis(X[0], X[1], X[2], Yn[0], Yn[1], Yn[2], Zn[0], Zn[1], Zn[2]);
+  out(p[0] - x0, p[1], p[2], sx, sy, sz, c[0], c[1], c[2], o, q[0], q[1], q[2], q[3], kind, move);
+}
+// A thin member (horn, claw, whisker) between two world points.
+function dstrut(out, x0, a, b, r, c, n, move = MOVE.SOLID) { strutM(out, a[0] - x0, a[1], a[2], b[0] - x0, b[1], b[2], r, c, n, KIND.SURREAL, move); }
+
+function* dragons(ctx, out, W) {
+  const L = ctx.length, x0 = ctx.x0;
+  for (let i = Math.floor((x0 - 1600) / DRCELL); i <= Math.floor((x0 + L + 1600) / DRCELL); i++) {
+    const g = dragonOf(W, i);
+    if (g.x1 < x0 - 20 || g.x0 > x0 + L + 20) continue;
+    note(ctx, 'dragon', g.wc, g.dc);
+    yield* dragon(ctx, out, g);
+  }
+}
+function* dragon(ctx, out, g) {
+  const x0 = ctx.x0, L = ctx.length, R = g.R, SO = MOVE.SOLID, FL = MOVE.FLAG, K = KIND.SURREAL;
+  const kd = clamp(Math.sqrt(out.density), 0.5, 1.3);
+  const night = isNight(ctx);
+  const lit = (c, n, amb = 0.66, sun = 0.5) => shade(c, n[0], n[1], n[2], amb, sun);
+  // --- the body: rings of overlapping scales, staggered row by row; red above, gold belly plates
+  // below; a crest of gold fins along the back, and the mane streaming from the neck ---
+  let s = 0, ring = 0;
+  while (s < g.L) {
+    const u = s / g.L, rr = dragonR(g, u), F = dragonAt(g, s);
+    const nth = clamp(Math.round((2 * Math.PI * rr) / (0.95 * R / kd)), 5, 12);
+    const circ = (2 * Math.PI * rr) / nth, ds = clamp(0.5 * circ, 0.07 * R, 0.4 * R);
+    if (F.p[0] > x0 - 3 * R && F.p[0] < x0 + L + 3 * R) {
+      const rg = makeRng(hashInts(g.seed, 7, ring));
+      const off = (ring % 2) * 0.5;
+      for (let j = 0; j < nth; j++) {
+        const th = ((j + off) / nth) * 2 * Math.PI;           // 0 on top, pi under the belly
+        const ct = Math.cos(th), st = Math.sin(th);
+        const n = [F.N[0] * ct + F.B[0] * st, F.N[1] * ct + F.B[1] * st, F.N[2] * ct + F.B[2] * st];
+        const Yc = [F.N[0] * st - F.B[0] * ct, F.N[1] * st - F.B[1] * ct, F.N[2] * st - F.B[2] * ct];
+        let c;
+        if (ct < -0.52) c = mix3(DRC.gold, DRC.goldPale, ring % 2 ? 0.0 : 0.45);              // the belly plates
+        else if (ct < -0.3) c = mix3(DRC.orange, DRC.redDeep, 0.4);                          // their edge
+        else c = mix3(DRC.red, DRC.redDeep, (ring % 2 ? 0.15 : 0.5) + 0.3 * rg() * (ct > 0.75 ? 0.6 : 1));     // the scales
+        dsplat(out, x0, add3(F.p, n, rr), F.T, Yc, ds * 0.95, circ * 0.66, circ * 0.3, lit(c, n), 1, K, SO);
+      }
+      // the crest: a gold fin on every second ring, raked back
+      if (ring % 2 === 0 && u > 0.05 && u < 0.93) {
+        const fh = rr * (0.85 + 0.3 * Math.sin(ring * 1.7)) * (1 - 0.4 * u);
+        const fd = norm3(F.N[0] - 0.75 * F.T[0], F.N[1] - 0.75 * F.T[1], F.N[2] - 0.75 * F.T[2]);
+        const base = add3(F.p, F.N, rr * 0.92);
+        dsplat(out, x0, add3(base, fd, fh * 0.35), fd, F.T, fh * 0.42, Math.max(ds * 0.8, rr * 0.16), rr * 0.07, lit(DRC.orange, F.N), 1, K, SO);
+        dsplat(out, x0, add3(base, fd, fh * 0.85), fd, F.T, fh * 0.3, Math.max(ds * 0.5, rr * 0.1), rr * 0.05, lit(DRC.gold, F.N, 0.75), 1, K, SO);
+      }
+      if (u < 0.13) {
+        for (const a of [-1.5, -0.75, 0, 0.75, 1.5]) {
+          const ca = Math.cos(a), sa = Math.sin(a);
+          const n = [F.N[0] * ca + F.B[0] * sa, F.N[1] * ca + F.B[1] * sa, F.N[2] * ca + F.B[2] * sa];
+          const hd = norm3(n[0] * 0.55 + F.T[0], n[1] * 0.55 + F.T[1], n[2] * 0.55 + F.T[2]);
+          const len = R * (1.0 + 0.5 * rg()) * (1 - u * 3);
+          // each lock SOLID, with a small FLAG tip that ripples: a flutter goes as the splat's own
+          // size, and the matter dial scatters all but SOLID, so whole locks would fly apart
+          const lc = lit(rg() < 0.5 ? DRC.gold : DRC.orange, n, 0.75);
+          dsplat(out, x0, add3(F.p, n, rr * 0.95, hd, len * 0.45), hd, n, len * 0.45, R * 0.26, R * 0.08, lc, 1, K, SO);
+          dsplat(out, x0, add3(F.p, n, rr * 0.95, hd, len * 0.95), hd, n, len * 0.16, R * 0.13, R * 0.05, lc, 1, K, FL);
+        }
+      }
+    }
+    if (out.due()) yield;
+    s += ds; ring++;
+  }
+  // --- four short legs with gold claws: the front pair under the chest, the hind pair half way back ---
+  for (const [ul, fwd] of [[0.17, 1], [0.52, -1]]) {
+    const F = dragonAt(g, ul * g.L), rr = 1.3 * dragonR(g, ul);   // (legs drawn a little stout, so they read)
+    if (F.p[0] < x0 - 4 * R || F.p[0] > x0 + L + 4 * R) continue;
+    const ahead = [-F.T[0], -F.T[1], -F.T[2]];
+    for (const sg of [-1, 1]) {
+      const hip = add3(F.p, F.B, sg * rr * 0.7, F.N, -rr * 0.35);
+      const knee = add3(hip, F.N, -rr * 0.95, F.B, sg * rr * 0.45, ahead, rr * 0.35 * fwd);
+      const foot = add3(knee, F.N, -rr * 0.55, ahead, rr * 0.75, F.B, sg * rr * 0.1);
+      dsplat(out, x0, add3(hip, F.N, -rr * 0.1), F.T, F.N, rr * 0.5, rr * 0.42, rr * 0.38, lit(DRC.red, F.B), 1, K, SO);    // the haunch
+      dstrut(out, x0, hip, knee, rr * 0.26, lit(DRC.red, F.B), 3);
+      dstrut(out, x0, knee, foot, rr * 0.2, lit(DRC.redDeep, F.B), 3);
+      dsplat(out, x0, add3(knee, F.T, rr * 0.45, F.N, rr * 0.1), F.T, F.N, rr * 0.42, rr * 0.12, rr * 0.08, lit(DRC.gold, F.N, 0.75), 1, K, SO);   // a flame of hair at the elbow
+      dsplat(out, x0, foot, ahead, F.B, rr * 0.2, rr * 0.16, rr * 0.18, lit(DRC.gold, F.N), 1, K, SO);
+      for (const cs of [-0.5, 0, 0.5]) dstrut(out, x0, foot, add3(foot, ahead, rr * 0.42, F.B, cs * rr * 0.4, F.N, -rr * 0.18), Math.max(rr * 0.06, 0.0008 * g.dc), DRC.horn, 2);
+    }
+  }
+  // --- the tail tuft: a fan of flame-shaped locks ---
+  {
+    const F = dragonAt(g, g.L), rg = makeRng(hashInts(g.seed, 9));
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 6 - 0.5) * 1.6, w = 0.25 * (rg() - 0.5);
+      const hd = norm3(F.T[0] + F.N[0] * a + F.B[0] * w, F.T[1] + F.N[1] * a + F.B[1] * w, F.T[2] + F.N[2] * a + F.B[2] * w);
+      const len = R * (0.9 + 0.5 * rg());
+      dsplat(out, x0, add3(F.p, hd, len * 0.5), hd, F.N, len * 0.5, R * 0.16, R * 0.08, lit(k % 2 ? DRC.gold : DRC.orange, F.N, 0.75), 1, K, SO);
+      dsplat(out, x0, add3(F.p, hd, len * 0.98), hd, F.N, len * 0.2, R * 0.09, R * 0.05, lit(DRC.red, F.N, 0.75), 1, K, FL);
+    }
+  }
+  // --- the head: long snout, open jaw, antlers, whiskers, beard, a bright eye ---
+  const F0 = dragonAt(g, 0);
+  const Fh = norm3(-F0.T[0] + 0.4 * g.dir, 0.3, -F0.T[2]);      // held up and forward, whatever the neck is doing
+  const up = F0.N, dt = up[0] * Fh[0] + up[1] * Fh[1] + up[2] * Fh[2];
+  const Uh = norm3(up[0] - Fh[0] * dt, up[1] - Fh[1] * dt, up[2] - Fh[2] * dt), Sh = cross3(Fh, Uh);
+  const Rh = 1.45 * R;   // the head is drawn large, as in the paintings
+  const O = add3(F0.p, Fh, Rh * 0.45, Uh, Rh * 0.12);
+  if (O[0] > x0 - 8 * Rh && O[0] < x0 + L + 8 * Rh) {
+    const P = (f, h, v) => add3(O, Fh, f * Rh, Uh, h * Rh, Sh, v * Rh);
+    // an ellipsoid in the head frame, pitched up by `pitch` about the side axis
+    const E = (f, h, v, a, b, c, col, pitch = 0, move = SO, kind = K, o = 1) => {
+      const cp = Math.cos(pitch), sp = Math.sin(pitch);
+      const X = norm3(Fh[0] * cp + Uh[0] * sp, Fh[1] * cp + Uh[1] * sp, Fh[2] * cp + Uh[2] * sp);
+      const Yv = [Uh[0] * cp - Fh[0] * sp, Uh[1] * cp - Fh[1] * sp, Uh[2] * cp - Fh[2] * sp];
+      dsplat(out, x0, P(f, h, v), X, Yv, a * Rh, b * Rh, c * Rh, col, o, kind, move);
+    };
+    const red = lit(mix3(DRC.red, DRC.orange, 0.2), Uh), redD = lit(DRC.redDeep, Uh), gold = lit(DRC.gold, Uh, 0.75), goldP = lit(DRC.goldPale, Uh, 0.75);
+    E(0.05, 0.12, 0, 0.82, 0.66, 0.62, red);                      // the skull
+    E(-0.35, -0.1, 0, 0.6, 0.55, 0.55, redD);                     // the nape, into the neck
+    E(1.25, 0.12, 0, 0.95, 0.36, 0.46, red, -0.08);               // the upper jaw and snout
+    E(1.15, 0.44, 0, 0.8, 0.08, 0.13, gold, -0.05);               // a gold ridge along the top of it
+    E(2.15, 0.28, 0, 0.32, 0.27, 0.4, redD);                      // the nose bulb
+    for (const v of [-0.26, 0.26]) E(2.3, 0.4, v, 0.1, 0.09, 0.09, DRC.mouth);      // nostrils
+    for (const v of [-0.3, 0.3]) E(1.35, -0.12, v, 0.85, 0.08, 0.1, gold, -0.08);   // gold lips
+    E(1.15, -0.24, 0, 0.75, 0.16, 0.3, DRC.mouth, -0.2);          // the open mouth, dark inside
+    E(1.05, -0.62, 0, 0.85, 0.17, 0.35, red, -0.55);              // the lower jaw, dropped open
+    E(1.05, -0.76, 0, 0.72, 0.08, 0.26, gold, -0.55);
+    for (const v of [-0.24, 0.24]) {                              // fangs, upper and lower
+      dstrut(out, x0, P(1.9, -0.12, v), P(1.95, -0.42, v), Rh * 0.05, DRC.tooth, 1);
+      dstrut(out, x0, P(1.72, -0.82, v * 0.9), P(1.8, -0.55, v * 0.9), Rh * 0.045, DRC.tooth, 1);
+    }
+    dstrut(out, x0, P(0.9, -0.4, 0), P(1.9, -0.55, 0), Rh * 0.07, [0.74, 0.2, 0.24], 3);     // the tongue, curling out
+    dstrut(out, x0, P(1.9, -0.55, 0), P(2.4, -0.35, 0), Rh * 0.05, [0.74, 0.2, 0.24], 2);
+    for (const v of [-0.4, 0.4]) {                                // gold brows, and the eye under each: a light
+      E(0.55, 0.55, v, 0.36, 0.13, 0.16, gold, 0.25);
+      E(0.6, 0.38, v * 1.1, 0.13, 0.12, 0.09, DRC.eye, 0, SO, KIND.LIGHT);
+    }
+    for (const v of [-0.55, 0.55]) for (const h of [0.15, -0.25]) {     // cheek frills, raked back (they ripple)
+      const hd = norm3(-Fh[0] + Sh[0] * v * 0.6 + Uh[0] * h, -Fh[1] + Sh[1] * v * 0.6 + Uh[1] * h, -Fh[2] + Sh[2] * v * 0.6 + Uh[2] * h);
+      dsplat(out, x0, add3(P(-0.1, h, v), hd, Rh * 0.45), hd, Uh, Rh * 0.5, Rh * 0.16, Rh * 0.06, h > 0 ? gold : goldP, 1, K, SO);
+    }
+    for (const v of [-0.32, 0.32]) {                              // antlers, swept back and up, each with a tine
+      const a = P(0.0, 0.62, v), b = P(-0.75, 1.3, v * 1.6), c = P(-1.7, 1.65, v * 2.0), t = P(-0.55, 2.0, v * 1.5);
+      dstrut(out, x0, a, b, Rh * 0.13, DRC.horn, 3); dstrut(out, x0, b, c, Rh * 0.1, DRC.horn, 3); dstrut(out, x0, b, t, Rh * 0.08, DRC.horn, 2);
+    }
+    for (let k = 0; k < 7; k++) {                                 // the great mane behind the skull, streaming back
+      const a = (k / 6 - 0.5) * 2.6, ca = Math.cos(a), sa = Math.sin(a);
+      const n = [Uh[0] * ca + Sh[0] * sa, Uh[1] * ca + Sh[1] * sa, Uh[2] * ca + Sh[2] * sa];
+      const hd = norm3(n[0] * 0.6 - Fh[0], n[1] * 0.6 - Fh[1], n[2] * 0.6 - Fh[2]);
+      dsplat(out, x0, add3(P(-0.45, 0.1, 0), n, Rh * 0.5, hd, Rh * 0.55), hd, n, Rh * 0.58, Rh * 0.2, Rh * 0.07, k % 2 ? gold : goldP, 1, K, SO);
+      dsplat(out, x0, add3(P(-0.45, 0.1, 0), n, Rh * 0.5, hd, Rh * 1.2), hd, n, Rh * 0.2, Rh * 0.1, Rh * 0.05, k % 2 ? gold : goldP, 1, K, FL);
+    }
+    const wr = Math.max(Rh * 0.045, 0.0007 * g.dc);                // whiskers from the snout, trailing back in a lazy curve
+    for (const v of [-1, 1]) {
+      let a = P(2.05, 0.05, v * 0.36);
+      for (let k = 1; k <= 6; k++) {
+        const b = P(2.05 - 0.85 * k, 0.05 - 0.32 * k + 0.02 * k * k + 0.25 * Math.sin(k * 1.1), v * (0.36 + 0.22 * k));
+        // the root half SOLID; the trailing half FLAG, in short pieces so its ripple stays small
+        if (k <= 3) dstrut(out, x0, a, b, wr * (1 - 0.06 * k), goldP, 2);
+        else dstrut(out, x0, a, b, wr * (1 - 0.06 * k), goldP, 4, FL);
+        a = b;
+      }
+    }
+    for (let k = 0; k < 5; k++) {                                 // the beard under the chin
+      const w = (k - 2) * 0.15, hd = norm3(-Uh[0] - Fh[0] * 0.45 + Sh[0] * w, -Uh[1] - Fh[1] * 0.45 + Sh[1] * w, -Uh[2] - Fh[2] * 0.45 + Sh[2] * w);
+      dsplat(out, x0, add3(P(0.75 - 0.12 * k, -0.75, (k - 2) * 0.1), hd, Rh * 0.4), hd, Sh, Rh * 0.42, Rh * 0.1, Rh * 0.07, k % 2 ? goldP : gold, 1, K, SO);
+    }
+    // the flaming pearl it chases, ahead of the jaws
+    // (a white-gold ball ringed by tongues of flame licking outwards and up)
+    const pp = P(4.4, 0.8, 0), pr = Rh * 0.55;
+    dsplat(out, x0, pp, Fh, Uh, pr * 2.2, pr * 2.2, pr * 2.2, DRC.flame, night ? 0.2 : 0.1, KIND.LIGHT, SO);
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * 2 * Math.PI, ca = Math.cos(a), sa = Math.sin(a);
+      const hd = norm3(Uh[0] * (ca + 0.6) + Fh[0] * sa, Uh[1] * (ca + 0.6) + Fh[1] * sa, Uh[2] * (ca + 0.6) + Fh[2] * sa);
+      dsplat(out, x0, add3(pp, hd, pr * 1.25), hd, Sh, pr * (ca > 0 ? 0.7 : 0.45), pr * 0.24, pr * 0.24, DRC.flame, 0.85, KIND.LIGHT, SO);
+    }
+    dsplat(out, x0, pp, Fh, Uh, pr, pr, pr, DRC.pearl, 1, KIND.LIGHT, SO);
+  }
+  if (out.due()) yield;
+}
+
 export const karstBiome = {
   name: 'karst',
   palette: PAL,
@@ -3216,9 +3476,10 @@ export const karstBiome = {
   shares: { trackside: 0.15, near: 0.39, mid: 0.27, far: 0.19 },
   // The towers and hills are the scenery, so they stay still on the beat. What answers it: houses,
   // pagodas and pavilions (BUILDING), trees and bamboo clumps (TREE; hill crowns, groves and mounds
-  // are HEDGE), and, tagged MOVE.BEAT by hand, the people and animals (in the fields, on the
-  // bunds, the lane, the river bank and the rafts, in the villages), market awnings, lotus flowers
-  // and the lanterns strung in the villages. Lights always do.
+  // are HEDGE), and, tagged MOVE.BEAT by hand, the boats and rafts, carts and bicycles, what people
+  // carry, market awnings, lotus flowers and the lanterns strung in the villages. The people and
+  // animals (in the fields, on the bunds, the lane, the river bank and the rafts, in the villages)
+  // are MOVE.FLASH: they brighten on the beat without swelling. Lights always answer it.
   beatKinds: [KIND.BUILDING, KIND.TREE],
 
 
@@ -3226,4 +3487,4 @@ export const karstBiome = {
 };
 
 // for scripts that inspect the layout
-export const _debug = { world, surface, towersIn, riverN, riverW, village, terraceSite, moundSite, stream, streamX, laneD, laneOn, landUse: (W, wx) => ({ ...landUse(W, wx) }), landmark, riverBridge };
+export const _debug = { world, surface, towersIn, riverN, riverW, village, terraceSite, moundSite, stream, streamX, laneD, laneOn, landUse: (W, wx) => ({ ...landUse(W, wx) }), landmark, riverBridge, dragonOf, dragonAt, DRCELL };
