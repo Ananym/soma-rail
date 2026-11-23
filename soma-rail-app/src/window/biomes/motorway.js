@@ -2102,7 +2102,7 @@ export const motorwayBiome = {
   holdHours: true,   // its lights are baked into the scenery: never let the clock run on into day
   // the night sky is the other half of this biome: more and fainter stars, the Milky Way, few
   // clouds, and a horizon lowered in the frame so the sky has most of the window
-  sky: { stars: 1.25, deep: 1, milkyWay: 1, clear: 0.8 },
+  sky: { stars: 1.25, deep: 1, milkyWay: 1, clear: 0.8, constellations: 1 },
   horizon: 0.3,
   generators: { trackside, near, mid, far },
 };
