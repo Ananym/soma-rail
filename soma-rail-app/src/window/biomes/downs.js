@@ -15,7 +15,7 @@
 // of small squares (fieldBales). About one site a kilometre or two has a machine at work or parked
 // (makeSite, machines): a tractor with a baler, a trailer of bales, a plough or a sprayer, or
 // parked by a gate; now and then a combine opening up a wheat field. Machines and bales keep
-// still on the beat (MOVE.SOLID), drivers brighten (MOVE.FLASH), standing crops sway (MOVE.SWAY).
+// still on the beat (MOVE.STILL), drivers brighten (MOVE.FLASH), standing crops sway (MOVE.SWAY).
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     giant trees and a monolith in the far band
@@ -628,7 +628,7 @@ function* fieldContents(ctx, out, L, dLo, dHi, margin, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Farm machinery and bales. They do not answer the beat (MOVE.SOLID, which also keeps the raised
+// Farm machinery and bales. They do not answer the beat (MOVE.STILL, which also keeps the raised
 // rule off them): a swell lifts each splat by its own size, so a rigid thing built from big and
 // small pieces (a bale's flat ends and its thin rim) came apart into spikes on every beat. The
 // only person, a tractor driver, brightens (MOVE.FLASH).
@@ -643,7 +643,7 @@ function faceTone(c, nx, ny, nz) {
 }
 
 // A frame for building a machine in its own metres: local x forward, y up, z to its left, turned by
-// yaw and scaled by S about a point on the ground. Every splat is MOVE.SOLID unless told otherwise.
+// yaw and scaled by S about a point on the ground. Every splat is MOVE.STILL unless told otherwise.
 // Splats are gathered, not emitted: `yield* flush(out, R)` sends them, yielding as it goes.
 function rig(ctx, out0, wx, d, yaw, S, base) {
   const buf = [];
@@ -656,7 +656,7 @@ function rig(ctx, out0, wx, d, yaw, S, base) {
     // world (splat space) position of a local point
     pos(lx, ly, lz) { return [X + S * (cs * lx + sn * lz), Y + S * ly, Z + S * (-sn * lx + cs * lz)]; },
     // a splat in local coordinates; q is an extra local rotation
-    p(lx, ly, lz, sx, sy, sz, c, q, move = MOVE.SOLID, o = 1) {
+    p(lx, ly, lz, sx, sy, sz, c, q, move = MOVE.STILL, o = 1) {
       const qq = q ? quatMul(qy, q) : qy;
       out(X + S * (cs * lx + sn * lz), Y + S * ly, Z + S * (-sn * lx + cs * lz), S * sx, S * sy, S * sz, c[0], c[1], c[2], o, qq[0], qq[1], qq[2], qq[3], KIND.OTHER, move);
     },
@@ -687,7 +687,7 @@ function rig(ctx, out0, wx, d, yaw, S, base) {
       face(x0, y0, z0, 0, 0, 1, D, 0, 1, 0, H, -1, 0, 0, opts.back || c);
     },
     // a thin straight member between two local points (kit strut, with the frame's motion class)
-    bar(ax, ay, az, bx, by, bz, r, c, n, move = MOVE.SOLID) {
+    bar(ax, ay, az, bx, by, bz, r, c, n, move = MOVE.STILL) {
       const [px, py, pz] = R.pos(ax, ay, az), [qx, qy2, qz] = R.pos(bx, by, bz);
       const dx = qx - px, dy = qy2 - py, dz = qz - pz, len = Math.hypot(dx, dy, dz) || 1e-6;
       const q = quatXTo(dx / len, dy / len, dz / len);

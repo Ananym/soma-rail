@@ -81,6 +81,10 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             above its root, swinging once for every two beats of the music as a wave that runs
 //             across the field, with a nudge on each beat. Only through swayBlob() and swayStrut()
 //             below (the thin axis carries the height above the root).
+//   STILL     does nothing on the beat, whatever its KIND and however high it stands: for rigid
+//             things (vehicles, boats, carts, machines, bales, crates). A swell lifts each splat
+//             by a share of its own size, so a rigid thing built from big and small pieces comes
+//             apart on every beat. (Unlike SOLID, it is still scattered at the dreamlike level.)
 //   RIDE      a rider on the ground (a cyclist): carried along the line at about a sixth of the
 //             train's speed, and brightens on the beat like FLASH. Only through rideCell() below.
 //   FALL      falls, and comes round again at the top of a 16 m column about the eye's height: a
@@ -88,7 +92,7 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
 //             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11, SWAY: 12 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11, SWAY: 12, STILL: 13 };
 // A chorus tag for group g (0..7): pass chorus(g) as the motion class.
 export const chorus = (g) => MOVE.CHORUS | ((g & 7) << 4);
 
