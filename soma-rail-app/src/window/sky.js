@@ -664,7 +664,7 @@ export function createSky(THREE) {
   // ones still showing with a 0.12 s release, so each beat holds its own subset without a pop.
   // A figure surfacing by itself (no music) runs the same envelope 2.5 times slower.
   const con = { clock: 0, t0: new Float64Array(N_CON).fill(-1e9), cut: new Float64Array(N_CON).fill(1e9), slow: new Float64Array(N_CON).fill(1),
-    peak: new Float64Array(N_CON).fill(1), bag: [], bagSeed: 1, lastOnset: -1e9, idleNext: 8, pin: null };
+    peak: new Float64Array(N_CON).fill(1), bag: [], bagSeed: 1, lastOnset: -1e9, idleNext: 8, nextAt: 4, pin: null };
   const conCentre = CONSTELLATIONS.map((c) => {
     const az = (c.at[0] * Math.PI) / 180, el = (c.at[1] * Math.PI) / 180;
     return [Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)];
@@ -707,18 +707,23 @@ export function createSky(THREE) {
     con.clock += Math.max(dt, 0);
     const now = con.clock;
     U.uConOn.value = on || con.pin ? 1 : 0;
-    // while figures are on, the beat is answered mostly by them: a tenth of the ordinary stars
-    // flare instead of a third (and of the faint field, a twelfth instead of two fifths)
-    U.uFlareThr.value.set(on ? 0.9 : 0.66, on ? 0.92 : 0.6);
-    if (on && live && onset) {
-      const h = (Math.sin(beatSeq * 12.9898) * 43758.5453) % 1, f = Math.abs(h);
-      conStart(conDeal(f < 0.45 ? 1 : f < 0.85 ? 2 : 3, aspect, shift), 1, 0.7 + 0.3 * beat);
-      con.lastOnset = now;
+    // The ordinary stars answer every beat as they do everywhere (a third of them flare). A figure
+    // is the rare event on top of that: now and then, never sooner than a quarter of a minute
+    // after the last, a beat lights one constellation (two, once in a while), which lingers for
+    // a second or two while the beats go on beneath it.
+    U.uFlareThr.value.set(0.66, 0.6);
+    if (on && live && onset && now >= con.nextAt) {
+      const f = Math.abs((Math.sin(beatSeq * 12.9898) * 43758.5453) % 1);
+      if (f < 0.3) {
+        conStart(conDeal(f < 0.045 ? 2 : 1, aspect, shift), 1.8, 0.8 + 0.2 * beat);
+        con.nextAt = now + 15 + 15 * Math.random();
+      }
     }
-    // with no music, one figure surfaces by itself every 10 to 20 s
+    if (onset) con.lastOnset = now;
+    // with no music, one figure surfaces by itself every half minute or so
     if (on && live && now - con.lastOnset > 6 && now > con.idleNext) {
       conStart(conDeal(1, aspect, shift), 2.5, 0.85);
-      con.idleNext = now + 10 + 10 * Math.random();
+      con.idleNext = now + 25 + 20 * Math.random();
     }
     if (!(on && live)) for (let k = 0; k < N_CON; k++) con.cut[k] = Math.min(con.cut[k], now);   // stopped, reduced motion, day
     for (let k = 0; k < N_CON; k++) {
