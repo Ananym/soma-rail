@@ -88,6 +88,7 @@ import { winterBiome } from './winter.js';
 import { fujiBiome } from './fuji.js';
 import { tropicsBiome } from './tropics.js';
 import { alpsBiome } from './alps.js';
+import { monsoonBiome } from './monsoon.js';
 
 export const BIOMES = {
   downs: downsBiome,
@@ -102,6 +103,7 @@ export const BIOMES = {
   fuji: fujiBiome,
   tropics: tropicsBiome,
   alps: alpsBiome,
+  monsoon: monsoonBiome,
   placeholder: placeholderBiome,
 };
 
