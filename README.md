@@ -46,7 +46,7 @@ Open http://localhost:5173
 
 ## The train window
 
-The view is a landscape of Gaussian splats sliding past, under a shader sky, behind a carriage window frame. It needs a browser with WebGL2 and a graphics card behind it. Without WebGL2 the start screen says the view cannot be drawn; where the browser can only draw in software (hardware acceleration switched off or blocked, as on some work laptops and remote desktops) it warns that the view will be very slow and says what to change. Once running, a view that stays under 14 frames a second for ten seconds puts up a notice offering fewer splats. The radio plays on in every case. The design is in [`docs/procedural-train-window.md`](docs/procedural-train-window.md).
+The view is a landscape of Gaussian splats sliding past, under a shader sky, behind a carriage window frame. It needs a browser with WebGL2 and a graphics card behind it. Without WebGL2 the start screen says the view cannot be drawn; where the browser can only draw in software (hardware acceleration switched off or blocked, as on some work laptops and remote desktops) it warns that the view will be very slow and says what to change. Once running, a view that stays under 14 frames a second for twenty seconds puts up a notice offering fewer splats. The radio plays on in every case. The design is in [`docs/procedural-train-window.md`](docs/procedural-train-window.md).
 
 What it does today:
 

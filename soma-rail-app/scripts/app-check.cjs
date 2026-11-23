@@ -94,14 +94,15 @@ const outDir = process.argv[2] || '.';
     });
     state.goneAtOnce = goneAtOnce;
     // A view that stays very slow must say so (TrainWindow's watchSpeed, App's .slow-notice). This
-    // renderer usually is that slow at the default budget: where the engine's own frame rate stays
-    // under 12 for the whole wait, the notice must come up, offer fewer splats, and go when dismissed.
+    // renderer usually is that slow at the default budget: if the engine's own frame rate is seen
+    // under 14 for 35 seconds running, the notice must have come up; and when it does it must offer
+    // fewer splats, and go when dismissed.
     let slow = null;
     if (c.budgetControl && warn.software) {
-      slow = { worstFps: 0, shown: false };
-      for (let i = 0; i < 90 && !slow.shown; i++) {
+      slow = { slowRun: 0, longestSlowRun: 0, shown: false };
+      for (let i = 0; i < 150 && !slow.shown; i++) {
         const s = await page.evaluate(() => ({ fps: window.__trainWindow ? window.__trainWindow.stats().fps : 99, kmh: window.__trainWindow ? window.__trainWindow.stats().kmh : 0, shown: !!document.querySelector('.slow-notice') }));
-        slow.shown = s.shown; if (s.kmh > 5) slow.worstFps = Math.max(slow.worstFps, s.fps);
+        slow.shown = s.shown; slow.slowRun = s.kmh > 5 && s.fps < 14 ? slow.slowRun + 1 : 0; slow.longestSlowRun = Math.max(slow.longestSlowRun, slow.slowRun);
         if (!slow.shown) await page.waitForTimeout(1000);
       }
       if (slow.shown) {
@@ -110,7 +111,7 @@ const outDir = process.argv[2] || '.';
         await page.waitForTimeout(400);
         slow.goneAfterDismiss = await page.evaluate(() => !document.querySelector('.slow-notice'));
       }
-      slow.ok = slow.shown ? slow.offersFewer && slow.goneAfterDismiss : slow.worstFps >= 12;   // not slow enough here to owe a notice
+      slow.ok = slow.shown ? slow.offersFewer && slow.goneAfterDismiss : slow.longestSlowRun < 35;   // else: not slow for long enough here to owe a notice
     }
     // Distraction in the generated view brakes the train instead of fading to black. Check the wiring:
     // losing focus must lower the rate the director runs at, and nothing may draw a black overlay.

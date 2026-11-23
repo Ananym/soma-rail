@@ -249,17 +249,19 @@ function nextBiome() {
 }
 // What the overlay shows: where we are and what is coming.
 let lastPublished = '';
-// Is the view struggling? Ten seconds on end at under 14 frames a second, with the resolution
-// already turned down as far as the engine will take it, while the train is moving in the open
-// and the page is in front. (Whether chunks are still being generated is not asked: on a machine
-// this slow they always are.) Once said it stays said: the app offers the remedy once.
-let slowTicks = 0, struggling = false;
+// Is the view struggling? Twenty seconds on end at under 14 frames a second while the train is
+// moving in the open and the page is in front. Timed by the clock, not by counting calls: on a
+// machine this slow the timers that call this are starved too. (The engine lowers its resolution
+// by itself when frames are slow, which takes it about twelve seconds; twenty gives that a chance
+// to be the cure. Whether chunks are still being generated is not asked: on a slow machine they
+// always are.) Once said it stays said: the app offers the remedy once.
+let slowSince = 0, struggling = false;
 function watchSpeed(s) {
   if (struggling) return;
-  const st = engine.stats();
+  const st = engine.stats(), now = Date.now();
   const fair = typeof document !== 'undefined' && document.visibilityState === 'visible' && !st.idle && st.kmh > 5 && !s.tunnel;
-  slowTicks = fair && st.fps < 14 && st.resScale <= 0.45 ? slowTicks + 1 : 0;
-  if (slowTicks >= 25) struggling = true;
+  if (fair && st.fps < 14) { if (!slowSince) slowSince = now; } else slowSince = 0;
+  if (slowSince && now - slowSince > 20000) struggling = true;
 }
 function publish() {
   if (!engine) return;
