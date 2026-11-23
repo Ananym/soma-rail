@@ -150,14 +150,16 @@ const stuckWatch = setInterval(() => {
   const stuck = !!el && props.resume && !!el.getAttribute('src') && !el.error && el.readyState === 0;
   if (!stuck) { stuckSince = 0; if (el && el.readyState >= 2) stallTries = 0; return; }
   if (!stuckSince) { stuckSince = Date.now(); return; }
-  if (Date.now() - stuckSince < (el.networkState === 3 ? 4000 : 10000)) return;
+  // (more patient each time, up to a minute: a slow connection must be given the chance to deliver)
+  const patience = (el.networkState === 3 ? 4000 : 10000) + Math.min(50000, 8000 * stallTries);
+  if (Date.now() - stuckSince < patience) return;
   stuckSince = 0;
   const m = el.src.match(/(ice[1-6])\.somafm\.com/);
-  if (m && stallTries < 5) {
+  if (m) {
     const next = STALL_SERVERS[(STALL_SERVERS.indexOf(m[1]) + 1) % STALL_SERVERS.length];
     el.src = el.src.replace(/ice[1-6]\.somafm\.com/, `${next}.somafm.com`);
-    stallTries++;
   }
+  stallTries++;
   console.log('Stream gave no data: asking again', el.src);
   el.load();
 }, 2000);
