@@ -90,6 +90,25 @@ const outDir = process.argv[2] || '.';
       };
     });
     state.goneAtOnce = goneAtOnce;
+    // A view that stays very slow must say so (TrainWindow's watchSpeed, App's .slow-notice). This
+    // renderer usually is that slow at the default budget: where the engine's own frame rate stays
+    // under 12 for the whole wait, the notice must come up, offer fewer splats, and go when dismissed.
+    let slow = null;
+    if (c.budgetControl && warn.software) {
+      slow = { worstFps: 0, shown: false };
+      for (let i = 0; i < 90 && !slow.shown; i++) {
+        const s = await page.evaluate(() => ({ fps: window.__trainWindow ? window.__trainWindow.stats().fps : 99, kmh: window.__trainWindow ? window.__trainWindow.stats().kmh : 0, shown: !!document.querySelector('.slow-notice') }));
+        slow.shown = s.shown; if (s.kmh > 5) slow.worstFps = Math.max(slow.worstFps, s.fps);
+        if (!slow.shown) await page.waitForTimeout(1000);
+      }
+      if (slow.shown) {
+        slow.offersFewer = await page.evaluate(() => [...document.querySelectorAll('.slow-notice button')].some((b) => b.textContent.trim() === 'Use fewer splats'));
+        await page.evaluate(() => [...document.querySelectorAll('.slow-notice button')].find((b) => b.textContent.trim() === 'Dismiss').click());
+        await page.waitForTimeout(400);
+        slow.goneAfterDismiss = await page.evaluate(() => !document.querySelector('.slow-notice'));
+      }
+      slow.ok = slow.shown ? slow.offersFewer && slow.goneAfterDismiss : slow.worstFps >= 12;   // not slow enough here to owe a notice
+    }
     // Distraction in the generated view brakes the train instead of fading to black. Check the wiring:
     // losing focus must lower the rate the director runs at, and nothing may draw a black overlay.
     // (How fast it brakes cannot be judged here: on a software renderer the page's timers starve,
@@ -347,7 +366,7 @@ const outDir = process.argv[2] || '.';
     // through a proxy: a connection reset on a request that is simply made again. Nothing else is excused.
     if (process.env.IDLE === '1' || c.distraction) for (let i = ours.length - 1; i >= 0; i--) if (/net::ERR_CONNECTION_RESET/.test(ours[i])) ours.splice(i, 1);
     if (youtube.length) ours.push(`requests to YouTube hosts: ${youtube.length}`);
-    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); console.log('start warning:', JSON.stringify(warn)); if (brake) console.log(c.touch ? 'touch:' : c.budgetControl ? 'budget:' : 'brake:', JSON.stringify(brake));
+    console.log(`\n== ${name}`); console.log(JSON.stringify(state)); console.log('start warning:', JSON.stringify(warn)); if (slow) console.log('slow notice:', JSON.stringify(slow)); if (brake) console.log(c.touch ? 'touch:' : c.budgetControl ? 'budget:' : 'brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }
     const audioOk = state.audio && !state.audio.paused && state.audio.time > 0.5;
     const viewOk = c.expect === 'notice'
@@ -356,8 +375,8 @@ const outDir = process.argv[2] || '.';
     const tapOk = c.tap === undefined ? true
       : c.tap ? !!(state.tap && (c.tap === 'attached' || state.tap.active) && state.tap.context === 'running' && state.audio.crossOrigin === 'anonymous')
         : !state.tap && state.audio.crossOrigin === null;
-    const ok = state.startGone && state.goneAtOnce && audioOk && viewOk && tapOk && warnOk && !ours.length && (!brake || brake.ok);
-    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, at once ${state.goneAtOnce}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk}, start warning ${warnOk})`); if (!ok) failed = true;
+    const ok = state.startGone && state.goneAtOnce && audioOk && viewOk && tapOk && warnOk && (!slow || slow.ok) && !ours.length && (!brake || brake.ok);
+    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, at once ${state.goneAtOnce}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk}, start warning ${warnOk}, slow notice ${!slow || slow.ok})`); if (!ok) failed = true;
     await ctx.close();
   }
   await browser.close(); server.httpServer.close();

@@ -251,12 +251,13 @@ function nextBiome() {
 let lastPublished = '';
 // Is the view struggling? Ten seconds on end at under 14 frames a second, with the resolution
 // already turned down as far as the engine will take it, while the train is moving in the open
-// and the page is in front. Once said it stays said: the app offers the remedy once.
+// and the page is in front. (Whether chunks are still being generated is not asked: on a machine
+// this slow they always are.) Once said it stays said: the app offers the remedy once.
 let slowTicks = 0, struggling = false;
 function watchSpeed(s) {
   if (struggling) return;
   const st = engine.stats();
-  const fair = typeof document !== 'undefined' && document.visibilityState === 'visible' && !st.idle && st.kmh > 5 && !s.tunnel && st.pending === 0;
+  const fair = typeof document !== 'undefined' && document.visibilityState === 'visible' && !st.idle && st.kmh > 5 && !s.tunnel;
   slowTicks = fair && st.fps < 14 && st.resScale <= 0.45 ? slowTicks + 1 : 0;
   if (slowTicks >= 25) struggling = true;
 }

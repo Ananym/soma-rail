@@ -231,7 +231,8 @@ uniform float uSway;`,
     // and not into the ground. They brighten only a little: a flash reads as a light, not as life.
     // People and animals are the other way round (classes 8 and 9): a body that swells looks wrong,
     // so they keep their size and brighten for the length of the beat instead.
-    float raised = uBeatRaised * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
+    // (Classes 8 and up answer the beat in their own way or not at all: the raised rule leaves them be.)
+    float raised = (mvHi ? 0.0 : uBeatRaised) * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
     float picked = (!mvHi && mv == 6) ? 1.0 : 0.0;
     float flashed = (mvHi && mv <= 1) ? 1.0 - isLight : 0.0;
@@ -244,7 +245,7 @@ uniform float uSway;`,
         chorus = step(fract(float((mvA >> 1) & 7) * 0.125 + uBeatSeq * 0.382), 0.4);
         rgba.a = 1.0;                                              // the group bits are not opacity
     }
-    scales *= 1.0 + uBreath + uBeat * (0.1 * raised * (1.0 - step(0.5, float(mvHi && mv == 3))) + 0.32 * isLight + 0.42 * picked * (1.0 - isLight) + 0.55 * chorus);
+    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.42 * picked * (1.0 - isLight) + 0.55 * chorus);
     center.y += 0.3 * scales.y * uBeat * (picked * (1.0 - isLight) + chorus);
     float shimmer = 1.0 + uBeat * (0.1 * picked * (1.0 - isLight) + 0.42 * flashed + 0.22 * chorus);
     if (uSparkle > 0.0) {
