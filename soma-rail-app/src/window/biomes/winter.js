@@ -21,13 +21,14 @@
 // station lamp, the snow under a lantern, the wall round a far window). A lamp on a dark post over
 // the skyline is a light floating in the sky; so is a station the brow of its own hill hides.
 //
-// The beat: buildings and lights (beatKinds); skaters, skiers, sledgers, animals, the sleigh and
-// its bells and the decorated tree tag their own splats with MOVE.BEAT. Roof snow is not BUILDING
-// (it would clip to white on every beat). Smoke billows (MOVE.VAPOUR), scarves and pennants
-// flutter (MOVE.FLAG), and the snow falls (MOVE.FALL).
+// The beat: buildings and lights (beatKinds, so the decorated tree's bulbs too); the sleigh, its
+// bells and the sledges tag their own splats with MOVE.BEAT and swell. People and animals (skaters,
+// skiers, sledgers, riders on the lift, deer, reindeer, horses) are MOVE.FLASH: they brighten on the
+// beat and keep their size. Roof snow is not BUILDING (it would clip to white on every beat). Smoke
+// billows (MOVE.VAPOUR), scarves and pennants flutter (MOVE.FLAG), and the snow falls (MOVE.FALL).
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
-//   scale     firs as tall as towers; enormous glowing snowflakes hanging still in the air like lanterns
+//   scale     firs as tall as towers; enormous ice snowflakes hanging still in the air (lit after dark)
 //   topology  cabins floating above their own snow-holes; reindeer walking through the air
 //   logic     the village church's spire repeating along the line, each copy a little more wrong
 import { hashInts, hashString, makeRng, noise1, noise2, fbm2 } from '../rng.js';
@@ -1497,7 +1498,7 @@ function frameOf(ctx, wx, y, d, yaw, k) {
 // A person. o: { yaw, k, coat, hat, pose: 'stand'|'skate'|'ski'|'sit'|'walk'|'pull', ph (0..1, the
 // stride), scarf, kid, kind }
 function* person(ctx, out0, wx, y, d, o) {
-  const out = moveOut(out0, MOVE.BEAT);
+  const out = moveOut(out0, MOVE.FLASH);
   const k = (o.k || FIG) * (o.kid ? 0.74 : 1), kind = o.kind != null ? o.kind : KIND.OTHER;
   const P = frameOf(ctx, wx, y, d, o.yaw, k);
   const q = quatYaw(o.yaw);
@@ -1506,7 +1507,7 @@ function* person(ctx, out0, wx, y, d, o) {
   const pose = o.pose || 'stand', ph = o.ph || 0;
   let pv = null;
   const PP = (u, h, v) => { pv = P(u, h, v); return pv; };
-  const seg = (a, b, r, c) => { const A = [...PP(a[0], a[1], a[2])], B = PP(b[0], b[1], b[2]); bar(out, A[0], A[1], A[2], B[0], B[1], B[2], r, c, 1, kind, MOVE.BEAT); };
+  const seg = (a, b, r, c) => { const A = [...PP(a[0], a[1], a[2])], B = PP(b[0], b[1], b[2]); bar(out, A[0], A[1], A[2], B[0], B[1], B[2], r, c, 1, kind, MOVE.FLASH); };
   const Ep = (u, h, v, rx, ry, rz, c, qq = q) => { PP(u, h, v); out(pv[0], pv[1], pv[2], rx * k, ry * k, rz * k, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], kind); };
   // the lean of the body and where the hips are
   let lean = 0, hipH = 0.92, sit = false;
@@ -1610,9 +1611,9 @@ function* snowman(ctx, out, W, wx, d, r, k = FIG) {
   if (out.due()) yield;
 }
 // A four-legged animal. o: { type: 'horse'|'reindeer'|'deer'|'elk', yaw, k, graze, ph (stride),
-// col, harness, kind }. Every splat answers the beat.
+// col, harness, kind }. Every splat brightens on the beat (MOVE.FLASH).
 function* beast(ctx, out0, wx, y, d, o) {
-  const out = moveOut(out0, MOVE.BEAT);
+  const out = moveOut(out0, MOVE.FLASH);
   const k = (o.k || FIG), kind = o.kind != null ? o.kind : KIND.OTHER;
   const P = frameOf(ctx, wx, y, d, o.yaw, k);
   const q = quatYaw(o.yaw);
@@ -1625,7 +1626,7 @@ function* beast(ctx, out0, wx, y, d, o) {
   let pv;
   const PP = (u, h, v) => { pv = P(u, h, v); return pv; };
   const E = (u, h, v, rx, ry, rz, c, qq = q) => { PP(u, h, v); out(pv[0], pv[1], pv[2], rx * k, ry * k, rz * k, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], kind); };
-  const seg = (a, b, r, c) => { const A = [...PP(a[0], a[1], a[2])], B = PP(b[0], b[1], b[2]); bar(out, A[0], A[1], A[2], B[0], B[1], B[2], r, c, 1, kind, MOVE.BEAT); };
+  const seg = (a, b, r, c) => { const A = [...PP(a[0], a[1], a[2])], B = PP(b[0], b[1], b[2]); bar(out, A[0], A[1], A[2], B[0], B[1], B[2], r, c, 1, kind, MOVE.FLASH); };
   const lr = Math.max((t === 'horse' || t === 'elk' ? 0.075 : 0.05) * k, thin(d));
   const ph = o.ph || 0;
   const legTop = S.bh - S.br * 0.6;
@@ -1686,7 +1687,7 @@ function* beast(ctx, out0, wx, y, d, o) {
     E(-S.bl * 0.05, S.bh - S.br * 0.1, 0, 0.09, S.br * 1.0, S.br * 0.92, hc);
     for (const v of [-1, 1]) for (const u of [-0.2, 0.2]) {
       PP(u, S.bh - S.br * 0.6, v * S.br * 0.9);
-      out(pv[0], pv[1], pv[2], 0.06 * k, 0.06 * k, 0.06 * k, 0.8, 0.62, 0.18, 1, 0, 0, 0, 1, kind);
+      out0(pv[0], pv[1], pv[2], 0.06 * k, 0.06 * k, 0.06 * k, 0.8, 0.62, 0.18, 1, 0, 0, 0, 1, kind, MOVE.BEAT);   // bells: things, so they swell
     }
   }
   if (out0.due()) yield;
@@ -2017,12 +2018,12 @@ function liftChair(out, x, y, d, G, sg, hr) {
   S(pt(-hw, 2.3 * k, -dir * 0.15 * k), pt(hw, 2.3 * k, -dir * 0.15 * k), r * 1.3, seat, 2);
   if (sg < 0 || hr % 100 >= 65) return;
   const n = 1 + (hr % 3);
-  const B = (a, b, rr, c) => bar(out, a[0], a[1], a[2], b[0], b[1], b[2], rr, c, 1, KIND.OTHER, MOVE.BEAT);
+  const B = (a, b, rr, c) => bar(out, a[0], a[1], a[2], b[0], b[1], b[2], rr, c, 1, KIND.OTHER, MOVE.FLASH);
   for (let j = 0; j < n; j++) {
     const q = (j - (n - 1) / 2) * 0.66 * k, ci = (hr + j * 3) % 7, coat = C.coat[ci], hat = C.coat[(ci + 2) % 7];
     B(pt(q, 2.8 * k, 0), pt(q, 2.05 * k, 0), Math.max(0.2 * k, thin(d, 1.2)), coat);
     const hp = pt(q, 1.86 * k, 0), hrad = Math.max(0.12 * k, thin(d, 0.9));
-    out(hp[0], hp[1], hp[2], hrad, hrad, hrad, hat[0], hat[1], hat[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);
+    out(hp[0], hp[1], hp[2], hrad, hrad, hrad, hat[0], hat[1], hat[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.FLASH);
     B(pt(q, 2.8 * k, dir * 0.1 * k), pt(q, 3.35 * k, dir * 0.45 * k), Math.max(0.09 * k, thin(d)), [0.1, 0.1, 0.13]);
     B(pt(q, 3.45 * k, -dir * 0.35 * k), pt(q, 3.35 * k, dir * 1.2 * k), Math.max(0.04 * k, thin(d, 0.7)), C.coat[(ci + 3) % 7]);
   }
@@ -2498,7 +2499,15 @@ function* near(ctx0, emit) {
   yield* bridges(ctx, out, W, lo, hi);
   yield* shoreReeds(ctx, out, W, lo, hi);
   yield* hedges(ctx, out, W, lo, hi);
-  if ((dz.scale || 0) > 0) { yield* giantFirs(ctx, out, W, 90, hi, 700, dz.scale); yield* bigFlakes(ctx, out, W, 60, hi, 260, dz.scale); }
+  if ((dz.scale || 0) > 0) {
+    yield* giantFirs(ctx, out, W, 90, hi, 700, dz.scale);
+    // the flakes are few (a few hundred splats each) and hang where nothing else is: they are
+    // drawn whatever the props have used, so a busy village chunk at a low count keeps them
+    const lim = out.limit;
+    out.limit = Infinity;
+    yield* bigFlakes(ctx, out, W, 60, hi, 260, dz.scale);
+    out.limit = lim;
+  }
   if ((dz.logic || 0) > 0) yield* repeatingSpire(ctx, out, W, lo, hi, dz.logic);
   if ((dz.topology || 0) > 0) yield* skyHerd(ctx, out, W, lo, hi, dz.topology);
   yield* snowfall(ctx, out, W, lo, hi, 0.022);
@@ -2552,35 +2561,151 @@ function* giantFirs(ctx, out, W, dLo, dHi, cell, amount) {
     yield* fir(ctx, out, wx - ctx.x0, d, { rng: r, height: H, width: H * 0.3, y: s.y - 1, n: Math.round(clamp(700 * Math.sqrt(out.density) * (200 / d), 60, 1400)), kind: KIND.SURREAL });
   }
 }
-// Scale: enormous snowflakes hanging still in the air like lanterns: six arms, each with two pairs
-// of side branches, a glowing heart. The whole flake is the lantern: its arms are lights too (ice
-// that glows), because arms of plain ice went black at dusk and left the heart hanging in the sky
-// as a light with nothing round it.
-function* bigFlakes(ctx, out, W, dLo, dHi, cell, amount) {
-  for (const { i, wx0 } of cellsAround(ctx, cell, 12)) {
+// Scale: enormous snowflakes hanging still in the air, drawn like a crystal and not a lantern: crisp
+// thin arms (struts sized from the flake and its distance) with clear side branches, a small
+// hexagonal plate at the heart, and no halo (a halo is what made them read as floating lights).
+//   designs   stellar dendrite (branches that shorten toward the tip, twigs on the longest),
+//             sectored plate (a hexagon with ridges, an inner hexagon and short branched tips),
+//             fern (many short branches close together), simple star (a plate and bare arms
+//             ending in small spades)
+//   pose      each flake hangs in a plane facing the track, turned only a little (yaw and tilt up
+//             to about 15 degrees). A plane parallel to the window keeps its true shape in the
+//             frame wherever along the pass it stands, so the star does not thin or squash from
+//             the left of the frame to the right; crossed planes would show as bars seen edge on.
+//   light     by day pale blue-white ice (natural colour, under the light threshold) with a darker
+//             blue rim just behind each line, so it reads on the sky and on snowy hills alike, and
+//             only a pin of light at the heart. From the first hint of evening the arms are a
+//             cool, not-quite-white light (only the blue channel at the threshold), so the shape
+//             still shows as lines and not as one bright blur; the heart is a small white light.
+//   motion    every splat is MOVE.SOLID: the dreamlike "matter" scatter would otherwise shake a
+//             tilted flake into specks (its splats sit at different distances). The light ones
+//             still swell a little on the beat, as every light does.
+//   sizes     most 80 to 150 px across on a 1080p screen (7 to 39 m across, 60 to 300 m out), one
+//             in seven a giant 70 to 110 m out, 230 to 350 px (up to a third of the window's
+//             height); about 2 a kilometre at the dreamlike level.
+const FLAKE_DESIGNS = ['dendrite', 'plate', 'fern', 'star'];
+function* bigFlakes(ctx, out0, W, dLo, dHi, cell, amount) {
+  const out = moveOut(out0, MOVE.SOLID);
+  // lit from the first hint of evening (about 15.7 h): the clock runs on at the dreamlike level
+  // (hours in a chunk's life), and ice built by day would go dark after nightfall
+  const lit = darkness(ctx) > 0.05;
+  // colours: arms, the heart plate's outline and fill, the heart's pin of light
+  const armC = lit ? [0.6, 0.78, 0.98] : [0.74, 0.79, 0.8];
+  const twigC = lit ? [0.52, 0.7, 0.97] : [0.68, 0.75, 0.79];
+  const plateC = lit ? [0.4, 0.56, 0.97] : [0.55, 0.65, 0.76];
+  const heartC = [0.9, 0.96, 1.0];
+  const rimC = [0.26, 0.4, 0.62];
+  const kArm = lit ? KIND.LIGHT : KIND.SURREAL;
+  const tanTop = Math.tan(22 * Math.PI / 180);
+  for (const { i, wx0 } of cellsAround(ctx, cell, 20)) {
     const r = worldRng(ctx, 1311, i);
-    if (r() > 0.75 * amount) continue;
-    const wx = wx0 + r() * cell, d = dLo + r() * (dHi - dLo);
-    const R = (2.5 + 4 * r()) * (0.6 + d / 250), y = W.H(wx, d) + 12 + R + (20 + 0.12 * d) * r();
-    const tilt = (r() - 0.5) * 0.6, spin = r() * Math.PI;
-    if (!inX(ctx, wx, R)) continue;
+    if (r() > 0.72 * amount) continue;
+    const wx = wx0 + r() * cell;
+    const giant = r() < 0.15;
+    const d = giant ? 70 + 40 * r() : dLo + r() * (dHi - dLo);
+    // sized by how big it looks: most 80 to 150 pixels across on a 1080p screen, a giant 230 to 350
+    const R = d * (giant ? 0.1 + 0.05 * r() : 0.035 + 0.03 * Math.pow(r(), 1.5));
+    // the centre 12 to 18 degrees above the eye (over most of the trees), the top tip inside the
+    // frame, the bottom tip clear of the ground
+    const e = Math.tan((12 + 6 * r()) * Math.PI / 180);
+    const y = Math.max(2.6 + d * Math.min(e, tanTop - R / d), W.H(wx, d) + R + 4);
+    const design = FLAKE_DESIGNS[Math.floor(r() * 4)];
+    const yaw = (r() - 0.5) * 0.5, tilt = (r() - 0.5) * 0.5, spin = r() * Math.PI / 3;
+    if (!inX(ctx, wx, R)) continue;   // every chunk it reaches draws its own part (out drops the rest)
+    if (globalThis.__winterFlakes) globalThis.__winterFlakes.push({ wx: Math.round(wx), d: Math.round(d), y: Math.round(y), R: +R.toFixed(1), design, top: +((y + R - 2.6) / d).toFixed(3) });
     const x = wx - ctx.x0;
-    const ar = Math.max(R * 0.04, thin(d, 1.4));
-    const ice = [0.74, 0.88, 1.0];
-    const basis = (a, rr) => [Math.cos(a) * rr, Math.sin(a) * rr * Math.cos(tilt), Math.sin(a) * rr * Math.sin(tilt)];
-    for (let k = 0; k < 6; k++) {
-      const a = spin + k * Math.PI / 3;
-      const [ex, ey, ez] = basis(a, R);
-      bar(out, x, y, -d, x + ex, y + ey, -(d + ez), ar, ice, 5, KIND.LIGHT, 0, 0.9);
-      for (const f of [0.45, 0.72]) {
-        const [bx, by, bz] = basis(a, R * f);
-        for (const sg of [-1, 1]) {
-          const [cx, cy, cz] = basis(a + sg * 0.55, R * f + R * 0.28 * (1.15 - f));
-          bar(out, x + bx, y + by, -(d + bz), x + cx, y + cy, -(d + cz), ar * 0.8, ice, 2, KIND.LIGHT, 0, 0.9);
-        }
+    // the flake's plane: e1 across, e2 up (yaw about the vertical, then tilt about e1)
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), ct = Math.cos(tilt), st = Math.sin(tilt);
+    const e1x = cy, e1z = -sy, e2x = st * sy, e2y = ct, e2z = st * cy;
+    const P = (u, v) => [x + u * e1x + v * e2x, y + v * e2y, -d + u * e1z + v * e2z];
+    const w = Math.max(R * 0.02, thin(d, 1.0));          // half-thickness of an arm
+    const pieces = (len) => Math.max(1, Math.ceil(len / (R * 0.1)));
+    // the plane's normal (toward the track) and, at every hour, a darker blue rim just behind each
+    // line, so the pale ice reads against snowy hills as well as against the sky
+    const nx = -e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y;
+    const back = w * 1.5;
+    const S = (u0, v0, u1, v1, rr, c, kind = kArm, o = 1) => {
+      const A = P(u0, v0), B = P(u1, v1), n = pieces(Math.hypot(u1 - u0, v1 - v0));
+      bar(out, A[0] - nx * back, A[1] - ny * back, A[2] - nz * back, B[0] - nx * back, B[1] - ny * back, B[2] - nz * back, rr * 1.7, rimC, n, KIND.SURREAL, MOVE.SOLID, o * 0.85);
+      bar(out, A[0], A[1], A[2], B[0], B[1], B[2], rr, c, n, kind, MOVE.SOLID, o);
+    };
+    const hex = (rad, rr, c, kind = kArm) => {
+      for (let k = 0; k < 6; k++) {
+        const a0 = spin + k * Math.PI / 3, a1 = a0 + Math.PI / 3;
+        S(Math.cos(a0) * rad, Math.sin(a0) * rad, Math.cos(a1) * rad, Math.sin(a1) * rad, rr, c, kind);
+      }
+    };
+    const B60 = Math.PI / 3;
+    // the heart: a small hexagonal plate (a flat fill in the flake's plane, its rim a hexagon)
+    const pr = R * (design === 'star' ? 0.22 : design === 'plate' ? 0.16 : 0.13);
+    const c0 = P(0, 0);
+    {
+      const q = quatBasis(e1x, 0, e1z, e2x, e2y, e2z, nx, ny, nz);
+      const fr = pr * 0.62, pk = lit ? KIND.LIGHT : KIND.SURREAL;
+      out(c0[0], c0[1], c0[2], fr, fr, w * 0.5, plateC[0], plateC[1], plateC[2], lit ? 0.55 : 0.7, q[0], q[1], q[2], q[3], pk);
+      for (let k = 0; k < 6; k++) {
+        const a = spin + (k + 0.5) * B60, p = P(Math.cos(a) * pr * 0.5, Math.sin(a) * pr * 0.5);
+        out(p[0], p[1], p[2], fr * 0.6, fr * 0.6, w * 0.5, plateC[0], plateC[1], plateC[2], lit ? 0.45 : 0.6, q[0], q[1], q[2], q[3], pk);
       }
     }
-    glow(out, x, y, d, [0.86, 0.94, 1.0], R * 0.09, 0.1, 4);
+    hex(pr, w * 0.8, armC);
+    L(out, c0[0], c0[1], -c0[2], Math.max(R * 0.028, thin(d, 1.3)), Math.max(R * 0.028, thin(d, 1.3)), w, heartC, 1, MOVE.SOLID);
+    // the arms and their branches
+    for (let k = 0; k < 6; k++) {
+      const a = spin + k * B60;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const along = (t) => [ca * R * t, sa * R * t];
+      const branch = (t, len, rr, c, twig = 0) => {
+        for (const sg of [-1, 1]) {
+          const [bu, bv] = along(t), b = a + sg * B60;
+          const eu = bu + Math.cos(b) * len, ev = bv + Math.sin(b) * len;
+          S(bu, bv, eu, ev, rr, c);
+          if (twig > 0) {   // a twig off the middle of the branch, parallel to the arm
+            const mu = bu + Math.cos(b) * len * 0.5, mv = bv + Math.sin(b) * len * 0.5;
+            S(mu, mv, mu + ca * twig, mv + sa * twig, rr * 0.85, c);
+          }
+        }
+      };
+      if (design === 'dendrite') {
+        const [tu, tv] = along(1);
+        S(ca * pr, sa * pr, tu, tv, w, armC);
+        branch(0.34, R * 0.3, w * 0.8, armC, R * 0.1);
+        branch(0.52, R * 0.25, w * 0.8, armC, R * 0.07);
+        branch(0.68, R * 0.17, w * 0.75, twigC);
+        branch(0.82, R * 0.1, w * 0.7, twigC);
+      } else if (design === 'fern') {
+        const [tu, tv] = along(1);
+        S(ca * pr, sa * pr, tu, tv, w, armC);
+        for (let j = 0; j < 6; j++) {
+          const t = 0.26 + j * 0.12;
+          branch(t, R * (0.24 - 0.17 * (t - 0.26) / 0.6), w * 0.7, twigC);
+        }
+      } else if (design === 'plate') {
+        // the plate: a hexagon whose corners lie on the arms, ridges from heart to corner, an
+        // inner hexagon; past each corner a short tip with one pair of branches
+        const hr = R * 0.58;
+        const [cu, cv] = along(0.58), [tu, tv] = along(1);
+        S(ca * pr, sa * pr, cu, cv, w * 0.9, armC);
+        S(cu, cv, tu, tv, w, armC);
+        const a1 = a + B60;
+        S(cu, cv, Math.cos(a1) * hr, Math.sin(a1) * hr, w * 0.9, armC);
+        const ir = R * 0.36;
+        S(ca * ir, sa * ir, Math.cos(a1) * ir, Math.sin(a1) * ir, w * 0.6, twigC);
+        branch(0.8, R * 0.13, w * 0.7, armC);
+      } else {
+        // simple star: bare arms from the plate, each ending in a small spade (a diamond)
+        const [tu, tv] = along(0.86);
+        S(ca * pr, sa * pr, tu, tv, w * 1.15, armC);
+        const sp = R * 0.08;
+        const pu = -sa, pv = ca;       // across the arm
+        const m1 = along(0.86), m2 = along(1.0), mm = along(0.93);
+        S(m1[0], m1[1], mm[0] + pu * sp, mm[1] + pv * sp, w * 0.8, armC);
+        S(m1[0], m1[1], mm[0] - pu * sp, mm[1] - pv * sp, w * 0.8, armC);
+        S(mm[0] + pu * sp, mm[1] + pv * sp, m2[0], m2[1], w * 0.8, armC);
+        S(mm[0] - pu * sp, mm[1] - pv * sp, m2[0], m2[1], w * 0.8, armC);
+        branch(0.55, R * 0.12, w * 0.75, twigC);
+      }
+    }
     if (out.due()) yield;
   }
 }
