@@ -7,6 +7,15 @@
 // villages, masts) comes from one pure layout of WORLD x and distance, `fieldAt()` and friends,
 // hashed from the world seed. Only the ground fill uses the chunk's own rng.
 //
+// Arable fields carry a crop (pickCrop): ripe wheat and barley, green barley and oilseed rape in
+// flower stand up off the ground (cropSurface lifts the fill, cropWalls draws their edges), with
+// tramlines, a combed and wind-waved top; stubble, mown grass and plough lie flat in stripes and
+// furrows. Cut fields have round bales (straw, or wrapped black and green), stacks of them and rows
+// of small squares (fieldBales). About one site a kilometre or two has a machine at work or parked
+// (makeSite, machines): a tractor with a baler, a trailer of bales, a plough or a sprayer, or
+// parked by a gate; now and then a combine opening up a wheat field. Machines and bales swell on
+// the beat (MOVE.BEAT), drivers brighten (MOVE.FLASH); the crops themselves stay still.
+//
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     giant trees and a monolith in the far band
 //   topology  floating islands of downland in the mid and far sky
@@ -16,6 +25,7 @@ import { makeTerrain } from '../terrain.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, strip, blob, broadleaf, conifer,
   bush, hedge, house, treeSplats, church, overheadLine, fence, floatingIsland, monolith, stick, jitter, mul3, mix3, shade, smooth, clamp, lerp, MOVE,
+  detail, quatXTo, quatYaw, quatAxis, quatMul,
 } from './kit.js';
 
 const PAL = {
@@ -65,7 +75,8 @@ function layout(ctx) {
   }
   rows[0].mid = (rows[0].D + rows[1].D) / 2;
   rows[0].W = rows[1].W;
-  L = { ws, rows, Ds: rows.map((q) => q.D), info: new Map(), villages: new Map() };
+  for (let k = 1; k < rows.length; k++) rows[k].lane = (hashInts(ws, 91, k) & 255) <= 30 && rows[k].D >= 25;   // as lanes()
+  L = { ws, rows, Ds: rows.map((q) => q.D), info: new Map(), villages: new Map(), sites: new Map(), terrain: ctx.terrain };
   layouts.set(ws, L);
   if (layouts.size > 8) layouts.delete(layouts.keys().next().value);
   return L;
@@ -73,6 +84,11 @@ function layout(ctx) {
 function edgeD(L, k, wx) {
   const q = L.rows[k];
   return q.amp ? q.D + q.amp * (2 * noise1(wx / q.wl, L.ws + k * 13) - 1) : q.D;
+}
+// Width of the grass headland inside a field's front edge: wider where a lane runs along it.
+function frontHw(L, k, wx, d) {
+  const hw = 2.5 + 0.004 * d;
+  return L.rows[k].lane && noise1(Math.floor(wx / 60) * 60 / 1200, L.ws + k * 5) >= 0.35 ? hw + 5 : hw;
 }
 function rowAt(L, wx, d) {
   const Ds = L.Ds;
@@ -112,6 +128,7 @@ function fieldInfo(L, k, j) {
     const a = ARABLE[Math.floor(Math.pow(r(), 1.3) * ARABLE.length)];
     f.color = jitter(a.c, r, 0.06); f.stripe = a.stripe;
     if (r() < 0.025) { f.color = [0.7, 0.64, 0.2]; f.stripe = 0.03; }     // oilseed rape, now and then
+    f.arable = true;
   } else {
     f.color = jitter(PASTURE[Math.floor(r() * PASTURE.length)], r, 0.05);
     f.stripe = r() < 0.3 ? 0.05 : 0;
@@ -119,11 +136,95 @@ function fieldInfo(L, k, j) {
     f.flock = r() < 0.3 ? (r() < 0.75 ? 1 : 2) : 0;      // 1 sheep, 2 cattle
   }
   f.farm = !f.wood && k >= 1 && r() < 0.06;
+  if (f.arable) pickCrop(L, f, k, j, cx, arable);
   L.info.set(key, f);
   if (L.info.size > 20000) L.info.clear();
   return f;
 }
 function fieldAt(L, wx, d) { const k = rowAt(L, wx, d); return fieldInfo(L, k, colAt(L, k, wx, d)); }
+
+// ---------------------------------------------------------------------------------------------
+// Crops. An arable field may stand in a crop with a real height: its top is lifted off the ground
+// (wheat about 0.9 m, rape 1.4 m) and its edges, inside the grassy headland, are drawn as upright
+// walls (cropWalls), so the near edge of a field reads as a wall of corn with the ground in front.
+// The season drifts slowly along the line: ripe wheat, stubble and bales in summer stretches, rape
+// in flower and green barley in spring ones, never wholly one or the other.
+// ---------------------------------------------------------------------------------------------
+const C = { WHEAT: 1, BARLEY: 2, GREEN: 3, RAPE: 4, STUBBLE: 5, CUT: 6, PLOUGH: 7 };
+const CROP = {
+  [C.WHEAT]: { c: [0.7, 0.55, 0.25], lite: [0.79, 0.67, 0.36], stem: [0.43, 0.35, 0.16], h: 0.9, wall: true },
+  [C.BARLEY]: { c: [0.73, 0.63, 0.37], lite: [0.8, 0.73, 0.5], stem: [0.48, 0.42, 0.24], h: 0.78, wall: true },
+  [C.GREEN]: { c: [0.33, 0.48, 0.18], lite: [0.5, 0.6, 0.32], stem: [0.2, 0.3, 0.11], h: 0.72, wall: true },
+  [C.RAPE]: { c: [0.8, 0.69, 0.07], lite: [0.8, 0.75, 0.2], stem: [0.21, 0.31, 0.1], h: 1.4, wall: true },
+  [C.STUBBLE]: { c: [0.72, 0.64, 0.42], h: 0.09 },
+  [C.CUT]: { c: [0.44, 0.53, 0.25], h: 0.05 },
+  [C.PLOUGH]: { c: [0.37, 0.27, 0.18], h: 0.12 },
+};
+function pickCrop(L, f, k, j, cx, arable) {
+  const r = makeRng(hashInts(L.ws, 72, k, j));      // its own stream: woods, flocks and farms stay put
+  const summer = smooth(0.3, 0.7, noise1(cx / 7000, L.ws + 303));
+  const tall = 0.3 + 0.45 * smooth(0.35, 0.75, arable);    // standing crops gather in the arable stretches
+  const u = r(), sum = r() < 0.15 + 0.7 * summer;
+  if (u < tall) f.crop = sum ? (r() < 0.65 ? C.WHEAT : C.BARLEY) : (r() < 0.55 ? C.RAPE : C.GREEN);
+  else if (u < tall + 0.4) f.crop = sum ? (r() < 0.55 ? C.STUBBLE : r() < 0.55 ? C.CUT : C.PLOUGH) : (r() < 0.5 ? C.PLOUGH : C.CUT);
+  else return;                                         // the flat colours above: hay meadow, young crop
+  f.color = jitter(CROP[f.crop].c, r, 0.04);
+  f.stripe = 0;
+  f.phase = r() * 24;
+  // bales on cut fields: 1 round straw, 2 wrapped silage, 3 rows of small squares
+  if ((f.crop === C.STUBBLE || f.crop === C.CUT) && r() < 0.8) f.bales = f.crop === C.CUT ? (r() < 0.75 ? 2 : 1) : (r() < 0.3 ? 3 : 1);
+}
+// The top of a crop at a world point: its colour, and its height above the ground in G.lift
+// (G.flat is the canopy splats' thickness as a share of their radius).
+const G = { lift: 0, flat: 0.12 };
+function cropSurface(L, f, wx, d, rng) {
+  const s = CROP[f.crop];
+  let c = f.color, lift = s.h, flat = 0.14;
+  const u = f.dir ? wx : d, v = f.dir ? d : wx + 0.3 * d;          // along and across the drill rows
+  const fine = smooth(260, 45, d);
+  const p = ((v + f.phase) % 24 + 24) % 24;
+  if (s.wall) {
+    // wind over the crop: broad paler swathes where the ears lean over, and a gently waving top
+    const w = noise2((wx + 0.6 * d) / 24, (d - 0.4 * wx) / 8, L.ws + 21);
+    lift *= 0.88 + 0.24 * w;
+    c = mix3(c, s.lite, smooth(0.45, 0.85, w) * 0.65);
+    if (f.crop === C.RAPE) {
+      // a bumpy top of yellow heads, the green of the plants showing between them
+      lift += (noise2(wx / 2.6, d / 2.6, L.ws + 23) - 0.5) * 0.5 + (rng() - 0.5) * 0.25 * fine;
+      if (rng() < (0.08 + 0.2 * fine) * smooth(700, 250, d)) c = mix3(s.stem, s.c, 0.25);
+      flat = 0.45;
+    } else {
+      // combed: fine streaks along the drill rows
+      c = mul3(c, 1 + 0.13 * fine * (2 * noise2(u / 16, v / 0.8, L.ws + 25) - 1));
+      flat = 0.3;
+    }
+    // tramlines every 24 m: a pair of wheel tracks where the crop is thin and the soil shows
+    if (p < 2.6) {
+      const k = smooth(700, 250, d);      // far off, a disc is wider than the tramline: leave it out
+      if (p < 0.7 || p > 1.9) { lift *= 0.2; c = mix3(c, s.stem, 0.75 * k); }
+      else { lift *= 0.85; c = mul3(c, 1 - 0.1 * k); }
+    }
+  } else if (f.crop === C.STUBBLE) {
+    // pale stripes the combine's width apart, and the straw left in rows
+    const q = ((v + f.phase) % 7.5 + 7.5) % 7.5;
+    c = mul3(c, (q < 3.75 ? 1.06 : 0.92) * (q > 6.6 ? 1.12 : 1));
+    if (q > 6.6) lift = 0.16;
+    flat = 0.25;
+  } else if (f.crop === C.CUT) {
+    const q = ((v + f.phase) % 6 + 6) % 6;              // mowing stripes and the raked rows
+    c = mul3(c, q < 3 ? 1.1 : 0.9);
+    if (q > 5.2) { c = mix3(c, [0.6, 0.6, 0.34], 0.5); lift = 0.12; }
+  } else if (f.crop === C.PLOUGH) {
+    // furrows: turned ridges in light and shade, a broader unevenness beyond
+    const sw = Math.sin((v / 1.1) * Math.PI * 2);
+    c = mul3(c, 1 + 0.2 * sw * fine + 0.1 * (noise2(wx / 40, d / 40, L.ws + 27) - 0.5));
+    lift = 0.1 + 0.09 * sw * fine;
+    flat = 0.3;
+  }
+  G.lift = lift * smooth(320, 200, d);
+  G.flat = flat;
+  return c;
+}
 
 // Villages: at most one per 1600 m world cell, centred on a church, in a slow "settled" stretch.
 const VCELL = 1600;
@@ -157,30 +258,130 @@ function nearVillage(L, wx, d) {
 }
 
 // Colour of the ground at a world point: the field, with stripes, mottling and a grassy headland.
-function groundColor(ctx, L, wx, d, rng, y) {
+// It also leaves the height of a standing crop there in G.lift (0 elsewhere). `cuts` lists the
+// strips a combine has already cut in this chunk (see cutsFor).
+function groundColor(ctx, L, wx, d, rng, y, cuts) {
   const k = rowAt(L, wx, d), j = colAt(L, k, wx, d);
-  const f = fieldInfo(L, k, j);
-  let c = f.color;
-  const near = smooth(900, 150, d);
-  if (f.stripe) {
-    const coord = f.dir ? d : wx + 0.3 * d;
-    const s = Math.sin((coord / f.period) * Math.PI * 2) > 0 ? 1 : -1;
-    c = mul3(c, 1 + f.stripe * s * near);
-  }
-  const m = noise2(wx / 31, d / 31, L.ws + 3) * 0.6 + noise2(wx / 7, d / 7, L.ws + 4) * 0.4;
-  c = mul3(c, 0.86 + 0.26 * m);
+  let f = fieldInfo(L, k, j);
+  G.lift = 0; G.flat = 0.12;
+  const front = d - edgeD(L, k, wx);
   // headland: a band of rough grass inside each boundary
-  const edge = Math.min(d - edgeD(L, k, wx), k + 1 < L.rows.length ? edgeD(L, k + 1, wx) - d : 1e9,
+  const edge = Math.min(front, k + 1 < L.rows.length ? edgeD(L, k + 1, wx) - d : 1e9,
     Math.abs(wx - colEdge(L, k, j, d)), Math.abs(colEdge(L, k, j + 1, d) - wx));
   const hw = 2.5 + 0.004 * d;
+  const vil = d < 1800 && nearVillage(L, wx, d);
+  let c = f.color;
+  const fhw = f.crop ? frontHw(L, k, wx, d) : hw;
+  if (f.crop && edge >= hw && front >= fhw && !vil) {
+    if (cuts && f.crop <= C.BARLEY) for (const q of cuts) if (q.k === k && q.j === j && front < fhw + cutDepth(q, wx)) { f = q.stub; break; }
+    c = cropSurface(L, f, wx, d, rng);
+  } else if (f.stripe) {
+    const coord = f.dir ? d : wx + 0.3 * d;
+    const s = Math.sin((coord / f.period) * Math.PI * 2) > 0 ? 1 : -1;
+    c = mul3(c, 1 + f.stripe * s * smooth(900, 150, d));
+  }
+  const m = noise2(wx / 31, d / 31, L.ws + 3) * 0.6 + noise2(wx / 7, d / 7, L.ws + 4) * 0.4;
+  c = mul3(c, f.crop ? 0.92 + 0.16 * m : 0.86 + 0.26 * m);
   if (edge < hw && !f.wood) c = mix3(c, [0.28, 0.38, 0.17], 0.6 * (1 - edge / hw));
+  else if (front < fhw) c = mix3(c, [0.28, 0.38, 0.17], 0.75);      // the verge of a lane along the field
   if (d > 600) {
     // far: chalk downland tops read paler, valley floors greener
     const hgt = (y != null ? y : ctx.terrain.height(wx, d)) - 0.025 * d;
     c = mix3(c, [0.42, 0.5, 0.28], smooth(60, 160, hgt) * 0.5);
   }
-  if (d < 1800 && nearVillage(L, wx, d)) c = mix3(c, [0.27, 0.36, 0.17], 0.5);
+  if (vil) c = mix3(c, [0.27, 0.36, 0.17], 0.5);
   return jitter(c, rng, 0.05);
+}
+
+// The ground fill of the trackside and near bands: kit fillGround, but each disc stands at the
+// height of the crop where it lands (groundColor's G.lift) and takes that crop's thickness.
+function* fieldFill(ctx, out, L, opts) {
+  out.limit = Infinity;
+  const n = Math.floor(opts.n != null ? opts.n : out.left());
+  if (n <= 0) return;
+  const rng = ctx.rng, cuts = opts.cuts;
+  const dn = opts.dNear != null ? opts.dNear : ctx.zNear, df = opts.dFar != null ? opts.dFar : ctx.zFar;
+  const p = opts.power, cover = opts.cover, minR = 0.0015, maxR = opts.maxR || 0.08, Lx = ctx.length;
+  const a1 = 1 - p, A = Math.pow(dn, a1), B = Math.pow(df, a1), Z = (B - A) / a1;
+  for (let i = 0; i < n; i++) {
+    const u = (i + rng()) / n;
+    const d = Math.pow(A + u * (B - A), 1 / a1);
+    const x = rng() * Lx;
+    const dens = (n * Math.pow(d, -p) / Z) / Lx;
+    const r = clamp(Math.sqrt(cover / (Math.PI * dens)), minR * d, maxR * d);
+    const wx = ctx.x0 + x;
+    const y = ctx.terrain.height(wx, d);
+    const c = groundColor(ctx, L, wx, d, rng, y, cuts);
+    const ax = 0.8 + 0.5 * rng();
+    out(x, y + G.lift, -d, r * ax, r * G.flat, r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+    if (out.due()) yield;
+  }
+}
+
+// Upright walls of standing crop along the inside of a field's headland: its near edge (or the edge
+// of what a combine has cut) and its two sides, drawn on a world grid so they line up across chunks.
+// Each piece is a darker band of stems under a band of ears, as high as the crop at that point.
+function* cropWalls(ctx, out, L, dLo, dHi, cuts) {
+  const x0 = ctx.x0 - 1, x1 = ctx.x0 + ctx.length + 1;
+  const piece = (f, wx, d, tx, tz, st, rng) => {
+    const c = cropSurface(L, f, wx, d, rng), h = G.lift;
+    if (h < 0.15) return;
+    const s = CROP[f.crop], y0 = ctx.terrain.height(wx, d), q = quatXTo(tx, 0, tz);
+    const stem = mul3(mix3(s.stem, c, 0.3), 0.92 + 0.12 * rng()), top = mul3(c, 0.86);
+    out(wx - ctx.x0, y0 + h * 0.4, -d, st * 0.72, h * 0.42, 0.1, stem[0], stem[1], stem[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
+    out(wx - ctx.x0, y0 + h * 0.84, -d, st * 0.72, h * 0.2, 0.14, top[0], top[1], top[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
+  };
+  for (let k = 0; k + 1 < L.rows.length; k++) {
+    const q = L.rows[k], q1 = L.rows[k + 1];
+    if (q.D - q.amp > Math.min(dHi, 330)) break;
+    if (q1.D + q1.amp < dLo) continue;
+    const a = Math.floor((x0 - 80) / q.W) - 1, b = Math.floor((x1 + 80) / q.W) + 1;
+    for (let j = a; j <= b; j++) {
+      const f = fieldInfo(L, k, j);
+      if (!f.crop || !CROP[f.crop].wall) continue;
+      const rng = worldRng(ctx, 75, k, j);
+      const cut = cuts && cuts.find((u) => u.k === k && u.j === j);
+      // the near edge
+      const dRef = Math.max(q.D, 8);
+      const st = Math.max(0.16, detail(out, dRef, 0.8));
+      const xa = colEdge(L, k, j, q.D) - 40, xb = colEdge(L, k, j + 1, q.D) + 40;
+      for (let g = Math.ceil(Math.max(xa, x0) / st); g * st < Math.min(xb, x1); g++) {
+        const wx = g * st;
+        const e = edgeD(L, k, wx), slope = (edgeD(L, k, wx + 1) - e);
+        const hw = 2.5 + 0.004 * e;
+        const d = e + frontHw(L, k, wx, e) + (cut ? cutDepth(cut, wx) : 0);
+        if (d < dLo || d >= dHi) continue;
+        if (wx - colEdge(L, k, j, d) < hw || colEdge(L, k, j + 1, d) - wx < hw) continue;
+        if (edgeD(L, k + 1, wx) - d < hw) continue;
+        if (d < 1800 && nearVillage(L, wx, d)) continue;
+        piece(f, wx, d, 1, -slope, st, rng);
+        if (out.due()) yield;
+      }
+      // the sides, which come into view as the field passes
+      const da = Math.max(dLo, q.D - q.amp), db = Math.min(dHi, q1.D + q1.amp);
+      for (const side of [0, 1]) {
+        const skew = (colEdge(L, k, j + side, 1000) - colEdge(L, k, j + side, 0)) / 1000;
+        for (let g = Math.ceil(da / 0.5); g * 0.5 < db;) {
+          const d = g * 0.5, hw = 2.5 + 0.004 * d;
+          const wx = colEdge(L, k, j + side, d) + (side ? -hw : hw);
+          const gs = Math.max(1, Math.round(Math.max(0.16, detail(out, d, 0.8)) / 0.5)), sd = gs * 0.5;
+          g += gs;
+          if (wx < x0 || wx >= x1) continue;
+          const front = d - edgeD(L, k, wx);
+          if (front < frontHw(L, k, wx, d) + (cut ? cutDepth(cut, wx) : 0) || edgeD(L, k + 1, wx) - d < hw) continue;
+          if (d < 1800 && nearVillage(L, wx, d)) continue;
+          piece(f, wx, d, skew, -1, sd, rng);
+          if (out.due()) yield;
+        }
+      }
+      // where a combine is at work, the face of the standing crop beside its header
+      if (cut && cut.xh >= x0 && cut.xh < x1) {
+        const e = edgeD(L, k, cut.xh) + frontHw(L, k, cut.xh, q.D);
+        for (let d = e + cut.all; d < e + cut.pass; d += 0.3) piece(f, cut.xh, d, 0, -1, 0.4, rng);
+        if (out.due()) yield;
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -334,6 +535,478 @@ function* fieldContents(ctx, out, L, dLo, dHi, margin, opts = {}) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Farm machinery and bales. Everything here is a thing, so it swells on the beat (MOVE.BEAT); the
+// only person, a tractor driver, brightens instead (MOVE.FLASH).
+// ---------------------------------------------------------------------------------------------
+
+// Tone of a face from its normal in splat space, as kit house() does it: tops lit, the front a
+// little darker, the approach (-x) end in sun, the far end and the back in shade.
+function faceTone(c, nx, ny, nz) {
+  const side = 0.74 + 0.08 * nz - 0.13 * nx;
+  const k = ny >= 0 ? lerp(side, 1.02, ny * ny) : lerp(side, 0.45, ny * ny);
+  return [c[0] * k, c[1] * k, c[2] * k];
+}
+
+// A frame for building a machine in its own metres: local x forward, y up, z to its left, turned by
+// yaw and scaled by S about a point on the ground. Every splat is MOVE.BEAT unless told otherwise.
+// Splats are gathered, not emitted: `yield* flush(out, R)` sends them, yielding as it goes.
+function rig(ctx, out0, wx, d, yaw, S, base) {
+  const buf = [];
+  const out = (...a) => { buf.push(a); };
+  const X = wx - ctx.x0, Z = -d, Y = base != null ? base : ctx.terrain.height(wx, d);
+  const cs = Math.cos(yaw), sn = Math.sin(yaw), qy = quatYaw(yaw);
+  const s = Math.max(0.12, detail(out0, d, 1.2)) / S;      // splat spacing, in local metres
+  const R = {
+    S, s, yaw, X, Y, Z, buf,
+    // world (splat space) position of a local point
+    pos(lx, ly, lz) { return [X + S * (cs * lx + sn * lz), Y + S * ly, Z + S * (-sn * lx + cs * lz)]; },
+    // a splat in local coordinates; q is an extra local rotation
+    p(lx, ly, lz, sx, sy, sz, c, q, move = MOVE.BEAT, o = 1) {
+      const qq = q ? quatMul(qy, q) : qy;
+      out(X + S * (cs * lx + sn * lz), Y + S * ly, Z + S * (-sn * lx + cs * lz), S * sx, S * sy, S * sz, c[0], c[1], c[2], o, qq[0], qq[1], qq[2], qq[3], KIND.OTHER, move);
+    },
+    // colour of a face whose local normal is (nx, ny, nz)
+    tone(c, nx, ny, nz) { return faceTone(c, cs * nx + sn * nz, ny, -sn * nx + cs * nz); },
+    // a box as its faces (no bottom), splats overlapping at the frame's spacing
+    box(x0, x1, y0, y1, z0, z1, c, opts = {}) {
+      if (z1 < z0) [z0, z1] = [z1, z0];
+      const sp = opts.s || s;
+      const face = (ox, oy, oz, ux, uy, uz, U, vx, vy, vz, V, nx, ny, nz, col) => {
+        const nu = Math.max(1, Math.round(U / (sp * 1.5))), nv = Math.max(1, Math.round(V / (sp * 1.5)));
+        const cc = R.tone(col, nx, ny, nz);
+        const hu = (U / nu) * 0.62, hv = (V / nv) * 0.62;
+        for (let a = 0; a < nu; a++) for (let b = 0; b < nv; b++) {
+          const ta = (a + 0.5) / nu * U, tb = (b + 0.5) / nv * V;
+          // sizes along the face's own axes: x, y, z of the local frame
+          const sx = Math.abs(ux) * hu + Math.abs(vx) * hv + Math.abs(nx) * 0.03;
+          const sy = Math.abs(uy) * hu + Math.abs(vy) * hv + Math.abs(ny) * 0.03;
+          const sz = Math.abs(uz) * hu + Math.abs(vz) * hv + Math.abs(nz) * 0.03;
+          R.p(ox + ux * ta + vx * tb, oy + uy * ta + vy * tb, oz + uz * ta + vz * tb, sx, sy, sz, cc, null, opts.move, opts.o);
+        }
+      };
+      const W = x1 - x0, H = y1 - y0, D = z1 - z0, top = opts.top || c;
+      face(x0, y1, z0, 1, 0, 0, W, 0, 0, 1, D, 0, 1, 0, top);
+      face(x0, y0, z1, 1, 0, 0, W, 0, 1, 0, H, 0, 0, 1, c);
+      face(x0, y0, z0, 1, 0, 0, W, 0, 1, 0, H, 0, 0, -1, c);
+      face(x1, y0, z0, 0, 0, 1, D, 0, 1, 0, H, 1, 0, 0, opts.front || c);
+      face(x0, y0, z0, 0, 0, 1, D, 0, 1, 0, H, -1, 0, 0, opts.back || c);
+    },
+    // a thin straight member between two local points (kit strut, but tagged to the beat)
+    bar(ax, ay, az, bx, by, bz, r, c, n, move = MOVE.BEAT) {
+      const [px, py, pz] = R.pos(ax, ay, az), [qx, qy2, qz] = R.pos(bx, by, bz);
+      const dx = qx - px, dy = qy2 - py, dz = qz - pz, len = Math.hypot(dx, dy, dz) || 1e-6;
+      const q = quatXTo(dx / len, dy / len, dz / len);
+      n = n || Math.max(1, Math.round(len / (r * 6)));
+      const sl = (len / n) * 0.5;
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n;
+        out(px + dx * t, py + dy * t, pz + dz * t, sl, r, r, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.OTHER, move);
+      }
+    },
+    // a wheel on an axle along local z: tyre with a lumpy tread, and a hub on both faces
+    wheel(lx, ly, lz, rad, w, hub) {
+      const tyre = [0.07, 0.07, 0.07];
+      const n = Math.max(10, Math.round((2 * Math.PI * rad) / (s * 1.3)));
+      for (let i = 0; i < n; i++) {
+        const t = (i / n) * Math.PI * 2;
+        const q = quatAxis(0, 0, 1, t);
+        R.p(lx - Math.sin(t) * rad * 0.9, ly + Math.cos(t) * rad * 0.9, lz, (Math.PI * rad / n) * 0.75, rad * 0.14, w * 0.5, R.tone(tyre, -Math.sin(t), Math.cos(t), 0), q);
+      }
+      for (const sg of [-1, 1]) {
+        R.p(lx, ly, lz + sg * w * 0.45, rad * 0.86, rad * 0.86, 0.03, R.tone([0.09, 0.09, 0.09], 0, 0, sg));
+        R.p(lx, ly, lz + sg * w * 0.5, rad * 0.56, rad * 0.56, 0.03, R.tone(hub, 0, 0, sg));
+        R.p(lx, ly, lz + sg * w * 0.53, rad * 0.16, rad * 0.16, 0.03, [0.2, 0.2, 0.2]);
+      }
+    },
+  };
+  return R;
+}
+
+function* flush(out, ...rigs) {
+  for (const R of rigs) for (const a of R.buf) { out(...a); if (out.due()) yield; }
+}
+
+const TRACTOR = [
+  { body: [0.6, 0.1, 0.07], hub: [0.56, 0.56, 0.54], roof: [0.72, 0.72, 0.7] },     // red
+  { body: [0.12, 0.35, 0.11], hub: [0.78, 0.62, 0.09], roof: [0.12, 0.35, 0.11] },  // green and yellow
+  { body: [0.09, 0.2, 0.5], hub: [0.7, 0.7, 0.68], roof: [0.72, 0.72, 0.7] },        // blue
+];
+const GLASS = [0.13, 0.17, 0.2];
+
+// A tractor, 1.6 times life size: big rear wheels, small front ones, bonnet, cab with its glass
+// and a driver, exhaust stack. Local x = 0 is the rear axle; the hitch is at x = -1.3.
+function tractor(R, liv, driver = true) {
+  const { body, hub, roof } = liv;
+  const dark = [0.12, 0.12, 0.12];
+  R.wheel(0, 0.9, 0.95, 0.9, 0.55, hub); R.wheel(0, 0.9, -0.95, 0.9, 0.55, hub);
+  R.wheel(2.55, 0.55, 0.85, 0.55, 0.38, hub); R.wheel(2.55, 0.55, -0.85, 0.55, 0.38, hub);
+  R.box(-0.5, 0.9, 0.6, 1.25, -0.55, 0.55, dark);                         // transmission under the cab
+  R.box(0.9, 3.45, 0.75, 1.65, -0.45, 0.45, body, { front: mul3(body, 0.8) });   // bonnet
+  R.box(3.25, 3.5, 0.8, 1.45, -0.4, 0.4, [0.16, 0.16, 0.16]);              // grille
+  // mudguards over the rear wheels
+  for (const sg of [-1, 1]) R.box(-0.85, 0.85, 1.8, 1.92, sg * 0.67, sg * 1.25 + (sg < 0 ? 0 : 0), body, {});
+  // cab: glass all round between corner posts, a roof
+  const cx0 = -0.75, cx1 = 0.85, cy0 = 1.3, cy1 = 2.85, cz = 0.7;
+  R.box(cx0, cx1, cy0, cy1, -cz, cz, GLASS, { top: GLASS, o: 0.8 });
+  for (const px of [cx0, cx1]) for (const pz of [-cz, cz]) R.bar(px, cy0, pz, px, cy1, pz, 0.06, body);
+  R.box(cx0 - 0.08, cx1 + 0.12, cy1, cy1 + 0.16, -cz - 0.08, cz + 0.08, roof);
+  R.box(cx0, cx1, cy0, cy0 + 0.35, -cz - 0.02, cz + 0.02, body);          // cab skirt
+  if (driver) {
+    R.p(0, 1.75, 0, 0.22, 0.3, 0.2, [0.2, 0.28, 0.44], null, MOVE.FLASH);
+    R.p(0, 2.2, 0, 0.12, 0.14, 0.12, [0.66, 0.5, 0.4], null, MOVE.FLASH);
+  }
+  R.bar(1.05, 1.6, 0.32, 1.05, 3.05, 0.32, 0.07, [0.18, 0.18, 0.18]);    // exhaust
+  R.bar(-0.6, 0.8, 0, -1.3, 0.6, 0, 0.07, dark);                          // drawbar and hitch
+}
+
+// A round bale lying on its curved side, axis along local z (or a frame turned by yaw):
+// the curved face as a ring of pieces, flat ends with the spiral of the roll in rings.
+// R.S is 1.5 for bales on their own (1.5 m across, drawn half again as big).
+const BALE = {
+  straw: { side: [0.72, 0.6, 0.34], end: [0.76, 0.66, 0.4], ring: [0.6, 0.48, 0.26] },
+  hay: { side: [0.58, 0.55, 0.3], end: [0.64, 0.6, 0.36], ring: [0.48, 0.45, 0.24] },
+  black: { side: [0.06, 0.06, 0.07], end: [0.08, 0.08, 0.09], ring: [0.2, 0.2, 0.22] },
+  green: { side: [0.46, 0.58, 0.4], end: [0.5, 0.62, 0.44], ring: [0.62, 0.7, 0.56] },
+};
+function roundBale(R, lx, ly, lz, kind, ax = 0) {
+  // ax turns the bale about the vertical inside the frame (radians)
+  const b = BALE[kind], rad = 0.75, hw = 0.6;
+  const ca = Math.cos(ax), sa = Math.sin(ax), qa = quatYaw(ax);
+  const P = (x, y, z) => [lx + ca * x + sa * z, ly + y, lz - sa * x + ca * z];
+  const n = Math.max(10, Math.round((2 * Math.PI * rad) / (R.s * 1.4)));
+  const na = Math.max(1, Math.round((2 * hw) / (R.s * 1.6)));
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2, nx = -Math.sin(t), ny = Math.cos(t);
+    const q = quatMul(qa, quatAxis(0, 0, 1, t));
+    const c = R.tone(b.side, ca * nx, ny, -sa * nx);
+    for (let a = 0; a < na; a++) {
+      const [x, y, z] = P(nx * rad * 0.92, ny * rad * 0.92, ((a + 0.5) / na * 2 - 1) * hw);
+      R.p(x, y, z, (Math.PI * rad / n) * 0.8, rad * 0.12, (hw / na) * 0.95, c, q);
+    }
+  }
+  if (kind === 'black' || kind === 'green') {
+    const [x, y, z] = P(0, rad * 0.75, 0);
+    R.p(x, y + 0.02, z, rad * 0.3, 0.05, hw * 0.7, mix3(b.side, [0.8, 0.8, 0.8], 0.35), qa);     // a sheen on the wrap
+  }
+  for (const sg of [-1, 1]) {
+    const nz = sg;
+    const tone = (c) => R.tone(c, sa * nz, 0, ca * nz);
+    let [x, y, z] = P(0, 0, sg * hw);
+    R.p(x, y, z, rad * 0.97, rad * 0.97, 0.04, tone(b.end), qa);
+    [x, y, z] = P(0, 0, sg * (hw + 0.015));
+    R.p(x, y, z, rad * 0.68, rad * 0.68, 0.03, tone(b.ring), qa);
+    [x, y, z] = P(0, 0, sg * (hw + 0.03));
+    R.p(x, y, z, rad * 0.5, rad * 0.5, 0.03, tone(b.end), qa);
+    [x, y, z] = P(0, 0, sg * (hw + 0.045));
+    R.p(x, y, z, rad * 0.22, rad * 0.22, 0.03, tone(b.ring), qa);
+  }
+}
+// A small square bale (0.9 x 0.45 x 0.35 m; fieldBales draws them 2.3 times life size, or they
+// are specks beside the round ones), long axis along local x.
+function squareBale(R, lx, lz, ax) {
+  // sides a darker gold than the stubble, a pale top, and its shadow on the stubble behind it
+  const ca = Math.cos(ax), sa = Math.sin(ax), qa = quatYaw(ax), c = [0.62, 0.5, 0.26], top = [0.8, 0.72, 0.45];
+  R.p(lx - 0.1, 0.02, lz - 0.3, 0.55, 0.02, 0.25, [0.3, 0.26, 0.16], qa);
+  for (let i = -1; i <= 1; i++) {
+    const x = lx + ca * i * 0.3, z = lz - sa * i * 0.3;
+    R.p(x, 0.2, z, 0.19, 0.15, 0.2, R.tone(c, 0, 0, 1), qa);
+    R.p(x, 0.36, z, 0.19, 0.03, 0.19, R.tone(top, 0, 1, 0), qa);
+  }
+}
+
+// Behind a tractor (local x < -1.3, the hitch): a round baler, a trailer of bales, a plough or a sprayer.
+function baler(R, liv) {
+  const col = liv.body;
+  R.bar(-1.3, 0.6, 0, -2.6, 0.7, 0, 0.08, [0.15, 0.15, 0.15]);
+  R.box(-5.1, -2.6, 0.55, 2.6, -1.2, 1.2, col, { top: mul3(col, 1.05) });
+  R.box(-2.9, -2.4, 0.15, 0.6, -1.1, 1.1, [0.15, 0.15, 0.15]);            // pickup
+  R.wheel(-3.9, 0.45, 1.35, 0.45, 0.35, liv.hub); R.wheel(-3.9, 0.45, -1.35, 0.45, 0.35, liv.hub);
+  R.box(-5.2, -4.9, 0.7, 2.4, -1.15, 1.15, [0.6, 0.58, 0.55]);             // tailgate
+}
+function baleTrailer(R, liv, kind) {
+  const deck = liv === TRACTOR[0] ? [0.5, 0.1, 0.07] : [0.4, 0.4, 0.39];
+  R.bar(-1.3, 0.6, 0, -2.4, 1.0, 0, 0.08, [0.15, 0.15, 0.15]);
+  R.box(-9.4, -2.4, 0.95, 1.2, -1.25, 1.25, deck);
+  R.wheel(-5.4, 0.45, 1.0, 0.45, 0.35, [0.5, 0.5, 0.5]); R.wheel(-5.4, 0.45, -1.0, 0.45, 0.35, [0.5, 0.5, 0.5]);
+  R.wheel(-6.4, 0.45, 1.0, 0.45, 0.35, [0.5, 0.5, 0.5]); R.wheel(-6.4, 0.45, -1.0, 0.45, 0.35, [0.5, 0.5, 0.5]);
+  // bales lying across the deck, two layers (the trailer frame is life size, so bales are 1.5 m)
+  for (let i = 0; i < 4; i++) roundBale(R, -3.3 - i * 1.6, 1.95, 0, kind);
+  for (let i = 0; i < 3; i++) roundBale(R, -4.1 - i * 1.6, 3.3, 0, kind);
+}
+function plough(R) {
+  const frame = [0.1, 0.22, 0.5], steel = [0.62, 0.62, 0.6];
+  R.box(-1.6, -1.2, 0.4, 1.6, -0.5, 0.5, frame);                          // headstock
+  R.bar(-1.4, 0.9, 0, -5.8, 0.9, -1.9, 0.12, frame);                      // beam, out to the unploughed side
+  for (let i = 0; i < 4; i++) {
+    const t = (i + 0.5) / 4, x = lerp(-1.9, -5.6, t), z = lerp(-0.2, -1.8, t);
+    R.bar(x, 0.9, z, x - 0.2, 0.1, z, 0.06, frame);
+    R.bar(x, 0.9, z, x - 0.2, 1.7, z, 0.06, frame);
+    R.p(x - 0.35, 0.25, z + 0.2, 0.4, 0.22, 0.05, R.tone(steel, 0, 0, 1), quatYaw(0.6));      // mouldboard in the soil
+    R.p(x - 0.35, 1.55, z + 0.2, 0.4, 0.22, 0.05, R.tone(steel, 0, 0, 1), quatYaw(0.6));      // its twin, turned up
+  }
+  R.wheel(-5.9, 0.4, -1.7, 0.4, 0.25, [0.5, 0.5, 0.5]);
+}
+function sprayer(R, liv) {
+  const tank = [0.74, 0.74, 0.7], boom = [0.55, 0.55, 0.52];
+  R.box(-2.4, -1.3, 0.6, 2.0, -0.9, 0.9, tank, { top: tank });            // tank on the linkage
+  R.box(-2.6, -2.3, 0.5, 1.6, -1.0, 1.0, [0.2, 0.2, 0.2]);
+  const L = 9, y = 1.0;
+  for (const sg of [-1, 1]) {
+    R.bar(-2.6, y, 0, -2.6, y, sg * L, 0.05, boom);
+    R.bar(-2.6, y + 0.45, sg * 0.8, -2.6, y, sg * L, 0.04, boom);
+    for (let i = 1; i <= 4; i++) R.bar(-2.6, y, sg * i * L / 5, -2.6, y + 0.45 * (1 - (i * L / 5 - 0.8) / (L - 0.8)), sg * i * L / 5, 0.035, boom, 1);
+  }
+}
+// A five-bar gate of galvanised steel, across local x from 0 to 3.6 (life size frame).
+function gate(R) {
+  const g = [0.6, 0.6, 0.58], post = [0.32, 0.26, 0.2];
+  R.bar(-0.15, 0, 0, -0.15, 1.5, 0, 0.09, post, 3, 0); R.bar(3.75, 0, 0, 3.75, 1.5, 0, 0.09, post, 3, 0);
+  for (let i = 0; i < 5; i++) { const y = 0.25 + i * 0.27; R.bar(0, y, 0, 3.6, y, 0, 0.035, g, 6, 0); }
+  R.bar(0, 0.25, 0, 0, 1.33, 0, 0.04, g, 2, 0); R.bar(3.6, 0.25, 0, 3.6, 1.33, 0, 0.04, g, 2, 0);
+  R.bar(0, 0.25, 0, 3.6, 1.33, 0, 0.035, g, 6, 0);
+  // a few metres of post-and-rail fence either side, so the gate stands in a boundary
+  const wood = [0.36, 0.3, 0.22];
+  for (const [a, b] of [[-9, -0.15], [3.75, 12.5]]) {
+    for (let x = a; x <= b + 0.01; x += (b - a) / 4) R.bar(x, 0, 0, x, 1.25, 0, 0.07, wood, 2, 0);
+    R.bar(a, 0.6, 0, b, 0.6, 0, 0.045, wood, 8, 0); R.bar(a, 1.1, 0, b, 1.1, 0, 0.045, wood, 8, 0);
+  }
+}
+
+const COMBINE = [
+  { body: [0.48, 0.62, 0.14], trim: [0.74, 0.74, 0.7], reel: [0.48, 0.62, 0.14], hub: [0.74, 0.74, 0.7] },   // lime and white
+  { body: [0.12, 0.35, 0.11], trim: [0.78, 0.62, 0.09], reel: [0.78, 0.62, 0.09], hub: [0.78, 0.62, 0.09] }, // green and yellow
+  { body: [0.6, 0.1, 0.07], trim: [0.2, 0.2, 0.2], reel: [0.6, 0.1, 0.07], hub: [0.56, 0.56, 0.54] },      // red
+];
+// A combine harvester, drawn 1.3 times life size: header and reel in front, the body with its
+// grain tank and cab, big drive wheels at the front, small steering wheels behind, the unloading
+// auger folded along its side and a cloud of chaff behind. Local x = 0 at the front axle.
+function combine(R, liv, rng) {
+  const { body, trim, reel } = liv;
+  R.wheel(0, 0.85, 1.45, 0.85, 0.65, liv.hub); R.wheel(0, 0.85, -1.45, 0.85, 0.65, liv.hub);
+  R.wheel(-4.2, 0.55, 1.25, 0.55, 0.4, liv.hub); R.wheel(-4.2, 0.55, -1.25, 0.55, 0.4, liv.hub);
+  R.box(-5.4, 0.8, 0.7, 3.3, -1.1, 1.1, body, { back: mul3(trim, 0.7) });
+  R.box(-3.2, 0.2, 3.3, 4.1, -1.45, 1.45, body, { top: mul3(trim, 0.9) });      // grain tank
+  R.box(-5.6, -5.3, 0.6, 2.2, -1.0, 1.0, [0.15, 0.15, 0.15]);                  // straw spreader
+  R.box(0.8, 2.6, 0.6, 1.7, -0.7, 0.7, body);                                   // feeder house
+  // header across the front, low in the crop, and the reel over it
+  R.box(2.6, 4.0, 0.25, 1.15, -3.75, 3.75, trim === COMBINE[2].trim ? [0.6, 0.1, 0.07] : trim);
+  R.box(3.6, 4.15, 0.15, 0.4, -3.75, 3.75, [0.25, 0.25, 0.25]);                // cutter bar
+  for (let i = 0; i < 6; i++) {
+    const t = (i / 6) * Math.PI * 2, x = 3.9 + 0.55 * Math.cos(t), y = 1.65 + 0.55 * Math.sin(t);
+    R.bar(x, y, -3.6, x, y, 3.6, 0.07, reel, 12);
+  }
+  R.bar(3.9, 1.65, -3.6, 3.9, 1.65, 3.6, 0.14, mul3(reel, 0.7), 12);              // the reel's shaft
+  for (const sg of [-1, 1]) {
+    R.p(3.9, 1.65, sg * 3.6, 0.6, 0.6, 0.05, R.tone(reel, 0, 0, sg));
+    R.bar(3.0, 1.1, sg * 3.6, 3.9, 1.65, sg * 3.6, 0.06, trim === COMBINE[2].trim ? body : trim, 2);
+  }
+  // cab at the front of the roof
+  R.box(0.1, 1.9, 3.0, 4.3, -0.85, 0.85, GLASS, { o: 0.8, top: GLASS });
+  R.box(0.0, 2.0, 4.3, 4.45, -0.95, 0.95, trim);
+  R.p(0.9, 3.5, 0, 0.22, 0.3, 0.2, [0.2, 0.28, 0.44], null, MOVE.FLASH);
+  R.p(0.9, 3.95, 0, 0.12, 0.14, 0.12, [0.66, 0.5, 0.4], null, MOVE.FLASH);
+  R.bar(-5.0, 3.6, -1.35, 1.0, 4.0, -1.6, 0.17, body);                         // unloading auger, folded
+  R.bar(-3.8, 4.1, 0.6, -3.8, 5.0, 0.6, 0.09, [0.15, 0.15, 0.15], 3);         // exhaust
+  // chaff and dust behind
+  for (let i = 0; i < 14; i++) {
+    R.p(-6.5 - rng() * 6, 0.8 + rng() * 2.5, (rng() - 0.5) * 4, 1 + rng() * 1.2, 0.7 + rng() * 0.6, 1 + rng(), [0.66, 0.6, 0.45], null, MOVE.VAPOUR, 0.22);
+  }
+}
+
+// Where the machines are: at most one site per 1000 m world cell, in a field it suits, at 40 to
+// 140 m out and only where the hedges in front leave it in sight. Cached per world.
+const SITE = 1000;
+function siteIn(L, i) {
+  if (L.sites.has(i)) return L.sites.get(i);
+  const v = makeSite(L, i);
+  if (L.sites.size > 2000) L.sites.clear();
+  L.sites.set(i, v);
+  return v;
+}
+// Is a point h metres above the ground at (wx, d) in sight over the row hedges in front of it?
+function inSight(L, wx, d, h) {
+  const T = L.terrain, yt = T.height(wx, d) + h;
+  for (let k = 1; k < L.rows.length && L.rows[k].D - L.rows[k].amp < d; k++) {
+    const dh = edgeD(L, k, wx);
+    if (dh >= d - 1) break;
+    const wx0 = Math.floor(wx / 40) * 40;
+    if (noise1(wx0 / 380, L.ws + k * 29 + 3) < 0.3) continue;                 // no hedge here (rowHedges)
+    const top = T.height(wx, dh) + 1.8 + 1.6 * noise1(wx0 / 900, L.ws + k) + 0.8;    // a hedge's leaves reach above its height
+    if (top > 2.6 + (yt - 2.6) * dh / d) return false;
+  }
+  // and over the standing crops in front of it (down to the hubs of a tractor's rear wheels)
+  const yc = yt + Math.max(0, 1.5 - h);
+  for (let dd = 9; dd < d - 6; dd += 4) {
+    const f = fieldAt(L, wx, dd);
+    if (f.crop && CROP[f.crop].wall && T.height(wx, dd) + CROP[f.crop].h * 1.2 + 0.4 > 2.6 + (yc - 2.6) * dd / d) return false;
+  }
+  return true;
+}
+function makeSite(L, i) {
+  const r = makeRng(hashInts(L.ws, 401, i));
+  if (r() < 0.1) return null;
+  for (let t = 0; t < 24; t++) {
+    let wx = (i + 0.15 + 0.7 * r()) * SITE, d = 40 + 95 * r();      // the middle of the cell: sites stay 300 m apart
+    const pick = r(), turn = r(), side = r() < 0.5 ? 1 : -1, liv = Math.floor(r() * 3);
+    const k = rowAt(L, wx, d), j = colAt(L, k, wx, d), f = fieldInfo(L, k, j);
+    if (f.wood || k + 1 >= L.rows.length || inVillage(L, wx, d)) continue;
+    const xa = colEdge(L, k, j, d) + 14, xb = colEdge(L, k, j + 1, d) - 14;
+    if (xb - xa < 24) continue;
+    wx = clamp(wx, xa, xb);
+    const e1 = edgeD(L, k + 1, wx), hw = 2.5 + 0.004 * d, e0 = edgeD(L, k, wx) + frontHw(L, k, wx, d) - hw;
+    let kind = null, yaw = side < 0 ? Math.PI : 0, cut = null;
+    const crop = f.crop || 0;
+    if ((crop === C.WHEAT && pick < 0.4) || (crop === C.BARLEY && pick < 0.2)) {
+      // a combine opening up the field: two passes cut all along the front, a third behind it
+      const W = 7.5 * 1.3, all = W * (1 + Math.floor(turn * 2));
+      d = e0 + hw + all + W / 2;
+      if (d + W > e1 - hw) continue;
+      kind = 'combine';
+      const xh = wx + side * 4.3 * 1.3;
+      cut = { k, j, dir: side, xh, all, pass: all + W, stub: { crop: C.STUBBLE, color: jitter(CROP[C.STUBBLE].c, r, 0.03), dir: true, phase: d - e0 } };
+    } else if (crop && CROP[crop].wall && f.dir && pick < 0.6) {
+      // a sprayer along a tramline (the lines run along the track in this field)
+      const p0 = Math.round((d + f.phase - 1.3) / 24) * 24 - f.phase + 1.3;
+      if (p0 < e0 + hw + 12 || p0 > e1 - hw - 4) continue;
+      d = p0; kind = 'sprayer';
+    } else if (crop === C.STUBBLE || crop === C.CUT) {
+      kind = pick < 0.5 ? 'baler' : 'trailer';
+      d = clamp(d, e0 + hw + 8, e1 - hw - 6);
+      yaw += (turn - 0.5) * 0.8;
+    } else if (crop === C.PLOUGH) {
+      kind = 'plough';
+      d = clamp(d, e0 + hw + 8, e1 - hw - 6);
+      yaw += (turn - 0.5) * 0.3;
+    } else if (pick < 0.5 && !(crop && CROP[crop].wall)) {
+      // parked by the gate at the front of the field, sometimes with a trailer of bales
+      kind = turn < 0.5 ? 'gate' : 'gate+trailer';
+      d = e0 + 5;
+      yaw += (turn - 0.5) * 0.5;
+    } else continue;
+    if (d < 36 || d > 160 || !inSight(L, wx, d, 1.0)) continue;
+    return { i, wx, d, k, j, kind, yaw, liv, cut, seed: hashInts(L.ws, 403, i) };
+  }
+  return null;
+}
+function* sitesAround(ctx, L, margin = 60) {
+  const a = Math.floor((ctx.x0 - margin - SITE) / SITE), b = Math.floor((ctx.x0 + ctx.length + margin) / SITE);
+  for (let i = a; i <= b; i++) {
+    const s = siteIn(L, i);
+    if (s && s.wx > ctx.x0 - margin && s.wx < ctx.x0 + ctx.length + margin) yield s;
+  }
+}
+// The strips combines have cut, for the fill and the crop walls of this chunk.
+function cutsFor(ctx, L) {
+  const res = [];
+  for (const s of sitesAround(ctx, L, 400)) if (s.cut) res.push(s.cut);
+  return res;
+}
+function cutDepth(q, wx) { return (wx - q.xh) * q.dir < 0 ? q.pass : q.all; }
+
+function* machines(ctx, out, L, dLo, dHi) {
+  for (const s of sitesAround(ctx, L, 40)) {
+    if (s.d < dLo || s.d >= dHi) continue;
+    const rng = makeRng(s.seed);
+    if (s.kind === 'combine') {
+      const R = rig(ctx, out, s.wx, s.d, s.yaw, 1.3);
+      combine(R, COMBINE[s.liv], rng);
+      yield* flush(out, R);
+    } else {
+      const liv = TRACTOR[s.liv];
+      const f = fieldInfo(L, s.k, s.j);
+      const R = rig(ctx, out, s.wx, s.d, s.yaw, 1.6);
+      tractor(R, liv);
+      if (s.kind === 'baler') {
+        baler(R, liv);
+        roundBale(R, -6.6, 0.75, 0, f.bales === 2 ? 'black' : 'straw');       // just let out of the tailgate
+      } else if (s.kind === 'trailer' || s.kind === 'gate+trailer') {
+        baleTrailer(R, liv, f.bales === 2 ? (rng() < 0.5 ? 'black' : 'green') : 'straw');
+      } else if (s.kind === 'plough') plough(R);
+      else if (s.kind === 'sprayer') sprayer(R, liv);
+      if (s.kind.startsWith('gate')) {
+        // the gate stands open in the gap at the front of the field
+        const e = edgeD(L, s.k, s.wx + 8);
+        const Gt = rig(ctx, out, s.wx + 8, e, 0.25, 1.3);
+        gate(Gt);
+        yield* flush(out, Gt);
+      }
+      yield* flush(out, R);
+    }
+  }
+}
+// A bale stack stands inside the field's front edge where it can be seen from the line, or else
+// inside its back edge (behind the field, so in sight over the bales and stubble); null for neither.
+function stackD(L, k, wx) {
+  const e = edgeD(L, k, wx) + 4.2;
+  if (e >= 30 && inSight(L, wx, e, 1.0)) return e;
+  const b = edgeD(L, k + 1, wx) - 4.2;
+  return b >= 30 && b < 200 && inSight(L, wx, b, 1.0) ? b : null;
+}
+
+// Bales on cut fields: rows of round bales where the baler dropped them, a stack of them by the
+// front hedge, or rows of small square bales. All placed from the field's world hash.
+function* fieldBales(ctx, out, L, dLo, dHi) {
+  const x0 = ctx.x0 - 3, x1 = ctx.x0 + ctx.length + 3;
+  for (let k = 0; k + 1 < L.rows.length; k++) {
+    const q = L.rows[k], q1 = L.rows[k + 1];
+    if (q.D - q.amp > Math.min(dHi, 330)) break;
+    if (q1.D + q1.amp < dLo) continue;
+    const a = Math.floor((x0 - 60) / q.W) - 1, b = Math.floor((x1 + 60) / q.W) + 1;
+    for (let j = a; j <= b; j++) {
+      const f = fieldInfo(L, k, j);
+      if (!f.bales) continue;
+      const dMid = (q.D + q1.D) / 2;
+      const xl = colEdge(L, k, j, dMid), xr = colEdge(L, k, j + 1, dMid);
+      if (xr < x0 - 20 || xl > x1 + 20) continue;
+      if (inVillage(L, (xl + xr) / 2, dMid)) continue;
+      const r = worldRng(ctx, 77, k, j);
+      const inside = (wx, d, m) => d > 15 && rowAt(L, wx, d) === k && colAt(L, k, wx, d) === j &&
+        d - edgeD(L, k, wx) > m + frontHw(L, k, wx, d) - 2.5 && edgeD(L, k + 1, wx) - d > m && wx - colEdge(L, k, j, d) > m && colEdge(L, k, j + 1, d) - wx > m;
+      const kind = f.bales === 2 ? (r() < 0.6 ? 'black' : 'green') : f.crop === C.CUT ? 'hay' : 'straw';
+      const busy = [];
+      for (const s of sitesAround(ctx, L, 80)) if (s.k === k && s.j === j) busy.push(s);
+      const want = (wx, d) => d >= dLo && d < dHi && wx >= x0 && wx < x1 && !busy.some((s) => Math.abs(wx - s.wx) < 22 && Math.abs(d - s.d) < 9);
+      if (f.bales === 3) {
+        // small square bales in rows along the track, every 6 to 9 m
+        for (let d = q.D + 8 + r() * 6; d < Math.min(q1.D - 4, 160); d += 9 + r() * 6) {
+          for (let wx = xl + 4 + r() * 6; wx < xr - 4; wx += 7 + r() * 4) {
+            const ax = (r() - 0.5) * 0.5, dd = d + (r() - 0.5) * 1.5;
+            if (!want(wx, dd) || !inside(wx, dd, 5)) continue;
+            const R = rig(ctx, out, wx, dd, 0, 2.3);
+            squareBale(R, 0, 0, ax);
+            yield* flush(out, R);
+          }
+          if (out.due()) yield;
+        }
+        continue;
+      }
+      // a stack by the front (or back) edge, end-on to the line: a pyramid of 4-3-2-1 or 3-2-1
+      if (r() < 0.55) {
+        const n = r() < 0.5 ? 3 : 4, sx = lerp(xl + 12, xr - 12 - n * 2.25, r());
+        const e = stackD(L, k, sx);
+        if (e != null && e >= dLo && e < dHi && inside(sx, e, 2) && sx < x1 + 10 && sx + n * 2.25 > x0 - 10) {
+          const R = rig(ctx, out, sx, e, 0, 1.5, ctx.terrain.height(sx, e));
+          for (let row = 0; row < n; row++) for (let c = 0; c < n - row; c++) roundBale(R, (c + row * 0.5) * 1.5, 0.75 + row * 1.28, 0, kind === 'green' ? 'black' : kind);
+          yield* flush(out, R);
+        }
+      }
+      // rows where the baler dropped them
+      const rowGap = 14 + 8 * r();
+      for (let d = q.D + 10 + r() * 8; d < Math.min(q1.D - 5, 320); d += rowGap) {
+        for (let wx = xl + 6 + r() * 20; wx < xr - 6; wx += 14 + 26 * r()) {
+          const dd = d + (r() - 0.5) * 4, ax = r() * Math.PI;
+          if (!want(wx, dd) || !inside(wx, dd, 4)) continue;
+          const R = rig(ctx, out, wx, dd, ax, 1.5);
+          roundBale(R, 0, 0.75, 0, kind);
+          yield* flush(out, R);
+        }
+        if (out.due()) yield;
+      }
+    }
+  }
+}
+
 // House, barn and a shed, with a tree. `wrong` > 0 nudges it for the repeating (logic) version.
 function* farmstead(ctx, out, x, d, rng, scale = 1, wrong = 0) {
   const yaw = (rng() - 0.5) * 0.5 + (rng() < 0.25 ? (rng() < 0.5 ? 1 : -1) * Math.PI / 2 : 0);
@@ -422,6 +1095,10 @@ function* trackside(ctx, emit) {
 
   // the boundary: post-and-wire fence, or in places a laid hawthorn hedge just beyond it
   yield* fence(ctx, out, 6.6, { spacing: 2.7 });
+  // standing crops: the walls of their near edges and sides (the canopy is the field fill below),
+  // early, so the prop limit never takes them from under a lifted canopy
+  const cuts = cutsFor(ctx, L);
+  yield* cropWalls(ctx, out, L, 6.7, ctx.zFar, cuts);
   for (const { i, wx0 } of cellsAround(ctx, 30, 2)) {
     if (stretch(wx0, 700, 41) < 0.68) continue;
     yield* hedge(ctx, out, (t) => [wx0 + 30 * t - ctx.x0, 7.6], 30, { rng: worldRng(ctx, 15, i), height: 1.4, width: 1.2, color: [0.17, 0.26, 0.11], gaps: 0.1, wobbleSalt: 5 });
@@ -451,6 +1128,8 @@ function* trackside(ctx, emit) {
   // field hedges that come close to the line
   yield* rowHedges(ctx, out, L, 8, ctx.zFar, { treeFrom: 9 });
 
+  yield* fieldBales(ctx, out, L, 6.7, ctx.zFar);
+
   // ground: ballast and cess (mostly below the window), a tufty verge, then the field
   const rest = out.left();
   const ballast = PAL.ballast;
@@ -462,10 +1141,7 @@ function* trackside(ctx, emit) {
     n: Math.round(rest * 0.07), dNear: 4.6, dFar: 6.9, power: 0, cover: 4, slope: false, flat: 0.4,
     color: (wx, d, rng) => jitter(mix3([0.28, 0.38, 0.16], [0.46, 0.44, 0.26], noise2(wx / 3, d, L.ws) * 0.7), rng, 0.15),
   });
-  yield* fillGround(ctx, out, {
-    dNear: 6.7, dFar: ctx.zFar + 1, power: 1.5, cover: 4.5, slope: false,
-    color: (wx, d, rng) => groundColor(ctx, L, wx, d, rng),
-  });
+  yield* fieldFill(ctx, out, L, { dNear: 6.7, dFar: ctx.zFar + 1, power: 1.5, cover: 4.5, cuts });
 }
 
 function* near(ctx, emit) {
@@ -474,13 +1150,19 @@ function* near(ctx, emit) {
   const cap = ctx.count * 0.62;
   out.limit = ctx.count * 0.8;
   const dz = ctx.dials || {};
+  // crops, machines and bales first: they are what this farmland is looked at for, and the crop
+  // walls must stand wherever the fill lifts a field, or the canopy floats
+  const cuts = cutsFor(ctx, L);
+  yield* cropWalls(ctx, out, L, ctx.zNear, ctx.zFar, cuts);
+  yield* machines(ctx, out, L, ctx.zNear, ctx.zFar);
+  yield* fieldBales(ctx, out, L, ctx.zNear, ctx.zFar);
   yield* rowHedges(ctx, out, L, ctx.zNear, ctx.zFar, { capAt: cap });
   yield* colHedges(ctx, out, L, ctx.zNear, ctx.zFar, 20, { capAt: cap });
   yield* lanes(ctx, out, L, ctx.zNear, ctx.zFar);
   yield* villages(ctx, out, L, ctx.zNear, ctx.zFar, { capAt: cap });
   yield* repeatingFarm(ctx, out, dz.logic || 0);
   if (out.n < cap) yield* fieldContents(ctx, out, L, ctx.zNear, ctx.zFar, 25, { woodSpacing: 8, capAt: cap });
-  yield* fillGround(ctx, out, { power: 1.5, cover: 3.2, slope: false, color: (wx, d, rng, x, y) => groundColor(ctx, L, wx, d, rng, y) });
+  yield* fieldFill(ctx, out, L, { power: 1.5, cover: 3.2, cuts });
 }
 
 // Logic dial: the same farmstead (same design, same distance) every 560 m of world x along
@@ -617,7 +1299,7 @@ export const _debug = {
     const terrain = makeTerrain(hashString(String(seedStr)), downsBiome.terrain);
     const ctx = { terrain };
     const L = layout(ctx);
-    const res = { woods: [], oaks: [], farms: [], villages: [], flocks: [] };
+    const res = { woods: [], oaks: [], farms: [], villages: [], flocks: [], machines: [], crops: [] };
     for (let k = 0; k + 1 < L.rows.length && L.rows[k].D < dMax; k++) {
       const q = L.rows[k];
       for (let j = Math.floor(x0 / q.W) - 1; j <= Math.floor(x1 / q.W) + 1; j++) {
@@ -625,6 +1307,15 @@ export const _debug = {
         const dMid = (q.D + L.rows[k + 1].D) / 2;
         const xl = colEdge(L, k, j, dMid), xr = colEdge(L, k, j + 1, dMid);
         if (xr < x0 || xl > x1) continue;
+        if (f.crop) {
+          const e = { crop: Object.keys(C).find((n) => C[n] === f.crop), x0: Math.round(xl), x1: Math.round(xr), d0: Math.round(q.D), d1: Math.round(L.rows[k + 1].D), bales: f.bales || 0 };
+          if (f.bales && f.bales !== 3) {        // the same draws as fieldBales
+            const r = worldRng(ctx, 77, k, j);
+            if (f.bales === 2) r();
+            if (r() < 0.55) { const n = r() < 0.5 ? 3 : 4, sx = lerp(xl + 12, xr - 12 - n * 2.25, r()); if (stackD(L, k, sx) != null) e.stack = { x: Math.round(sx + n * 1.1), d: Math.round(stackD(L, k, sx)), n }; }
+          }
+          res.crops.push(e);
+        }
         if (f.wood) { res.woods.push({ x0: Math.round(xl), x1: Math.round(xr), d0: Math.round(q.D), d1: Math.round(L.rows[k + 1].D) }); continue; }
         if (dMid < 1800 && inVillage(L, (xl + xr) / 2, dMid)) continue;
         const rng = worldRng(ctx, 11, k, j);
@@ -640,6 +1331,10 @@ export const _debug = {
     for (let i = Math.floor(x0 / VCELL) - 1; i <= Math.floor(x1 / VCELL) + 1; i++) {
       const v = villageIn(L, i);
       if (v && v.cx >= x0 && v.cx <= x1 && v.dc < dMax) res.villages.push({ church: { x: Math.round(v.cx), d: Math.round(v.dc + 14) }, R: Math.round(v.R), spire: v.spire });
+    }
+    for (let i = Math.floor(x0 / SITE) - 1; i <= Math.floor(x1 / SITE) + 1; i++) {
+      const s = siteIn(L, i);
+      if (s && s.wx >= x0 && s.wx <= x1) res.machines.push({ kind: s.kind, x: Math.round(s.wx), d: Math.round(s.d) });
     }
     return res;
   },
