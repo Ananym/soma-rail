@@ -22,6 +22,19 @@ const NUM = {
   sparkle: 1,        // strength of the treble shimmer (0 = off)
   move: 1,           // strength of the moving things (flags, traffic, vapour); 0 = everything still
   beatPin: -1,       // pins the beat pulse at this value 0..1 (screenshot scripts); -1 lets the music drive it
+  // Music signals (director.js "Music signals"). A strength of 0 switches that part off, leaving
+  // the picture exactly as it was before the part existed; the pins hold a signal for stills.
+  split: 1,          // kicks move big things and hats small ones (0: one pulse moves everything, as before)
+  mid: 1,            // vocals and melody warm the lights and strengthen the gusts (0: off)
+  weather: 1,        // loudness thins or fills the rain, the snow and the traffic (0: always full, as before)
+  events: 1,         // drops and breakdowns set off events (0: none)
+  chase: 1,          // lamps chase at the tempo (0: they rest, as before)
+  bigPin: -1,        // pins the big things' pulse 0..1 (-1: follows beatPin, else the music)
+  smallPin: -1,      // pins the small things' pulse 0..1 (-1: follows beatPin, else the music)
+  midPin: -1,        // pins the mid-band lift 0..1
+  weatherPin: -1,    // pins the weather 0..1 (1 = full)
+  chasePin: -1,      // pins the beat clock (beats, any number) and switches the chase on
+  eventT: -1,        // with fire=<kind>: holds that event at this many seconds after it began
   beatSeq: -1,       // pins the beat counter (screenshot scripts): which chorus groups answer; -1 lets it count
   moveT: -1,         // pins the motion clock at this many seconds (screenshot scripts); -1 lets it run
   tags: 0,           // 1 paints each motion class a flat colour and dims the rest (to check the tagging)
@@ -29,7 +42,7 @@ const NUM = {
   debug: 0,          // 1 shows a stats readout
   preserve: 0,       // 1 keeps the drawing buffer readable (screenshot scripts only; slower)
 };
-const STR = { seed: '', biome: '', slot: '' };   // slot: dawn | day | dusk | night
+const STR = { seed: '', biome: '', slot: '', fire: '' };   // fire: raise a music event once the view is running (drop | breakdown, or a kind events.js knows)   // slot: dawn | day | dusk | night
 
 export function readParams(search = (typeof location !== 'undefined' ? location.search : '')) {
   const q = new URLSearchParams(search);

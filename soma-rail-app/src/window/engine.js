@@ -412,6 +412,16 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     uniforms.uDissolve.value = S.dissolve;
     uniforms.uBreath.value = S.breath;
     uniforms.uBeat.value = params.beatPin >= 0 ? params.beatPin : S.beat;
+    // music signals (director.js): each part's strength from the URL, 0 leaving the picture as it was
+    {
+      const pin = (p, v) => (p >= 0 ? p : v), beatNow = uniforms.uBeat.value, k = Math.min(1, Math.max(0, params.split));
+      uniforms.uBeatBig.value = pin(params.bigPin, params.beatPin >= 0 ? params.beatPin : beatNow + (S.beatBig - beatNow) * k);
+      uniforms.uBeatSmall.value = pin(params.smallPin, params.beatPin >= 0 ? params.beatPin : beatNow + (S.beatSmall - beatNow) * k);
+      uniforms.uMid.value = pin(params.midPin, reducedMotion ? 0 : S.mid * params.mid);
+      uniforms.uWeather.value = pin(params.weatherPin, 1 - (1 - S.weather) * Math.min(1, Math.max(0, params.weather)));
+      uniforms.uChase.value = params.chasePin >= 0 ? params.chasePin % 1024 : S.chase % 1024;
+      uniforms.uChaseOn.value = params.chasePin >= 0 ? 1 : reducedMotion ? 0 : S.chaseOn * Math.min(1, Math.max(0, params.chase));
+    }
     // each new beat gets a number, so that the chorus groups (kit.js chorus()) take turns
     if (S.beat > lastBeatSeen + 0.25) beatSeq = (beatSeq + 1) % 1024;
     lastBeatSeen = S.beat;

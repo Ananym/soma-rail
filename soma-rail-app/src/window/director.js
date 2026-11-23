@@ -43,6 +43,16 @@ export function createDirector({ params, reducedMotion = false }) {
     dissolve: 0,            // shader "matter" amount, 0..1
     breath: 0,              // shader scale pulse from the bass
     beat: 0,                // 0..1, jumps on each onset and decays quickly
+    // Music signals: the contract with the picture (engine.js copies them to the shader). Each has
+    // a neutral value that leaves the picture as it is without it, and holds that value whenever
+    // the music is not being analysed (Safari, iOS, a stream that refuses CORS).
+    beatBig: 0,             // the pulse for big things (kicks); neutral: equal to beat
+    beatSmall: 0,           // the pulse for small things and lights (hats, snares); neutral: equal to beat
+    mid: 0,                 // 0..1 lift of the mid band (vocals, melody) over its recent average; neutral 0
+    weather: 1,             // 0..1 slow loudness; 1 is full weather (neutral), lower thins rain, snow, traffic
+    chase: 0,               // beat clock: one unit per beat at the trusted tempo, whole numbers on beats
+    chaseOn: 0,             // 0..1: 1 while there is a fresh tempo lock; 0 (neutral) rests the lamps
+    event: null,            // { seq, kind: 'drop' | 'breakdown' | ..., strength, at }: the last music event
     sparkle: 0,             // 0..1, lifts when the treble rises above its recent average
     trebleNow: 0,
     trebleAvg: 0,
@@ -204,6 +214,11 @@ export function createDirector({ params, reducedMotion = false }) {
       }
     },
 
+    // Raise a music event by hand (debug, the fire= URL parameter, tests).
+    fireEvent(kind, strength = 1) {
+      state.event = { seq: (state.event ? state.event.seq : 0) + 1, kind, strength, at: state.time };
+    },
+
     // The engine calls this when the world has been rebuilt behind the tunnel wall.
     worldReady() { if (state.tunnel) state.tunnel.ready = true; },
 
@@ -240,7 +255,8 @@ export function createDirector({ params, reducedMotion = false }) {
       state.sparkle += (lift - state.sparkle) * (1 - Math.exp(-dt / 0.1));
       const wantDissolve = reducedMotion ? 0 : state.dials.matter * Math.max(0, state.energy - 0.35) * 0.9;
       state.dissolve += (wantDissolve - state.dissolve) * Math.min(1, dt * 0.5);
-      if (still) { state.beat = 0; state.sparkle = 0; state.breath = 0; }
+      state.beatBig = state.beat; state.beatSmall = state.beat;   // (neutral, until band onsets are wired in)
+      if (still) { state.beat = 0; state.beatBig = 0; state.beatSmall = 0; state.mid = 0; state.sparkle = 0; state.breath = 0; }
 
       const t = state.tunnel;
       if (t) {

@@ -15,6 +15,12 @@ export const PATCH_UNIFORMS = () => ({
   uDissolve: { value: 0 },          // 0..1, scatters splats ("matter" dial)
   uBreath: { value: 0 },            // small scale pulse from the bass
   uBeat: { value: 0 },              // 0..1, jumps on each onset (kick, snare) and decays in a fraction of a second
+  uBeatBig: { value: 0 },           // the pulse big things take (kicks); equal to uBeat when the beat is not split
+  uBeatSmall: { value: 0 },         // the pulse small things and lights take (hats, snares); likewise
+  uMid: { value: 0 },               // 0..1 lift of the mid band (vocals, melody); 0 leaves everything as it was
+  uWeather: { value: 1 },           // 0..1: 1 is full weather; lower thins the rain, the snow and the traffic
+  uChase: { value: 0 },             // the beat clock, in beats (wrapped at 1024), for lamps that chase
+  uChaseOn: { value: 0 },           // 0..1: how much the chase shows; 0 rests the lamps
   uBeatSeq: { value: 0 },           // counts the beats (wrapped at 1024): which chorus groups answer this one
   uSparkle: { value: 0 },           // 0..1, follows the treble (hi-hats, cymbals, air)
   uClock: { value: 0 },             // seconds, for the sparkle's flicker
@@ -44,6 +50,12 @@ uniform float uDissolve;
 uniform float uBreath;
 uniform float uBeat;
 uniform float uBeatSeq;
+uniform float uBeatBig;
+uniform float uBeatSmall;
+uniform float uMid;
+uniform float uWeather;
+uniform float uChase;
+uniform float uChaseOn;
 uniform float uSparkle;
 uniform float uClock;
 uniform float uBeatRaised;
