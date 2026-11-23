@@ -31,14 +31,20 @@
 // each part fills (as himalaya.js), so a slope or a cliff facing the line gets most of them.
 //
 // Flowers are drawn in two layers. The carpet: every ground splat on a meadow is either grass or a
-// flower colour, by the patch it lies in, so the colour fields reach out to the slopes. The heads:
-// near the line (out to about 120 m) plants are drawn one by one on thin stems, in the forms of
-// their kind (discs with an eye, bells, spikes, umbels, low cushions), a good deal larger than
-// life so they read from a moving train. They keep clear of the cattle, the goats, the marmots and
-// the haymakers (clearings), so that those can be seen.
+// flower colour, by the patch it lies in, so the colour fields reach out to the slopes (out to a few
+// hundred metres only a tint: there the plants carry the colour). The meadow in 3D (meadow()):
+// out to 135 m plants stand one by one on their stems among tufts of grass, in the forms of their
+// kind (rays round an eye, cups, bells, spires of florets, umbels on rays, thistles, trumpets,
+// clover heads, cushions, alpenrose domes), in full by the line and simpler further out, larger
+// than life so they read from a moving train; beyond, and up the slope meadows of the mid band,
+// drifts: a tussock with heads of its patch's flowers on top, so the middle distance has relief.
+// Uncut strips along field borders, the river bank and the road's verges flower richer and taller.
+// The plants keep clear of the cattle, the goats, the marmots and the haymakers (clearings).
 //
-// The beat: buildings and lights (beatKinds); animals, people, vehicles and the cable car's cabins
-// tag their own splats with MOVE.BEAT. The mountains, the forest and the flowers stay still. Flags
+// The beat: buildings and lights (beatKinds); vehicles and the cable car's cabins tag their own
+// splats with MOVE.BEAT (they swell); animals and people with MOVE.FLASH (they brighten, never
+// swell). The flower heads answer in colour groups (kit.js chorus(): one group per colour, a few
+// groups each beat, see CHORUS_OF). The mountains, the forest, stems and grass stay still. Flags
 // and washing flutter (MOVE.FLAG), spray and chimney smoke billow (MOVE.VAPOUR), the eagle and the
 // choughs fly (MOVE.FLY).
 //
@@ -53,7 +59,7 @@ import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, detail, shade, jitter, mul3, mix3, smooth,
   clamp, lerp, quatYaw, quatRoll, quatMul, quatXTo, rotY, SUN,
-  overheadLine, flightCell, flyBody, flyWing, Q_ID, broadleaf, floatingIsland,
+  overheadLine, flightCell, flyBody, flyWing, Q_ID, broadleaf, floatingIsland, chorus,
 } from './kit.js';
 
 const PAL = {
@@ -126,40 +132,53 @@ const CAMY = 2.6;
 // 'bell' (nodding bells down the top of the stem), 'spike' (a tall spire of bloom), 'umbel' (a wide
 // flat plate), 'cushion' (low, in mats), 'bush' (alpenrose: a low dark bush covered in bloom),
 // 'tuft' (cotton grass). h = height of the plant in metres, r = radius of a head; both are drawn
-// larger than life (see flowerHeads).
+// larger than life (see meadow()).
 // ---------------------------------------------------------------------------------------------
 const FL = [
-  /* 0 */ { name: 'buttercup', c: [0.8, 0.7, 0.06], form: 'disc', h: 0.5, r: 0.08 },
-  /* 1 */ { name: 'arnica', c: [0.8, 0.52, 0.04], eye: [0.5, 0.3, 0.05], form: 'disc', h: 0.6, r: 0.12 },
-  /* 2 */ { name: 'ox-eye daisy', c: [0.8, 0.8, 0.76], eye: [0.8, 0.64, 0.08], form: 'disc', h: 0.65, r: 0.13 },
-  /* 3 */ { name: 'gentian', c: [0.08, 0.14, 0.72], eye: [0.3, 0.4, 0.8], form: 'cushion', h: 0.22, r: 0.1 },
+  /* 0 */ { name: 'buttercup', c: [0.8, 0.7, 0.06], eye: [0.62, 0.5, 0.05], form: 'disc', h: 0.5, r: 0.095 },
+  /* 1 */ { name: 'arnica', c: [0.8, 0.54, 0.05], eye: [0.56, 0.3, 0.05], form: 'daisy', n: 7, h: 0.55, r: 0.12 },
+  /* 2 */ { name: 'ox-eye daisy', c: [0.8, 0.8, 0.77], eye: [0.8, 0.62, 0.06], form: 'daisy', n: 9, h: 0.65, r: 0.13 },
+  /* 3 */ { name: 'gentian', c: [0.08, 0.14, 0.72], eye: [0.36, 0.5, 0.8], form: 'trumpet', h: 0.25, r: 0.12 },
   /* 4 */ { name: 'bellflower', c: [0.44, 0.3, 0.78], form: 'bell', h: 0.7, r: 0.09 },
-  /* 5 */ { name: 'red clover', c: [0.72, 0.28, 0.5], form: 'cushion', h: 0.3, r: 0.09 },
-  /* 6 */ { name: 'poppy', c: [0.8, 0.1, 0.05], eye: [0.08, 0.06, 0.08], form: 'disc', h: 0.7, r: 0.14 },
+  /* 5 */ { name: 'red clover', c: [0.72, 0.26, 0.46], form: 'clover', h: 0.28, r: 0.11 },
+  /* 6 */ { name: 'poppy', c: [0.8, 0.1, 0.05], eye: [0.08, 0.06, 0.08], form: 'poppy', h: 0.7, r: 0.14 },
   /* 7 */ { name: 'alpenrose', c: [0.78, 0.16, 0.34], form: 'bush', h: 0.7, r: 0.34 },
   /* 8 */ { name: 'fireweed', c: [0.76, 0.24, 0.58], form: 'spike', h: 1.5, r: 0.1 },
   /* 9 */ { name: 'monkshood', c: [0.2, 0.14, 0.62], form: 'spike', h: 1.35, r: 0.09 },
   /* 10 */ { name: 'cow parsley', c: [0.8, 0.8, 0.74], form: 'umbel', h: 1.15, r: 0.2 },
-  /* 11 */ { name: 'yellow gentian', c: [0.8, 0.68, 0.1], form: 'spike', h: 1.3, r: 0.1 },
+  /* 11 */ { name: 'yellow gentian', c: [0.8, 0.68, 0.1], form: 'spike', sub: 'whorl', h: 1.3, r: 0.1 },
   /* 12 */ { name: 'edelweiss', c: [0.78, 0.78, 0.7], eye: [0.7, 0.66, 0.3], form: 'cushion', h: 0.2, r: 0.1 },
   /* 13 */ { name: 'forget-me-not', c: [0.36, 0.58, 0.8], eye: [0.8, 0.74, 0.3], form: 'cushion', h: 0.28, r: 0.08 },
-  /* 14 */ { name: 'meadow sage', c: [0.3, 0.2, 0.7], form: 'spike', h: 0.75, r: 0.07 },
-  /* 15 */ { name: 'red campion', c: [0.8, 0.2, 0.44], form: 'disc', h: 0.7, r: 0.09 },
-  /* 16 */ { name: 'globeflower', c: [0.8, 0.74, 0.16], form: 'disc', h: 0.6, r: 0.11 },
+  /* 14 */ { name: 'meadow sage', c: [0.3, 0.2, 0.7], form: 'spike', h: 0.75, r: 0.085 },
+  /* 15 */ { name: 'red campion', c: [0.8, 0.2, 0.44], eye: [0.6, 0.12, 0.3], form: 'disc', h: 0.7, r: 0.09 },
+  /* 16 */ { name: 'globeflower', c: [0.8, 0.74, 0.16], form: 'globe', h: 0.6, r: 0.11 },
   /* 17 */ { name: 'cotton grass', c: [0.8, 0.8, 0.78], form: 'tuft', h: 0.5, r: 0.08 },
   /* 18 */ { name: 'bistort', c: [0.8, 0.5, 0.62], form: 'spike', h: 0.8, r: 0.06 },
-  /* 19 */ { name: 'orange hawkweed', c: [0.8, 0.34, 0.05], form: 'disc', h: 0.45, r: 0.08 },
+  /* 19 */ { name: 'orange hawkweed', c: [0.8, 0.34, 0.05], eye: [0.6, 0.2, 0.04], form: 'disc', h: 0.45, r: 0.08 },
+  /* 20 */ { name: 'orchid', c: [0.66, 0.3, 0.64], form: 'spike', sub: 'orchid', h: 0.65, r: 0.075 },
+  /* 21 */ { name: 'thistle', c: [0.58, 0.2, 0.58], form: 'thistle', h: 1.1, r: 0.11 },
+  /* 22 */ { name: 'lupin', c: [0.34, 0.3, 0.76], form: 'spike', sub: 'band', h: 1.05, r: 0.1 },
+  /* 23 */ { name: 'scabious', c: [0.6, 0.54, 0.8], eye: [0.5, 0.44, 0.72], form: 'disc', h: 0.6, r: 0.1 },
 ];
+// The beat: each colour of flower is one chorus group (kit.js chorus()), and on each beat a few of
+// the eight answer together, every head of that colour across the meadow:
+//   0 white (daisy, edelweiss, cotton grass)   1 yellow and orange (buttercup, arnica, globeflower,
+//   yellow gentian, hawkweed)   2 sky and bell blue (gentian, forget-me-not, bellflower)   3 red
+//   (poppy, red clover, campion)   4 pink (alpenrose, fireweed, bistort)   5 purple (orchid, thistle,
+//   scabious, sage)   6 blue-violet spikes (monkshood, lupin)   7 white umbels (cow parsley)
+const CHORUS_OF = [1, 1, 0, 2, 2, 3, 3, 4, 4, 6, 7, 1, 0, 2, 5, 3, 1, 0, 4, 1, 5, 5, 6, 5];
+FL.forEach((f, i) => { f.g = CHORUS_OF[i]; });
 // Mixes that grow together: a stretch of the journey takes one, each patch picks from it.
 const FMIX = [
-  [0, 2, 4, 5, 15, 14],          // the classic hay meadow: yellow, white, violet, pink
-  [3, 13, 2, 0, 12, 5],          // blues: gentian and forget-me-not among daisies
-  [6, 2, 14, 0, 10, 19],         // poppies, daisies, sage
-  [8, 10, 9, 16, 15, 4],         // tall herbs: fireweed, cow parsley, monkshood
-  [1, 19, 4, 11, 16, 3],         // arnica and hawkweed: oranges and violets
-  [7, 3, 12, 1, 13, 18],         // the alpine turf: alpenrose, gentian, edelweiss
-  [18, 17, 16, 13, 5, 2],        // wet meadow by the river: bistort, cotton grass, globeflower
-  [15, 5, 8, 2, 4, 6],           // pinks and reds
+  [0, 2, 4, 5, 15, 14, 23],          // the classic hay meadow: yellow, white, violet, pink
+  [3, 13, 2, 0, 12, 5, 4],           // blues: gentian and forget-me-not among daisies
+  [6, 2, 14, 0, 10, 19, 21],         // poppies, daisies, sage, thistles
+  [8, 10, 9, 16, 15, 4, 21],         // tall herbs: fireweed, cow parsley, monkshood, thistle
+  [1, 19, 4, 11, 16, 3, 20],         // arnica and hawkweed: oranges and violets, orchids
+  [7, 3, 12, 1, 13, 18, 20],         // the alpine turf: alpenrose, gentian, edelweiss
+  [18, 17, 16, 13, 22, 9, 2],        // wet meadow by the river: bistort, cotton grass, globeflower, lupin, monkshood
+  [15, 5, 18, 2, 4, 6, 20],          // pinks and reds
+  [20, 2, 23, 0, 5, 14, 21],         // orchids and scabious among daisies
 ];
 const GRASS_STEM = [0.2, 0.4, 0.12];
 
@@ -167,7 +186,7 @@ const GRASS_STEM = [0.2, 0.4, 0.12];
 // Small helpers
 // ---------------------------------------------------------------------------------------------
 const SX = SUN[0], SY = SUN[1], SZ = SUN[2];
-const B = MOVE.BEAT;
+const B = MOVE.BEAT, FL_ = MOVE.FLASH;   // B: things that swell on the beat; FL_: people and animals, which only brighten
 // Snow lit from its surface normal: warm white facing the sun, blue turned away from it.
 function snowTone(nx, ny, nz, res) {
   const l = nx * SX + ny * SY + nz * SZ;
@@ -858,8 +877,9 @@ function mixOf(W, i) {
   });
 }
 // The patch a point lies in: PT.a and PT.b are its two kinds of flower, PT.da and PT.db how thickly
-// each grows (0..1, the share of the ground it colours), PT.k the kind of field.
-const PT = { a: 0, b: 0, da: 0, db: 0, k: 0 };
+// each grows (0..1, the share of the ground it colours), PT.k the kind of field, PT.tall how much
+// taller than usual it grows (the uncut strips: field borders, river banks, the road's verges).
+const PT = { a: 0, b: 0, da: 0, db: 0, k: 0, tall: 1 };
 function patchAt(W, wx, d, wet) {
   const ws = W.ws;
   // drifts: irregular patches about 14 m x 9 m; further off, the wide drifts that show from afar
@@ -871,17 +891,31 @@ function patchAt(W, wx, d, wet) {
     const qu = wx / 85 + 1.2 * noise2(wx / 140, d / 90, ws + 305), qv = d / 46 + 1.2 * noise2(wx / 120, d / 70, ws + 306);
     h = hashInts(ws, 307, Math.floor(qu), Math.floor(qv)) >>> 0;
   }
-  // the mix changes along the journey, with a ragged border between one stretch and the next
+  const x = xAt(W, wx);
+  // the mix changes along the journey, with a ragged border between one stretch and the next; up
+  // the valley side it gives way to the alpine turf (alpenrose, gentian, edelweiss)
   const mi = Math.floor(wx / 640 + (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.1);
-  const mix = wet ? FMIX[6] : mixOf(W, mi);
-  PT.a = mix[(h >>> 8) % 6]; PT.b = mix[(h >>> 12) % 6];
-  const k = fieldAt(W, wx, d, n1, n2);
+  const up = d > x.ft ? smooth(x.ft, x.ft + 380, d) : 0;
+  const mix = wet ? FMIX[6] : up > 0 && ((h >>> 4) & 255) < up * 230 ? FMIX[5] : mixOf(W, mi);
+  PT.a = mix[(h >>> 8) % mix.length]; PT.b = mix[(h >>> 12) % mix.length];
+  let k = fieldAt(W, wx, d, n1, n2);
+  // the uncut strips: a few metres along the borders of the fields, the banks of the river and
+  // the verges of the road, left to flower tall
+  const fu = wx / 120 + 0.22 * n1, fv = d / 80 + 0.26 * n2;
+  const eu = Math.min(fu - Math.floor(fu), Math.ceil(fu) - fu) * 120, ev = Math.min(fv - Math.floor(fv), Math.ceil(fv) - fv) * 80;
+  let e = d < x.ft ? Math.max(smooth(4.5, 1.5, eu), smooth(3.5, 1.2, ev)) : 0;
+  const ar = Math.abs(d - x.rc) - x.rw * 0.5;
+  if (ar > 0 && ar < 12) e = Math.max(e, smooth(12, 5, ar));
+  const av = Math.abs(d - x.rd);
+  if (av > 4 && av < 8) e = Math.max(e, 0.7 * smooth(8, 5.5, av));
+  if (e > 0.5) k = FK.HAY;
   PT.k = k;
+  PT.tall = 1 + 0.35 * e;
   // how much blooms: rich and poor zones, and less where the cows graze or the hay is cut
   const bloom = (0.55 + 0.9 * noise2(wx / 150, d / 100, ws + 308)) * (1 - 0.45 * smooth(90, 260, d));
-  const kk = k === FK.HAY ? 1 : k === FK.PASTURE ? 0.42 : 0.12;
-  PT.da = clamp((0.22 + 0.34 * ((h >>> 16) & 255) / 255) * bloom * kk, 0, 0.56);
-  PT.db = clamp((0.07 + 0.16 * ((h >>> 24) & 255) / 255) * bloom * kk, 0, 0.24);
+  const kk = Math.max(k === FK.HAY ? 1 : k === FK.PASTURE ? 0.42 : 0.12, 1.25 * e);
+  PT.da = clamp((0.22 + 0.34 * ((h >>> 16) & 255) / 255) * bloom * kk, 0, 0.6);
+  PT.db = clamp((0.07 + 0.16 * ((h >>> 24) & 255) / 255) * bloom * kk, 0, 0.26);
   return PT;
 }
 
@@ -905,7 +939,9 @@ function grassColor(W, wx, d, c, k) {
     mixc(c, sw > 0.3 ? C.mown : C.mownDark, c, 0.25);
   } else if (k === FK.PASTURE) mixc(c, c, C.pasture, 0.5);
 }
-function paint(W, wx, d, y, nx, ny, nz, rng) {
+// rel: the band's splat count against its count at 600k: with fewer plants standing on it, the
+// ground keeps more of their colour.
+function paint(W, wx, d, y, nx, ny, nz, rng, rel = 1) {
   const P = PA, c = P.c, ws = W.ws;
   const x = xAt(W, wx);
   P.fl = -1; P.f = 0;
@@ -1058,8 +1094,9 @@ function paint(W, wx, d, y, nx, ny, nz, rng) {
     const fi = u < pt.da ? pt.a : pt.b;
     P.fl = fi;
     grassColor(W, wx, d, c, pt.k);
-    // (close by, where the plants themselves are drawn over it, the ground only takes their tint)
-    mixc(c, FL[fi].c, c, 0.3 + 0.2 * smooth(70, 28, d) + 0.14 * smooth(80, 200, d));
+    // (out to a few hundred metres, where the plants themselves stand on it, the ground only takes
+    // their tint: the colour is carried by the flowers, in 3D)
+    mixc(c, FL[fi].c, c, 0.32 + 0.43 * smooth(330, 140, d) * clamp(1.8 * rel - 0.8, 0.25, 1));
     mulc(c, 0.8 + 0.3 * rng());
   } else {
     grassColor(W, wx, d, c, pt.k);
@@ -1087,6 +1124,7 @@ function* fillView(ctx, out, W, opts = {}) {
   const dn = opts.dNear != null ? opts.dNear : ctx.zNear, df = opts.dFar != null ? opts.dFar : ctx.zFar;
   const NS = opts.strips || 6, NB = 40, cover = opts.cover || 3.2;
   const minR = opts.minR || 0.0015, maxR = opts.maxR || 0.04, floorK = opts.floor != null ? opts.floor : 0.4;
+  const rel = relCount(ctx);
   const db = new Float64Array(NB + 1);
   for (let b = 0; b <= NB; b++) db[b] = dn * Math.pow(df / dn, b / NB);
   const SL = L / NS;
@@ -1139,7 +1177,7 @@ function* fillView(ctx, out, W, opts = {}) {
       const hx = (yx - y) / e, hd = (yd - y) / e;
       const il = 1 / Math.hypot(hx, 1, hd);
       const nx = -hx * il, ny = il, nz = hd * il;
-      const p = paint(W, wx, d, y, nx, ny, nz, rng);
+      const p = paint(W, wx, d, y, nx, ny, nz, rng, rel);
       const c = p.c, t = p.t;
       if (t === T.RIVER) {
         out(x, y + 0.02, -d, r * 1.5, r * 0.05, r * 0.75, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
@@ -1210,6 +1248,7 @@ function* fillPlain(ctx, out, W, opts = {}) {
   const L = ctx.length;
   const p = opts.power != null ? opts.power : 1.5, cover = opts.cover || 3;
   const minR = opts.minR || 0.0015, maxR = opts.maxR || 0.08;
+  const rel = relCount(ctx);
   const a1 = 1 - p;
   const A = Math.pow(dn, a1), Bq = Math.pow(df, a1), Z = (Bq - A) / a1;
   for (let i = 0; i < n; i++) {
@@ -1222,7 +1261,7 @@ function* fillPlain(ctx, out, W, opts = {}) {
     const hx = (yx - y) / e, hd = (yd - y) / e;
     const il = 1 / Math.hypot(hx, 1, hd);
     const nx = -hx * il, ny = il, nz = hd * il;
-    const pp = paint(W, wx, d, y, nx, ny, nz, rng);
+    const pp = paint(W, wx, d, y, nx, ny, nz, rng, rel);
     const c = pp.c;
     const nzc = nz < 0 ? 0 : nz, qw = 1 + ny, ql = Math.hypot(nzc, nx, qw);
     const ax = 0.8 + 0.5 * rng();
@@ -1246,84 +1285,334 @@ function* fillStrip(ctx, out, W, n, dn, df, color, lift = 0, round = 0.12) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Flower heads: the plants near the line, drawn one by one. n plants are scattered over the strip
-// [dLo, dHi) (more of them nearer); each takes the kind its patch grows and the form of that kind.
-// They are drawn larger than life, and larger still with distance, so that a head is never much
-// under four pixels across: K = how many times life size.
+// The meadow in 3D: plants standing in the grass, drawn one by one near the line, in clumps
+// further out, and as drifts (a tussock with heads of bloom on its top) in the middle distance.
+// Everything is sized from distance so that a head is never under about a pixel and a half across
+// (r >= HEADPX * d), and drawn larger than life near the line (K) so that its form reads.
+//   lod 0 (out to LOD0 m): the full form of the kind: rays round an eye, cups, bells, spires of
+//         florets, umbels on their rays, thistles, trumpets, clover heads, with grass blades round them
+//   lod 1 (to the drift line): a stem and one or two head splats, in clumps of a few
+//   drift (beyond it): see drift()
 // ---------------------------------------------------------------------------------------------
-function* flowerHeads(ctx, out, W, budget, dLo, dHi, opts = {}) {
+const HEADPX = 0.00072;          // a head's radius per metre of distance: 1.65 px across at 1080p
+const LOD0 = 34;
+// The band's splat count against what it gets at a 600k budget (the meadow is tuned there).
+const REF = { trackside: 28074, near: 64728, mid: 35056, far: 1e9 };
+function relCount(ctx) { return clamp(ctx.count / (REF[ctx.layer] || ctx.count), 0.3, 2); }
+const LEAF = [0.16, 0.34, 0.1], LEAF_DARK = [0.1, 0.24, 0.08], SEED = [0.6, 0.56, 0.36];
+const BUSH = [0.09, 0.2, 0.09], BRACT = [0.24, 0.36, 0.14], BUD = [0.3, 0.42, 0.16], TUFT = [0.4, 0.46, 0.2];
+// (these run for every splat of the meadow: nothing in them allocates)
+// A splat whose long axis runs along (ux, uy, uz) (any length): petals, blades, rays, leaves, stems.
+function dirSplat(out, x, y, z, a, b, c, ux, uy, uz, col, k, move = 0) {
+  const il = 1 / (Math.hypot(ux, uy, uz) || 1);
+  ux *= il; uy *= il; uz *= il;
+  if (ux < 0) { ux = -ux; uy = -uy; uz = -uz; }
+  const w = 1 + ux, l = Math.hypot(uz, uy, w);
+  out(x, y, z, a, b, c, col[0] * k, col[1] * k, col[2] * k, 1, 0, -uz / l, uy / l, w / l, KIND.OTHER, move);
+}
+// A stem from (ax, ay, az) to (bx, by, bz), r thick: one long splat.
+function stem(out, ax, ay, az, bx, by, bz, r, col = GRASS_STEM) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
+  dirSplat(out, (ax + bx) * 0.5, (ay + by) * 0.5, (az + bz) * 0.5, Math.max(len * 0.5, r), r, r, dx, dy, dz, col, 1);
+}
+function ball(out, x, y, z, rx, ry, rz, col, k, move = 0) { out(x, y, z, rx, ry, rz, col[0] * k, col[1] * k, col[2] * k, 1, 0, 0, 0, 1, KIND.OTHER, move); }
+const LC = [0, 0, 0], GC3 = [0, 0, 0];
+function lit(c, f) { LC[0] = Math.min(0.8, c[0] * f); LC[1] = Math.min(0.8, c[1] * f); LC[2] = Math.min(0.8, c[2] * f); return LC; }
+// A ring of n petals of half-length pl round (cx, cy, cz), in a plane tipped t radians from level
+// toward the window (so a head faces up and toward the train, and still shows as an ellipse from the side).
+function rays(out, cx, cy, cz, n, rr, pl, pw, t, col, k, rng, move = 0) {
+  const ct = Math.cos(t), st = Math.sin(t), a0 = rng() * 6.28;
+  for (let i = 0; i < n; i++) {
+    const a = a0 + (i / n) * 6.283, ca = Math.cos(a), sa = Math.sin(a);
+    const ux = ca, uy = sa * st, uz = sa * ct;          // (the plane: x, and up-and-toward-the-window)
+    dirSplat(out, cx + ux * rr, cy + uy * rr, cz + uz * rr, pl, pw, pw * 0.35, ux, uy, uz, col, k * (0.92 + 0.16 * rng()), move);
+  }
+}
+// One plant of kind F standing at (x, y0, z) (splat space), d metres out. K: times life size for
+// the head, Kh for the height. tall: > 1 in the uncut strips.
+function plant(out, F, x, y0, z, d, K, Kh, rng, lod, tall) {
+  const c = F.c, kc = 0.86 + 0.22 * rng(), hm = chorus(F.g);   // (hm: the heads answer the beat with their colour)
+  const h = F.h * Kh * tall * (0.75 + 0.5 * rng());
+  const r = Math.max(F.r * K * (0.85 + 0.3 * rng()), HEADPX * d);
+  const sr = Math.max(0.011 * K, 0.00045 * d);
+  const lx = (rng() - 0.5) * 0.22 * h, lz = (rng() - 0.5) * 0.12 * h;
+  const tx = x + lx, ty = y0 + h, tz = z + lz;
+  const form = F.form;
+  if (form === 'bush') {
+    // alpenrose: a low dark-leaved bush covered in clusters of bloom
+    // (a dome: seen from the train's height the top shows as much as the front, so the bloom is
+    // spread over the whole upper surface, leaves showing dark between)
+    const bw = r * (1.0 + 0.6 * rng()), bh = Math.max(h * 0.75, bw * 0.9);
+    ball(out, x, y0 + bh * 0.42, z, bw, bh * 0.5, bw * 0.85, BUSH, 0.75 + 0.3 * rng());
+    const nb = lod ? 5 : 11;
+    for (let b = 0; b < nb; b++) {
+      const a = rng() * 6.283, p = 0.25 + 1.1 * rng(), sp_ = Math.sin(p);
+      ball(out, x + Math.cos(a) * sp_ * bw * 0.85, y0 + bh * (0.42 + 0.5 * Math.cos(p)), z + Math.sin(a) * sp_ * bw * 0.75, bw * 0.2, bw * 0.17, bw * 0.2, b & 1 ? c : lit(c, 1.15), kc, hm);
+    }
+    return;
+  }
+  if (form === 'cushion') {
+    // a low mat of small flowers (forget-me-not, edelweiss), its leaves showing between
+    const n = lod ? 3 : 6;
+    if (!lod) ball(out, x, y0 + h * 0.4, z, r * 3.2, h * 0.4, r * 2.4, LEAF_DARK, 0.9 + 0.2 * rng());
+    for (let b = 0; b < n; b++) {
+      const ox = (rng() - 0.5) * r * 6, od = (rng() - 0.5) * r * 4;
+      ball(out, x + ox, y0 + h * (0.75 + 0.5 * rng()), z + od, r * 1.1, r * 0.75, r * 0.9, c, kc, hm);
+      if (F.eye && !lod) ball(out, x + ox, y0 + h * 0.95 + r * 0.35, z + od + r * 0.4, r * 0.32, r * 0.28, r * 0.28, F.eye, 1, hm);
+    }
+    return;
+  }
+  if (form === 'trumpet') {
+    // gentian: deep blue trumpets standing straight up out of a rosette, low in the turf
+    if (!lod) for (let b = 0; b < 3; b++) { const a = rng() * 6.28; dirSplat(out, x + Math.cos(a) * r, y0 + 0.03, z + Math.sin(a) * r, r * 1.2, r * 0.45, r * 0.15, Math.cos(a), 0.15, Math.sin(a), LEAF, 0.9); }
+    const n = lod ? 2 : 3 + Math.floor(rng() * 3);
+    for (let b = 0; b < n; b++) {
+      const ox = (rng() - 0.5) * r * 3.5, od = (rng() - 0.5) * r * 2.5, hh = h * (0.7 + 0.5 * rng());
+      ball(out, x + ox, y0 + hh * 0.55, z + od, r * 0.55, hh * 0.5, r * 0.55, c, kc, hm);
+      if (!lod) ball(out, x + ox, y0 + hh * 0.98, z + od + r * 0.15, r * 0.6, r * 0.25, r * 0.6, F.eye || lit(c, 1.5), 1, hm);
+    }
+    return;
+  }
+  if (form === 'clover') {
+    // a round head on a short stalk, trefoil leaves below
+    if (!lod) for (let b = 0; b < 3; b++) { const a = rng() * 6.28; ball(out, x + Math.cos(a) * r * 1.3, y0 + h * 0.3, z + Math.sin(a) * r * 1.3, r * 0.8, r * 0.25, r * 0.8, LEAF, 0.85 + 0.25 * rng()); }
+    stem(out, x, y0, z, tx, ty, tz, sr);
+    ball(out, tx, ty, tz, r, r * 1.1, r, c, kc, hm);
+    if (!lod) ball(out, tx - r * 0.2, ty + r * 0.45, tz + r * 0.3, r * 0.55, r * 0.45, r * 0.5, lit(c, 1.25), kc, hm);
+    return;
+  }
+  if (form === 'tuft') {
+    // cotton grass: white tufts nodding on fine stems
+    stem(out, x, y0, z, tx, ty, tz, sr, TUFT);
+    ball(out, tx, ty, tz, r * 0.9, r * 1.2, r * 0.8, c, kc, hm);
+    if (!lod) { stem(out, x, y0, z, tx + h * 0.2, ty - h * 0.15, tz, sr, TUFT); ball(out, tx + h * 0.2, ty - h * 0.15, tz, r * 0.8, r, r * 0.7, c, kc, hm); }
+    return;
+  }
+  if (form === 'spike') {
+    // a spire of florets up the top of the stem: widest at the foot, narrowing to the buds
+    const sub = F.sub;
+    const top = sub === 'orchid' ? 0.55 : sub === 'whorl' ? 0.7 : 0.42;
+    stem(out, x, y0, z, x + lx * (1 - top), y0 + h * (1 - top), z + lz * (1 - top), sr * 1.25);
+    if (sub === 'orchid' && !lod) for (let s = -1; s <= 1; s += 2) dirSplat(out, x + s * r * 1.2, y0 + h * 0.12, z + r * 0.5, h * 0.18, r * 0.6, r * 0.12, s * 0.5, 1, 0.3, LEAF_DARK, 1);
+    if (sub === 'whorl') {
+      // yellow gentian: whorls of bloom in the axils of broad paired leaves, all the way up
+      const n = lod ? 2 : 4;
+      for (let b = 0; b < n; b++) {
+        const t = 1 - top + top * (b + 0.5) / n, wx_ = x + lx * t, wy = y0 + h * t, wz = z + lz * t, rr = r * (1.35 - 0.5 * b / n);
+        if (!lod) for (let s = -1; s <= 1; s += 2) dirSplat(out, wx_ + s * rr * 1.4, wy - rr * 0.7, wz, rr * 1.2, rr * 0.45, rr * 0.2, s, 0.35, 0.2, LEAF, 0.95);
+        ball(out, wx_, wy, wz, rr * 1.15, rr * 0.7, rr * 1.05, c, kc * (b & 1 ? 1 : 1.08), hm);
+      }
+      return;
+    }
+    const n = lod ? 2 : 7;
+    const seg = (h * top) / n;
+    for (let b = 0; b < n; b++) {
+      const t = 1 - top + top * (b + 0.5) / n, rr = r * (lod ? 1.2 - 0.5 * b : 1.15 - 0.7 * b / n);
+      // (sub 'band': lupin, whorls in bands; otherwise open below, darker buds at the tip); near
+      // by, the florets stand apart, left and right of the stem by turns
+      const f = sub === 'band' ? (b & 1 ? 0.82 : 1.12) : 1.12 - 0.3 * b / n;
+      const sx = lod ? 0 : (b & 1 ? 0.45 : -0.45) * rr;
+      ball(out, x + lx * t + sx, y0 + h * t, z + lz * t, rr * (lod ? 0.72 : 0.75), lod ? Math.max(seg * 0.75, rr * 1.1) : Math.max(seg * 0.62, rr * 0.7), rr * (lod ? 0.65 : 0.75), lit(c, f), kc, hm);
+    }
+    return;
+  }
+  // the rest stand on a single stem
+  stem(out, x, y0, z, tx, ty, tz, sr * (form === 'thistle' || form === 'umbel' ? 1.35 : 1));
+  if (form === 'umbel') {
+    // cow parsley: rays from the top of the stem to a dome of small white umbellets, a second one lower down
+    const n = lod ? 2 : 5, R = r * 1.3;
+    if (lod) { ball(out, tx, ty, tz, r * 1.3, r * 0.4, r * 1.1, c, kc, hm); ball(out, tx + r * 1.2, ty - h * 0.14, tz + 0.05, r * 0.75, r * 0.3, r * 0.65, c, kc * 0.92, hm); return; }
+    // (umbellets small and apart, on rays from below the top, in a shallow dome: the gaps show)
+    const a0 = rng() * 6.28, rs = Math.max(sr * 0.45, 0.00045 * d);
+    for (let b = 0; b < n; b++) {
+      const a = a0 + (b / n) * 6.28, ca = Math.cos(a), sa = Math.sin(a);
+      const ex = tx + ca * R, ey = ty + r * 0.15 + r * 0.2 * (b & 1), ez = tz + sa * R * 0.8;
+      stem(out, tx, ty - r * 0.9, tz, ex, ey, ez, rs);
+      ball(out, ex, ey + r * 0.12, ez, r * 0.42, r * 0.22, r * 0.4, c, kc * (0.95 + 0.1 * rng()), hm);
+    }
+    stem(out, tx, ty - r * 0.9, tz, tx, ty + r * 0.4, tz, rs);
+    ball(out, tx, ty + r * 0.5, tz, r * 0.42, r * 0.24, r * 0.4, c, kc, hm);
+    return;
+  }
+  if (form === 'thistle') {
+    // a stout stem, spiny leaves standing out from it, a purple brush over a green bract
+    if (!lod) for (let s = -1; s <= 1; s += 2) dirSplat(out, x + lx * 0.4 + s * h * 0.12, y0 + h * (0.35 + 0.15 * s), z + lz * 0.4, h * 0.14, r * 0.55, r * 0.15, s, 0.45, 0.25, LEAF_DARK, 1);
+    ball(out, tx, ty - r * 0.35, tz, r * 0.6, r * 0.55, r * 0.6, BRACT, 1);
+    ball(out, tx, ty + r * 0.3, tz, r * 0.75, r * 0.6, r * 0.72, c, kc, hm);
+    if (!lod) {
+      // a second, younger head on a side branch
+      const bx = tx + h * 0.2 * (rng() < 0.5 ? -1 : 1), by = ty - h * 0.2;
+      stem(out, x + lx * 0.6, y0 + h * 0.6, z + lz * 0.6, bx, by, tz, sr);
+      ball(out, bx, by, tz, r * 0.5, r * 0.55, r * 0.5, BRACT, 1);
+      ball(out, bx, by + r * 0.35, tz, r * 0.5, r * 0.4, r * 0.5, c, kc * 0.9, hm);
+    }
+    return;
+  }
+  if (form === 'bell') {
+    // harebells and bellflowers: bells hanging from the arching top of the stem
+    const n = lod ? 2 : 3 + Math.floor(rng() * 2), dir = rng() < 0.5 ? -1 : 1;
+    for (let b = 0; b < n; b++) {
+      const t = 1 - b * 0.18, bx = x + lx * t + dir * r * (0.7 + 0.5 * b) * (b & 1 ? -1 : 1), by = y0 + h * t - r * 0.5;
+      if (!lod) stem(out, x + lx * t, y0 + h * t + r * 0.1, z + lz * t, bx, by + r * 0.7, z + lz * t, sr * 0.8);
+      ball(out, bx, by, z + lz * t + 0.01, r * 0.62, r, r * 0.62, c, kc, hm);
+      if (!lod) ball(out, bx, by - r * 0.75, z + lz * t + r * 0.1, r * 0.5, r * 0.2, r * 0.5, lit(c, 0.75), kc, hm);
+    }
+    return;
+  }
+  if (form === 'poppy') {
+    // a cup of four scarlet petals round a dark eye, a nodding bud beside it
+    if (!lod) {
+      // (an open bowl: the petals splay out and up, so from above the window the black eye shows)
+      ball(out, tx, ty - r * 0.15, tz, r * 0.45, r * 0.3, r * 0.45, lit(c, 0.7), kc, hm);
+      for (let b = 0; b < 4; b++) {
+        const a = (b / 4) * 6.28 + 0.4, ux = Math.cos(a), uz = Math.sin(a);
+        dirSplat(out, tx + ux * r * 0.6, ty + r * 0.1, tz + uz * r * 0.55, r * 0.58, r * 0.6, r * 0.1, ux * 0.8, 0.55, uz * 0.8, lit(c, b === 1 ? 1.1 : 0.95), kc, hm);
+      }
+      ball(out, tx, ty + r * 0.42, tz + r * 0.62, r * 0.3, r * 0.16, r * 0.22, F.eye, 1, hm);
+      const bx = tx + (rng() < 0.5 ? -1 : 1) * h * 0.25;
+      stem(out, x, y0, z, bx, ty - h * 0.12, tz, sr);
+      ball(out, bx, ty - h * 0.18, tz, r * 0.3, r * 0.42, r * 0.3, BUD, 1);
+    } else {
+      ball(out, tx, ty, tz + r * 0.2, r, r * 0.7, r * 0.6, c, kc, hm);
+      if (d < 90) ball(out, tx, ty + r * 0.3, tz + r * 0.5, r * 0.32, r * 0.25, r * 0.25, F.eye, 1, hm);
+    }
+    return;
+  }
+  if (form === 'daisy') {
+    // ox-eye daisy, arnica: a ring of rays round a raised eye, facing up and toward the window
+    if (!lod) {
+      rays(out, tx, ty, tz, F.n || 8, r * 0.58, r * 0.5, r * 0.16, 0.85, c, kc, rng, hm);
+      ball(out, tx, ty + r * 0.12, tz + r * 0.45, r * 0.34, r * 0.24, r * 0.26, F.eye, 1, hm);
+    } else {
+      out(tx, ty, tz + r * 0.2, r, r * 0.62, r * 0.55, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, KIND.OTHER, hm);
+      if (d < 95) ball(out, tx, ty + r * 0.18, tz + r * 0.5, r * 0.38, r * 0.3, r * 0.3, F.eye, 1, hm);
+    }
+    return;
+  }
+  if (form === 'globe') {
+    // globeflower: a closed ball of pale gold, lit on top
+    ball(out, tx, ty, tz, r * 0.9, r * 0.85, r * 0.9, c, kc, hm);
+    if (!lod) ball(out, tx - r * 0.15, ty + r * 0.4, tz + r * 0.25, r * 0.5, r * 0.35, r * 0.45, lit(c, 1.15), kc, hm);
+    return;
+  }
+  // disc: buttercup, campion, hawkweed, scabious: an open head, a bud or a second head on a branch
+  if (!lod) {
+    rays(out, tx, ty, tz, 5, r * 0.45, r * 0.5, r * 0.32, 0.8, c, kc, rng, hm);
+    ball(out, tx, ty + r * 0.1, tz + r * 0.42, r * 0.3, r * 0.22, r * 0.24, F.eye || lit(c, 0.8), 1, hm);
+    const s = rng() < 0.5 ? -1 : 1, bx = tx + s * h * 0.22, by = ty - h * 0.15;
+    stem(out, x + lx * 0.55, y0 + h * 0.55, z + lz * 0.55, bx, by, tz, sr * 0.8);
+    ball(out, bx, by, tz, r * 0.6, r * 0.45, r * 0.55, c, kc * 0.95, hm);
+  } else {
+    out(tx, ty, tz + r * 0.2, r, r * 0.62, r * 0.55, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, KIND.OTHER, hm);
+    if (F.eye && d < 80) ball(out, tx, ty + r * 0.18, tz + r * 0.5, r * 0.36, r * 0.28, r * 0.28, F.eye, 1, hm);
+  }
+}
+// A tuft of grass: blades leaning out from a point, in the hay meadow some with a pale seed head.
+function grassTuft(out, W, wx, x, y0, z, d, K, rng, lod, k, tall) {
+  const g = GC3;
+  grassColor(W, wx, -z, g, k);
+  const hay = k === FK.HAY, n = lod ? 2 : 4;
+  const H = (hay ? 0.55 : 0.28) * K * tall * (0.7 + 0.6 * rng());
+  const w = Math.max(0.014 * K, HEADPX * 0.7 * d);
+  for (let b = 0; b < n; b++) {
+    const ux = (rng() - 0.5) * 0.8, uz = (rng() - 0.5) * 0.5, l = H * (0.6 + 0.4 * rng());
+    const kk = 0.7 + 0.45 * rng();
+    dirSplat(out, x + ux * l * 0.5, y0 + l * 0.5, z + uz * l * 0.5, l * 0.5, w, w * 0.6, ux, 1, uz, g, kk);
+    if (hay && b === 0 && rng() < 0.5) dirSplat(out, x + ux * l, y0 + l * 1.02, z + uz * l, l * 0.16, w * 1.6, w * 1.2, ux, 1, uz, SEED, 0.85 + 0.3 * rng());
+  }
+}
+// A drift: what a patch of meadow looks like from a few hundred metres, where single flowers merge:
+// a tussock of grass, darker below, with heads of the patch's flowers crowded on its top and the
+// tall kinds standing out of it. s = its half-width in metres.
+function drift(out, W, wx, x, y0, z, d, s, pt, rng, tall) {
+  const g = GC3;
+  grassColor(W, wx, d, g, pt.k);
+  const ht = s * (0.45 + 0.45 * rng()) * tall;
+  ball(out, x, y0 + ht * 0.42, z, s, ht * 0.55, s * 0.7, g, 0.62 + 0.2 * rng());
+  const tot = pt.da + pt.db, n = 2 + Math.floor(rng() * (d > 300 ? 2 : 3) + 2.5 * tot);
+  const rmin = HEADPX * d * 1.05;
+  for (let b = 0; b < n; b++) {
+    const F = FL[rng() * tot < pt.da ? pt.a : pt.b], kc = 0.88 + 0.2 * rng();
+    const r = Math.max(rmin, F.r * 1.6) * (0.85 + 0.35 * rng());
+    const up = F.form === 'spike' || F.form === 'umbel' || F.form === 'thistle';
+    const low = F.form === 'cushion' || F.form === 'trumpet' || F.form === 'clover';
+    const yy = y0 + ht * (low ? 0.6 + 0.3 * rng() : 0.85 + 0.3 * rng()) + (up ? F.h * tall * 0.6 : 0);
+    const c = F.c;
+    out(x + (rng() - 0.5) * 1.7 * s, yy, z + (rng() - 0.25) * 0.9 * s, r * (up ? 0.75 : 1.05), r * (up ? 1.8 : 0.8), r * 0.85, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, KIND.OTHER, chorus(F.g));
+  }
+}
+// The verge mix by the line: poppies, daisies, hawkweed, fireweed, campion.
+const VERGE = [6, 2, 19, 8, 6, 15];
+// Plants over the strip [dLo, dHi): sampled with density ~ d^-power, single plants and grass tufts
+// out to opts.drift metres, drifts beyond. Stops at `budget` splats (or the band's limit).
+function* meadow(ctx, out, W, budget, dLo, dHi, opts = {}) {
   const rng = ctx.rng, L = ctx.length;
   const p = opts.power != null ? opts.power : 1.3, a1 = 1 - p;
   const A = Math.pow(dLo, a1), Bq = Math.pow(dHi, a1);
-  const K_ = KIND.OTHER;
   const stop = Math.min(out.limit, out.n + budget), zones = opts.zones;
-  for (let i = 0; i < budget * 2 && out.n < stop; i++) {
-    const d0 = Math.pow(A + rng() * (Bq - A), 1 / a1);
+  const dD = opts.drift != null ? opts.drift : 1e9, grassP = opts.grass != null ? opts.grass : 0.5;
+  // (a low budget draws fewer plants: each is drawn a little larger, and each drift spreads a little
+  // wider, to keep the cover; and fewer are drawn in full)
+  const rel = relCount(ctx), spread = 1 / Math.sqrt(rel), big = clamp(Math.pow(rel, -0.35), 1, 1.35);
+  const lod0 = rel > 0.8 ? LOD0 : 26;
+  // what the ground is beyond 95 m (wood, water, road ...), asked once per cell of the chunk (5 m)
+  const G = opts.cell || 5, gd0 = Math.max(95, dLo), gn = Math.max(1, Math.ceil((dHi - gd0) / G) + 1);
+  const grid = dHi > 95 ? new Int8Array((Math.ceil(L / G) + 1) * gn).fill(-1) : null;
+  for (let i = 0; i < budget * 3 && out.n < stop; i++) {
     const x0 = rng() * L, wx0 = ctx.x0 + x0;
     const xx = xAt(W, wx0);
-    // not on the ballast, the road or the river
-    if (d0 < 6.2 || Math.abs(d0 - xx.rd) < 4.6 || Math.abs(d0 - xx.rc) < xx.rw * 0.5 + 2 || d0 > xx.ft + 200 || (xx.hs > 0.3 && d0 < 15)) continue;
+    // (opts.slope: that share of the samples goes evenly up the valley side, which faces the window
+    // and fills far more of it than its distance would say)
+    const d0 = opts.slope && rng() < opts.slope ? Math.max(dLo, xx.ft - 40) + rng() * (dHi - Math.max(dLo, xx.ft - 40)) : Math.pow(A + rng() * (Bq - A), 1 / a1);
+    const rd = xx.rd, rc = xx.rc, hw = xx.rw * 0.5, ft = xx.ft;
+    // not on the ballast, the road, the river or the path, nor in a wood, on rock or in a clearing
+    if (d0 < 6.2 || Math.abs(d0 - rd) < 4.6 || Math.abs(d0 - rc) < hw + 1.5 || (xx.hs > 0.3 && d0 < 15)) continue;
     if (pathOn(xx) && Math.abs(d0 - pathD(xx)) < 1.4) continue;
     if (xx.nb > 0 && hairpinOff(W, wx0, d0) < 4.5) continue;
-    const wet = Math.abs(d0 - xx.rc) < xx.rw * 0.5 + 16;
-    const pt = patchAt(W, wx0, d0, wet);
-    const tot = pt.da + pt.db;
-    const u0 = rng() * Math.max(0.5, tot + 0.12);
-    if (u0 > tot) continue;                                   // grass here
-    const fi = u0 < pt.da ? pt.a : pt.b, F = FL[fi];
-    // a clump of a few plants of the kind
-    const m = F.form === 'bush' ? 1 : 1 + Math.floor(rng() * (d0 < 30 ? 2.2 : 3.4));
     if (zones && cleared(zones, wx0, d0)) continue;
-    const K = clamp(d0 / 30, 1.2, 1.8) * (opts.k || 1);
-    const Kh = F.form === 'spike' || F.form === 'umbel' ? Math.min(K, 1.1) : K;
-    for (let j = 0; j < m; j++) {
-      const x = x0 + (rng() - 0.5) * 1.3 * K, d = d0 + (rng() - 0.5) * 0.9 * K;
-      const y0 = W.H(ctx.x0 + x, d);
-      const h = F.h * Kh * (0.75 + 0.5 * rng()), r = F.r * K * (0.85 + 0.3 * rng());
-      const c = F.c, kc = 0.86 + 0.2 * rng();
-      const sr = Math.max(0.012 * K, 0.0005 * d);
-      const lx = (rng() - 0.5) * 0.25 * h;
-      const z = -d;
-      if (F.form === 'disc') {
-        bar(out, x, y0, z, x + lx, y0 + h, z, sr, GRASS_STEM, 1, K_);
-        // the head faces up and toward the window
-        out(x + lx, y0 + h, z + r * 0.2, r, r * 0.62, r * 0.55, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, K_);
-        if (F.eye && d < 70) out(x + lx, y0 + h + r * 0.18, z + r * 0.5, r * 0.38, r * 0.3, r * 0.3, F.eye[0], F.eye[1], F.eye[2], 1, 0, 0, 0, 1, K_);
-      } else if (F.form === 'bell') {
-        bar(out, x, y0, z, x + lx, y0 + h, z, sr, GRASS_STEM, 1, K_);
-        for (let b = 0; b < 3; b++) {
-          const t = 1 - b * 0.2, sg = b % 2 ? 1 : -1;
-          out(x + lx * t + sg * r * 0.8, y0 + h * t - r * 0.4, z + 0.02, r * 0.75, r, r * 0.7, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, K_);
-        }
-      } else if (F.form === 'spike') {
-        bar(out, x, y0, z, x + lx, y0 + h * 0.55, z, sr * 1.3, GRASS_STEM, 1, K_);
-        // the spire: a tall tapering head, a paler tip
-        out(x + lx * 0.8, y0 + h * 0.7, z, r * 1.25, h * 0.2, r * 1.1, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, K_);
-        out(x + lx, y0 + h * 0.92, z, r * 0.75, h * 0.13, r * 0.7, Math.min(0.8, c[0] * kc * 1.12), Math.min(0.8, c[1] * kc * 1.12), Math.min(0.8, c[2] * kc * 1.12), 1, 0, 0, 0, 1, K_);
-      } else if (F.form === 'umbel') {
-        bar(out, x, y0, z, x + lx, y0 + h, z, sr * 1.2, GRASS_STEM, 1, K_);
-        out(x + lx, y0 + h, z, r * 1.3, r * 0.3, r * 1.1, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, K_);
-        out(x + lx + r * 1.1, y0 + h * 0.86, z + 0.05, r * 0.7, r * 0.2, r * 0.6, c[0] * kc * 0.92, c[1] * kc * 0.92, c[2] * kc * 0.92, 1, 0, 0, 0, 1, K_);
-      } else if (F.form === 'tuft') {
-        bar(out, x, y0, z, x + lx, y0 + h, z, sr, [0.4, 0.46, 0.2], 1, K_);
-        out(x + lx, y0 + h, z, r * 0.9, r * 1.1, r * 0.8, c[0] * kc, c[1] * kc, c[2] * kc, 0.95, 0, 0, 0, 1, K_);
-      } else if (F.form === 'bush') {
-        // alpenrose: a low dark-leaved bush covered in clusters of bloom
-        const bw = r * (1.4 + rng()), bh = h * 0.6;
-        out(x, y0 + bh * 0.5, z, bw, bh * 0.6, bw * 0.7, 0.09, 0.2, 0.09, 1, 0, 0, 0, 1, K_);
-        for (let b = 0; b < 8; b++) {
-          const a = rng() * Math.PI, rr = 0.5 + 0.5 * rng();
-          out(x + Math.cos(a) * bw * rr, y0 + bh * (0.55 + 0.5 * Math.sin(a) * rr), z + bw * 0.45, bw * 0.24, bw * 0.2, bw * 0.18, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, K_);
-        }
-      } else {
-        // cushion: a low mat of small flowers on short stems
-        for (let b = 0; b < 5; b++) {
-          const ox = (rng() - 0.5) * r * 9, od = (rng() - 0.5) * r * 6;
-          out(x + ox, y0 + h * (0.8 + 0.6 * rng()), z + od, r * 1.25, r * 0.8, r * 0.9, c[0] * kc, c[1] * kc, c[2] * kc, 1, 0, 0, 0, 1, K_);
-          if (F.eye && d < 40) out(x + ox, y0 + h * 0.95 + r * 0.3, z + od + r * 0.4, r * 0.35, r * 0.3, r * 0.3, F.eye[0], F.eye[1], F.eye[2], 1, 0, 0, 0, 1, K_);
-        }
-      }
+    if (d0 > 95) {
+      const gi = Math.floor(x0 / G), gj = Math.floor((d0 - gd0) / G), ci = gi * gn + gj;
+      let t = grid[ci];
+      if (t < 0) t = grid[ci] = paintType(W, ctx.x0 + (gi + 0.5) * G, gd0 + (gj + 0.5) * G);
+      if (t !== T.MEADOW && t !== T.TURF) continue;
     }
+    const wet = d0 < ft && Math.abs(d0 - rc) < hw + 16;
+    const pt = patchAt(W, wx0, d0, wet);
+    const tall = pt.tall, tot = pt.da + pt.db;
+    const u0 = rng() * Math.max(0.5, tot + 0.1);
+    if (d0 >= dD) {
+      // the middle distance: drifts of bloom where the patch flowers, plain tussocks between
+      const s = Math.max(0.45, (d0 > 300 ? 0.0044 : 0.0034) * d0) * spread * (0.75 + 0.5 * rng());
+      const y0 = W.H(wx0, d0);
+      if (u0 < tot * 1.25) drift(out, W, wx0, x0, y0, -d0, d0, s, pt, rng, tall);
+      else if (pt.k !== FK.MOWN && rng() < grassP) {
+        const g = GC3; grassColor(W, wx0, d0, g, pt.k);
+        const ht = s * (0.35 + 0.4 * rng()) * tall;
+        ball(out, x0, y0 + ht * 0.4, -d0, s * 0.9, ht * 0.5, s * 0.65, g, 0.7 + 0.3 * rng());
+      }
+      if (out.due()) yield;
+      continue;
+    }
+    const lod = d0 < lod0 ? 0 : 1;
+    const K = clamp(d0 / 25, 1.5, 1.8) * big * (opts.k || 1);
+    if (u0 > tot) {
+      // grass between the flowers: blades with height, so the turf itself stands up
+      if (pt.k !== FK.MOWN && rng() < grassP) grassTuft(out, W, wx0, x0, W.H(wx0, d0), -d0, d0, K, rng, lod, pt.k, tall);
+      if (out.due()) yield;
+      continue;
+    }
+    let fi = u0 < pt.da ? pt.a : pt.b;
+    if (opts.verge && rng() < opts.verge) fi = VERGE[Math.floor(rng() * VERGE.length)];
+    const F = FL[fi];
+    const Kh = F.form === 'spike' || F.form === 'umbel' || F.form === 'thistle' ? Math.min(K, 1.1) : K;
+    // a clump of a few plants of the kind (more, and spread wider, further out), grass among them
+    const m = F.form === 'bush' ? 1 : 1 + Math.floor(rng() * (lod ? 3.6 : 3.2));
+    const sp = (lod ? 1.6 : 1.1) * K;
+    for (let j = 0; j < m; j++) {
+      const x = x0 + (rng() - 0.5) * sp, d = d0 + (rng() - 0.5) * 0.7 * sp;
+      plant(out, F, x, W.H(ctx.x0 + x, d), -d, d, K, Kh, rng, lod, tall);
+    }
+    if (!lod && rng() < 0.3) grassTuft(out, W, wx0, x0 + (rng() - 0.5) * sp, W.H(wx0, d0), -d0, d0, K, rng, lod, pt.k, tall);
     if (out.due()) yield;
   }
 }
@@ -1906,14 +2195,15 @@ function paintType(W, wx, d) {
 // ---------------------------------------------------------------------------------------------
 // Figures: animals and people. A handful of shaped, oriented splats each, drawn larger than life
 // so they read in one still at 40 to 120 m. Each part is placed in the figure's own frame (u
-// forward, h up, v to its left) and turned by its heading. Every splat answers the beat.
+// forward, h up, v to its left) and turned by its heading. Every splat flashes on the beat
+// (MOVE.FLASH: brighter, never bigger; a swelling body looked uncanny).
 // ---------------------------------------------------------------------------------------------
 const FIG = 1.4;
 function figure(ctx, out0, wx, y, d, yaw, k, kind) {
   const ca = Math.cos(yaw), sa = Math.sin(yaw), x0 = wx - ctx.x0, q = quatYaw(yaw);
   const P = (u, h, v) => [x0 + (u * ca - v * sa) * k, y + h * k, -(d + (u * sa + v * ca) * k)];
-  const E = (u, h, v, rx, ry, rz, c, qq = q) => { const p = P(u, h, v); out0(p[0], p[1], p[2], rx * k, ry * k, rz * k, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], kind, B); };
-  const seg = (a, b, r, c, n = 1) => { const A = P(a[0], a[1], a[2]), Bp = P(b[0], b[1], b[2]); bar(out0, A[0], A[1], A[2], Bp[0], Bp[1], Bp[2], r, c, n, kind, B); };
+  const E = (u, h, v, rx, ry, rz, c, qq = q) => { const p = P(u, h, v); out0(p[0], p[1], p[2], rx * k, ry * k, rz * k, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], kind, FL_); };
+  const seg = (a, b, r, c, n = 1) => { const A = P(a[0], a[1], a[2]), Bp = P(b[0], b[1], b[2]); bar(out0, A[0], A[1], A[2], Bp[0], Bp[1], Bp[2], r, c, n, kind, FL_); };
   return { P, E, seg, q };
 }
 const BODY = {
@@ -2020,18 +2310,18 @@ function marmot(ctx, out0, W, wx, d, r, k = 2.6) {
   out0(x - dir * 0.5 * k, y + 0.05, -(d + 0.3), 0.5 * k, 0.07 * k, 0.4 * k, C.earth[0], C.earth[1], C.earth[2], 1, 0, 0, 0, 1, KIND.GROUND);
   out0(x - dir * 0.5 * k, y + 0.06, -(d + 0.3), 0.16 * k, 0.05 * k, 0.14 * k, 0.1, 0.08, 0.06, 1, 0, 0, 0, 1, KIND.GROUND);
   if (r() < 0.75) {
-    out0(x, y + 0.2 * k, -d, 0.17 * k, 0.22 * k, 0.16 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, B);
-    out0(x + dir * 0.03 * k, y + 0.4 * k, -d, 0.13 * k, 0.16 * k, 0.12 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, B);
-    out0(x + dir * 0.07 * k, y + 0.3 * k, -(d - 0.08 * k), 0.09 * k, 0.17 * k, 0.07 * k, pale[0], pale[1], pale[2], 1, 0, 0, 0, 1, K_, B);
-    out0(x + dir * 0.06 * k, y + 0.6 * k, -d, 0.09 * k, 0.085 * k, 0.085 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, B);
-    out0(x + dir * 0.14 * k, y + 0.58 * k, -d, 0.04 * k, 0.04 * k, 0.045 * k, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, K_, B);
-    bar(out0, x + dir * 0.08 * k, y + 0.42 * k, -(d - 0.1 * k), x + dir * 0.19 * k, y + 0.36 * k, -(d - 0.1 * k), 0.03 * k, dark, 1, K_, B);
-    out0(x - dir * 0.2 * k, y + 0.05 * k, -d, 0.16 * k, 0.045 * k, 0.05 * k, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, K_, B);
+    out0(x, y + 0.2 * k, -d, 0.17 * k, 0.22 * k, 0.16 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, FL_);
+    out0(x + dir * 0.03 * k, y + 0.4 * k, -d, 0.13 * k, 0.16 * k, 0.12 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, FL_);
+    out0(x + dir * 0.07 * k, y + 0.3 * k, -(d - 0.08 * k), 0.09 * k, 0.17 * k, 0.07 * k, pale[0], pale[1], pale[2], 1, 0, 0, 0, 1, K_, FL_);
+    out0(x + dir * 0.06 * k, y + 0.6 * k, -d, 0.09 * k, 0.085 * k, 0.085 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, FL_);
+    out0(x + dir * 0.14 * k, y + 0.58 * k, -d, 0.04 * k, 0.04 * k, 0.045 * k, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, K_, FL_);
+    bar(out0, x + dir * 0.08 * k, y + 0.42 * k, -(d - 0.1 * k), x + dir * 0.19 * k, y + 0.36 * k, -(d - 0.1 * k), 0.03 * k, dark, 1, K_, FL_);
+    out0(x - dir * 0.2 * k, y + 0.05 * k, -d, 0.16 * k, 0.045 * k, 0.05 * k, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, K_, FL_);
   } else {
     // on all fours, low
-    out0(x, y + 0.16 * k, -d, 0.3 * k, 0.14 * k, 0.15 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, B);
-    out0(x + dir * 0.32 * k, y + 0.2 * k, -d, 0.1 * k, 0.09 * k, 0.09 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, B);
-    out0(x - dir * 0.36 * k, y + 0.12 * k, -d, 0.14 * k, 0.045 * k, 0.05 * k, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, K_, B);
+    out0(x, y + 0.16 * k, -d, 0.3 * k, 0.14 * k, 0.15 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, FL_);
+    out0(x + dir * 0.32 * k, y + 0.2 * k, -d, 0.1 * k, 0.09 * k, 0.09 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, K_, FL_);
+    out0(x - dir * 0.36 * k, y + 0.12 * k, -d, 0.14 * k, 0.045 * k, 0.05 * k, dark[0], dark[1], dark[2], 1, 0, 0, 0, 1, K_, FL_);
   }
 }
 const COAT_COL = [[0.72, 0.14, 0.1], [0.14, 0.3, 0.62], [0.8, 0.56, 0.08], [0.16, 0.44, 0.24], [0.7, 0.3, 0.52], [0.78, 0.76, 0.7], [0.8, 0.36, 0.08]];
@@ -2752,7 +3042,7 @@ function* repeatingChalet(ctx, out, W, dLo, dHi, logic) {
 // ---------------------------------------------------------------------------------------------
 // Where one band hands its props to the next: a little short of the border, so that a thing standing
 // just inside it is drawn whole by the band beyond (whose clip reaches well back) and not cut off.
-const SPLIT_TN = 28.6, SPLIT_NM = 290;
+const SPLIT_TN = 28.6, SPLIT_NM = 290, DRIFT_D = 135;
 function* trackside(ctx0, emit) {
   const [ctx, W] = local(ctx0);
   const out = makeOut(ctx, emit, { zMargin: 1, detailK: 1.2 });
@@ -2764,10 +3054,11 @@ function* trackside(ctx0, emit) {
   yield* herds(ctx, out, W, lo, hi);
   yield* marmots(ctx, out, W, lo, hi);
   note('trackside props %', ctx.x0, 100 * out.n / ctx.count);     // (of the 50% they may take)
-  out.limit = ctx.count * 0.66;
+  out.limit = ctx.count * 0.8;
   // the bank falls away below the window: what shows of this band is the foot of the bank and the
-  // first of the meadow, 15 to 30 m out, so the flowers and most of the ground go there
-  yield* flowerHeads(ctx, out, W, Math.round(ctx.count * 0.3), 12, ctx.zFar, { power: 0.3, zones: clearings(ctx, W) });
+  // first of the meadow, 17 to 30 m out (the bottom of the window looks down to about 19 m), so
+  // the flowers and most of the ground go there
+  yield* meadow(ctx, out, W, Math.round(ctx.count * 0.45), 16.5, ctx.zFar, { power: 0.3, zones: clearings(ctx, W), verge: 0.25, grass: 0.3 });
   out.limit = Infinity;
   const rest = out.left();
   yield* fillStrip(ctx, out, W, Math.round(rest * 0.05), 2.5, 4.5, (wx, d, rng) => jitter(C.ballast, rng, 0.25), 0, 0.12);
@@ -2806,8 +3097,12 @@ function* near(ctx0, emit) {
   forestPlan(ctx, out, W, plan, lo, hi, 6.5, { inner: 0.45 });
   out.limit = Math.max(out.limit, out.n) + ctx.count * 0.12;
   yield* drawPlan(ctx, out, plan, Math.max(0, out.limit - out.n));
-  out.limit = Math.min(ctx.count * 0.74, out.n + ctx.count * 0.24);
-  yield* flowerHeads(ctx, out, W, Math.round(ctx.count * 0.24), ctx.zNear, 120, { power: 1.25, zones: clearings(ctx, W) });
+  // the meadow in 3D (taken from the ground fill, which used to have two thirds of the band):
+  // plants and grass tufts out to DRIFT_D, drifts of bloom beyond it
+  const zones = clearings(ctx, W);
+  out.limit = Math.min(ctx.count * 0.84, out.n + ctx.count * 0.47);
+  yield* meadow(ctx, out, W, Math.round(ctx.count * 0.33), ctx.zNear, DRIFT_D, { power: 1.6, zones, grass: 0.3 });
+  yield* meadow(ctx, out, W, Math.round(ctx.count * 0.14), DRIFT_D, ctx.zFar, { power: 1.1, zones, drift: 0, grass: 0.5 });
   yield* fillView(ctx, out, W, { cover: 3.4, strips: 4, maxR: 0.03 });
 }
 
@@ -2836,6 +3131,9 @@ function* mid(ctx0, emit) {
   for (const t of plan) t.nMax = Math.min(t.nMax, 6);
   out.limit = Math.max(out.limit, out.n) + ctx.count * 0.1;
   yield* drawPlan(ctx, out, plan, Math.max(0, out.limit - out.n));
+  // drifts of bloom on the floor beyond the near band and up the slope meadows (from the ground fill)
+  out.limit = Math.min(ctx.count * 0.72, out.n + ctx.count * 0.18);
+  yield* meadow(ctx, out, W, Math.round(ctx.count * 0.18), lo, 1300, { power: 1.3, drift: 0, grass: 0.3, cell: 20, slope: 0.6 });
   yield* fillView(ctx, out, W, { cover: 3.3, strips: 10, far: true });
 }
 
@@ -2860,8 +3158,8 @@ export const alpsBiome = {
   shares: { trackside: 0.1, near: 0.43, mid: 0.27, far: 0.2 },
   // a daylight country: flowers and snow want sun
   slots: { dawn: 0.22, day: 0.56, dusk: 0.22, night: 0 },
-  // Buildings and lights answer the beat; animals, people, vehicles and cabins tag their own splats
-  // with MOVE.BEAT. The mountains, the forest and the flowers stay still.
+  // Buildings and lights answer the beat; vehicles and cabins tag their own splats with MOVE.BEAT,
+  // animals and people with MOVE.FLASH, flower heads with a chorus group per colour.
   beatKinds: [KIND.BUILDING, KIND.LIGHT],
   sky: { stars: 1.2, deep: 0.6, milkyWay: 0.6, clear: 0.5 },
   generators: { trackside, near, mid, far },
@@ -2896,4 +3194,4 @@ function layout(seedStr, x0, x1) {
     deer: list(DEERCELL, deerGroup, (g) => ({ wx: R(g.wx), d: R(g.d), n: g.n })),
   };
 }
-export const _debug = { world, at, layout, xAt, heightAt, paint, patchAt, FL };
+export const _debug = { world, at, layout, xAt, heightAt, paint, patchAt, FL, plant, drift, grassTuft };
