@@ -76,6 +76,9 @@ const outDir = process.argv[2] || '.';
     await page.waitForTimeout(400);
     const goneAtOnce = await page.evaluate(() => !document.querySelector('.start-overlay'));
     await page.waitForTimeout(c.wait);
+    // Where live analysis is required, give the engine time to start and take its first frames: on
+    // this renderer that alone can take longer than the wait above.
+    if (c.tap === true) await page.waitForFunction(() => { const t = window.__trainWindowAudio && window.__trainWindowAudio(); return !!(t && t.active); }, null, { timeout: 90000 }).catch(() => {});
     const state = await page.evaluate(() => {
       const a = document.querySelector('audio');
       return {
