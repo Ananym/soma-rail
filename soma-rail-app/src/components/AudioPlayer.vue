@@ -139,7 +139,31 @@ onMounted(() => {
   emit('audio-ready', audioElement.value);
 });
 
+// A stream that is wanted but gives no data and raises no error: the element has its source and
+// either nothing is in progress (seen now and then when Start is clicked before the stream is
+// known) or the connection is open and silent. The error handler never hears of either, so after
+// a few seconds this asks again, from the next server in the list.
+const STALL_SERVERS = ['ice6', 'ice5', 'ice4', 'ice1', 'ice3'];
+let stuckSince = 0, stallTries = 0;
+const stuckWatch = setInterval(() => {
+  const el = audioElement.value;
+  const stuck = !!el && props.resume && !!el.getAttribute('src') && !el.error && el.readyState === 0;
+  if (!stuck) { stuckSince = 0; if (el && el.readyState >= 2) stallTries = 0; return; }
+  if (!stuckSince) { stuckSince = Date.now(); return; }
+  if (Date.now() - stuckSince < (el.networkState === 3 ? 4000 : 10000)) return;
+  stuckSince = 0;
+  const m = el.src.match(/(ice[1-6])\.somafm\.com/);
+  if (m && stallTries < 5) {
+    const next = STALL_SERVERS[(STALL_SERVERS.indexOf(m[1]) + 1) % STALL_SERVERS.length];
+    el.src = el.src.replace(/ice[1-6]\.somafm\.com/, `${next}.somafm.com`);
+    stallTries++;
+  }
+  console.log('Stream gave no data: asking again', el.src);
+  el.load();
+}, 2000);
+
 onUnmounted(() => {
+  clearInterval(stuckWatch);
   if (audioElement.value) {
     audioElement.value.pause();
     audioElement.value.src = '';

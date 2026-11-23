@@ -49,7 +49,8 @@ const outDir = process.argv[2] || '.';
     if (c.init) await page.addInitScript(c.init);
     if (c.route) await c.route(page);
     const errors = [];
-    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 240)); });
+    const radioLog = [];   // what the player said about starting, printed if the radio is not playing
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 240)); if (/radio|stream|server|Audio|playback/i.test(m.text())) radioLog.push(`${m.type()}: ${m.text().slice(0, 160)}`); });
     page.on('pageerror', (e) => errors.push('pageerror: ' + String(e).slice(0, 240)));
     const youtube = [];
     page.on('request', (r) => { if (/youtube|ytimg|googlevideo/i.test(r.url())) youtube.push(r.url()); });
@@ -79,13 +80,15 @@ const outDir = process.argv[2] || '.';
     await page.waitForTimeout(400);
     const goneAtOnce = await page.evaluate(() => !document.querySelector('.start-overlay'));
     await page.waitForTimeout(c.wait);
+    // A stream that stalls is asked for again from another server (AudioPlayer's watchdog): allow that.
+    await page.waitForFunction(() => { const a = document.querySelector('audio'); return a && !a.paused && a.currentTime > 0.5; }, null, { timeout: 40000 }).catch(() => {});
     // Where live analysis is required, give the engine time to start and take its first frames: on
     // this renderer that alone can take longer than the wait above.
     if (c.tap === true) await page.waitForFunction(() => { const t = window.__trainWindowAudio && window.__trainWindowAudio(); return !!(t && t.active); }, null, { timeout: 90000 }).catch(() => {});
     const state = await page.evaluate(() => {
       const a = document.querySelector('audio');
       return {
-        audio: a ? { paused: a.paused, time: +a.currentTime.toFixed(1), volume: +a.volume.toFixed(2), slider: document.querySelector('#volume-slider') ? +document.querySelector('#volume-slider').value : null, crossOrigin: a.crossOrigin, error: a.error && a.error.code } : null,
+        audio: a ? { paused: a.paused, time: +a.currentTime.toFixed(1), ready: a.readyState, net: a.networkState, hasSrc: !!a.getAttribute('src'), volume: +a.volume.toFixed(2), slider: document.querySelector('#volume-slider') ? +document.querySelector('#volume-slider').value : null, crossOrigin: a.crossOrigin, error: a.error && a.error.code } : null,
         startGone: !document.querySelector('.start-overlay'),
         goneAtOnce: false,
         hasCanvas: !!document.querySelector('.window-container canvas'),
@@ -376,6 +379,7 @@ const outDir = process.argv[2] || '.';
     console.log(`\n== ${name}`); console.log(JSON.stringify(state)); console.log('start warning:', JSON.stringify(warn)); if (slow) console.log('slow notice:', JSON.stringify(slow)); if (brake) console.log(c.touch ? 'touch:' : c.budgetControl ? 'budget:' : 'brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }
     const audioOk = state.audio && !state.audio.paused && state.audio.time > 0.5;
+    if (!audioOk) { console.log('radio log:'); for (const l of radioLog.slice(-14)) console.log('  ' + l); }
     const viewOk = c.expect === 'notice'
       ? state.notice && !state.hasCanvas
       : state.hasCanvas && !state.windowHidden && !state.notice && state.engine && state.engine.splats > 0;
