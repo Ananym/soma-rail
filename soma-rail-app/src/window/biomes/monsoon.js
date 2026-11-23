@@ -318,7 +318,7 @@ function wallH(W, wx, d, s) {
   // spurs and gullies of the lower slopes
   h *= lerp(1, 0.45 + 1.1 * fbm2(wx / 1500, d / 1100, ws + 52, 3), smooth(150, 900, s));
   // spurs and gullies running down the slope: they bend the terraces' contours into curves
-  h += (noise2(wx / 190, d / 420, ws + 55) - 0.5) * 2 * Math.min(60, 0.32 * s) + (noise2(wx / 85, d / 70, ws + 56) - 0.5) * 8 * smooth(0, 150, s);
+  h += (noise2(wx / 260, d / 520, ws + 55) - 0.5) * 2 * Math.min(75, 0.36 * s) + (noise2(wx / 120, d / 260, ws + 58) - 0.5) * 2 * Math.min(22, 0.12 * s) + (noise2(wx / 85, d / 70, ws + 56) - 0.5) * 3 * smooth(0, 150, s);
   // limestone knolls standing out of the forest here and there
   const kn = noise2(wx / 520, d / 520, ws + 57);
   if (kn > 0.62) h += (kn - 0.62) * (kn - 0.62) * 2600 * smooth(150, 700, s);
@@ -456,6 +456,13 @@ function paint(W, wx, d, y, nx, ny, nz, rng) {
   if (ad < 6) { PA.t = T.VERGE; mixc(c, C.verge, C.grassWet, smooth(3.6, 6, ad) * (0.5 + rng() * 0.5)); return PA; }
   if (yd) { PA.t = T.YARD; mixc(c, C.yard, C.earth, rng() * 0.5); if (yd > 1) setc(c, C.grassWet); return PA; }
   // terraces
+  if (TA.m > 0.25 && d > 230) {
+    // (far off the contour lines carry the steps: under them the fill is one even, dark green, so
+    // it adds no speckle of its own)
+    PA.t = T.RISER; PA.f = 0.9;
+    mixc(c, C.riser, C.rice, 0.45 + 0.1 * rng());
+    return PA;
+  }
   if (TA.m > 0.25) {
     const f = TA.f;
     PA.f = f;
@@ -512,61 +519,82 @@ function paint(W, wx, d, y, nx, ny, nz, rng) {
 
 // What grows on tread i of the terraces at this point: 0 flooded, 1 young rice in water, 2 green rice.
 function treadState(W, wx, d, i, v) {
-  const cell = Math.floor((wx + 53 * i) / (160 + 0.2 * d));
+  const cell = Math.floor((wx + 53 * i) / (220 + 0.25 * d));
   const hsh = worldHashF(W, 9, i * 4099 + cell), wetter = 0.4 + 0.25 * v;
   return hsh < wetter ? 0 : hsh < wetter + 0.2 ? 1 : 2;
 }
-// The terraces drawn as lines along their contours, so that they read as steps from any distance:
-// along the top of each riser a dark bund, and on the tread behind it a line of water (where the
-// tread lies below the eye, so that its surface can be seen) or of rice. Columns across the chunk
-// march outward and find each riser's top where the step index changes.
-function* terraceLines(ctx, out, W, dLo, dHi, frac) {
-  const L = ctx.length, cap = out.n + frac * ctx.count;
-  const dMid = Math.max(dLo, Math.min(dHi, 600));
-  let step = clamp(0.005 * dMid, 1.2, 5);
-  // count the risers on a few columns first, and space the columns so that the whole chunk fits
-  // the cap (else the lines would stop part-way along it)
-  let risers = 0;
-  for (let k = 0; k < 6; k++) {
-    const wx = ctx.x0 + (k + 0.5) * L / 6, X0 = xAt(W, wx), fl = X0.fl;
-    let d = Math.max(dLo, X0.ft + 4, X0.rc + X0.rw * 0.5 + 6), pq = NaN;
-    while (d < dHi) {
-      const h = heightAt(W, wx, d), S = stepOf(d);
-      if (TA.rel > 190) break;
-      if (TA.m >= 0.5) { const q = TA.rel / S; if (pq === pq && Math.floor(q) > Math.floor(pq)) risers += d > 600 ? 1 : 2; pq = q; } else pq = NaN;
-      void h; void fl;
-      d += S * 0.55;
-    }
-  }
-  const want = (risers / 6) * (L / step);
-  if (want > frac * ctx.count) step *= want / (frac * ctx.count);
-  for (let x = step * 0.5; x < L; x += step) {
-    const wx = ctx.x0 + x, X0 = xAt(W, wx), fl = X0.fl, ft = X0.ft, v = X0.v, rcEdge = X0.rc + X0.rw * 0.5 + 6;
-    let d = Math.max(dLo, ft + 4, rcEdge), prevQ = NaN, prevD = d;
-    while (d < dHi) {
-      heightAt(W, wx, d);
-      const S = stepOf(d);
-      if (TA.m < 0.5 || TA.rel > 190) { prevQ = NaN; d += S * 1.2; if (TA.rel > 190) break; continue; }
+// The terraces drawn as lines along their contours, so that they read as steps from any distance.
+// Columns stand on a world grid (the same in every chunk and band); in each, a march outward over
+// the slope finds where each step's riser tops out (the contour rel = S*i). The same step in
+// neighbouring columns is joined by long thin splats laid along the contour, overlapping: a dark
+// bund, and below it a band of the tread's tone (flooded and grey, young rice, deep green), the
+// tone changing only in long runs along the contour. A segment belongs to the chunk and band its
+// middle falls in, so the lines run on unbroken across every border.
+function terraceCrossings(W, wx, dMax) {
+  const X0 = xAt(W, wx);
+  const ft = X0.ft, v = X0.v, fl = X0.fl, rcEdge = X0.rc + X0.rw * 0.5 + 6;
+  const res = new Map();
+  let d = Math.max(ft + 4, rcEdge), pq = NaN, pd = d;
+  while (d < dMax) {
+    heightAt(W, wx, d);
+    const S = stepOf(d);
+    if (TA.rel > 235) break;
+    if (TA.m >= 0.5) {
       const q = TA.rel / S;
-      if (prevQ === prevQ && Math.floor(q) > Math.floor(prevQ)) {
-        // the riser's top lies between prevD and d: interpolate to it
-        const i = Math.floor(q), t = clamp((i - prevQ) / Math.max(1e-6, q - prevQ), 0, 1);
-        const dl = prevD + (d - prevD) * t, hl = fl + S * i;
-        // (drawn a little bolder than the real thing: a tread seen from below is a sliver)
-        const sy = Math.max(0.25, 0.0009 * dl, 0.07 * S), sb = Math.max(0.35, 0.0013 * dl, 0.16 * S), sx = step * 0.75;
-        if (dl < 600) out(x, hl - sy * 0.2, -dl, sx, sy, sy, C.lip[0], C.lip[1], C.lip[2], 1, 0, 0, 0, 1, KIND.GROUND);
-        const st = treadState(W, wx, dl + S, i, v);
-        const below = hl < CAMY - 1;
-        const c = st === 0 ? (below ? C.water : C.young) : st === 1 ? (below ? mix3(C.water, C.young, 0.5) : C.young) : C.rice;
-        const k = 0.94 + 0.12 * ctx.rng();
-        out(x, hl + sy * 0.6 + sb * 0.8, -(dl + 0.5), sx, sb, sy, c[0] * k, c[1] * k, c[2] * k, 1, 0, 0, 0, 1, KIND.GROUND);
-        if (out.n >= cap) return;
+      if (pq === pq && Math.floor(q) > Math.floor(pq)) {
+        const i = Math.floor(q), t = clamp((i - pq) / Math.max(1e-6, q - pq), 0, 1);
+        if (!res.has(i)) res.set(i, pd + (d - pd) * t);
+      }
+      pq = q;
+    } else pq = NaN;
+    pd = d;
+    d += S * 0.45;
+  }
+  return { res, fl, v };
+}
+function* terraceLines(ctx, out, W, dLo, dHi, step) {
+  const L = ctx.length, k0 = Math.floor((ctx.x0 - step) / step), k1 = Math.ceil((ctx.x0 + L) / step);
+  let prev = null, pwx = 0;
+  const n0 = out.n;
+  for (let k = k0; k <= k1; k++) {
+    const wx = k * step, cur = terraceCrossings(W, wx, dHi + 40);
+    if (prev) {
+      const xm = (wx + pwx) / 2 - ctx.x0;
+      if (xm >= 0 && xm < L) {
+        for (const [i, db] of cur.res) {
+          const da = prev.res.get(i);
+          if (da === undefined || Math.abs(db - da) > step * 4) continue;   // (a fold: not this contour)
+          const dm = (da + db) / 2;
+          if (dm < dLo || dm >= dHi) continue;
+          const Sa = stepOf(da), Sb = stepOf(db), ya = prev.fl + Sa * i, yb = cur.fl + Sb * i;
+          const ax = pwx - ctx.x0, bx = wx - ctx.x0;
+          const dx = bx - ax, dy = yb - ya, dz = -(db - da), len = Math.hypot(dx, dy, dz);
+          const q = quatXTo(dx / len, dy / len, dz / len), S = (Sa + Sb) / 2, ym = (ya + yb) / 2;
+          const sx = len * 0.62;
+          // the band of the tread's tone, filling most of the step below the bund
+          const st = treadState(W, (wx + pwx) / 2, dm + S, i, cur.v);
+          const below = ym < CAMY - 1;
+          let c = st === 0 ? (below ? C.water : mix3(C.water, C.young, 0.35)) : st === 1 ? mix3(C.water, C.young, below ? 0.55 : 0.8) : (i % 3 === 0 ? C.riceDeep : C.rice);
+          const fade = smooth(1300, 2200, dm);
+          if (fade > 0) c = mix3(c, C.riser, 0.35 * fade);
+          // (it lies on the riser's face, the part of each step a window below it sees: from the
+          // riser's foot, RW of the way back to the step below, up to the bund)
+          const ga = da - (prev.res.get(i - 1) ?? da - S / 0.35), gb = db - (cur.res.get(i - 1) ?? db - S / 0.35);
+          const run = clamp((ga + gb) / 2, S * 0.8, S * 8) * RW;
+          const sb = Math.max(0.35, 0.0012 * dm, 0.48 * S);
+          out(ax + dx / 2, ym - S * 0.5, -(dm - run * 0.5 - 0.3), sx, sb, Math.max(0.3, run * 0.45), c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
+          // the bund along the top of the riser (merging into the bands far off, in the haze)
+          if (dm < 1600) {
+            const sy = Math.max(0.25, 0.0009 * dm, 0.09 * S);
+            out(ax + dx / 2, ym + sy * 0.2, -dm, sx, sy, Math.max(0.2, sy), C.lip[0], C.lip[1], C.lip[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
+          }
+        }
         if (out.due()) yield;
       }
-      prevQ = q; prevD = d;
-      d += S * 0.55;
     }
+    prev = cur; pwx = wx;
   }
+  note('terrace lines', ctx.x0, out.n - n0);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -641,6 +669,13 @@ function* fillView(ctx, out, W, opts = {}) {
         // a terrace's tread lies level (normals taken across a step would tilt it up the hill)
         const c = p.c, th = p.wet >= 1 ? 0.04 : 0.14;
         out(x, y + (p.wet >= 1 ? 0.03 : 0.12), -d, r * 1.25, r * th, r * 0.75, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        if (out.due()) yield;
+        continue;
+      }
+      if (t === T.RISER && d > 230) {
+        // the underlay of a far terraced slope: lying in the slope, a little below the lines
+        const c = soft(p.c, 0.4), qw = 1 + ny, ql = Math.hypot(nz, nx, qw);
+        out(x, y - 0.6 * stepOf(d), -d, r * 1.1, r * 0.1, r * Math.min(1.6, 1 / ny), c[0], c[1], c[2], 1, nz / ql, 0, -nx / ql, qw / ql, KIND.GROUND);
         if (out.due()) yield;
         continue;
       }
@@ -2268,9 +2303,9 @@ function* rain(ctx, out, W, dLo, dHi, per, pw = 1.6) {
     const amt = xAt(W, wx).rain;
     const u = rng(), d = dLo + (dHi - dLo) * Math.pow(rng(), pw);
     if (u > amt) continue;
-    const w = Math.max(0.008, 0.0009 * d), h = Math.max(w * 3.2, 0.3 + 0.013 * d);
+    const w = Math.max(0.008, 0.0009 * d - 0.0004 * Math.max(0, d - 25)), h = Math.max(w * 3.2, 0.3 + 0.011 * d);   // (finer beyond 25 m)
     const k = 0.92 + 0.16 * rng();
-    out(x, -3.4 + 16 * rng(), -d, w, h, w, C.rain[0] * k, C.rain[1] * k, C.rain[2] * k, (0.26 + 0.16 * amt) * (1 - 0.7 * smooth(20, 115, d)), 0, 0, 0, 1, KO, MOVE.FALL);
+    out(x, -3.4 + 16 * rng(), -d, w, h, w, C.rain[0] * k, C.rain[1] * k, C.rain[2] * k, (0.26 + 0.16 * amt) * (1 - 0.78 * smooth(18, 100, d)), 0, 0, 0, 1, KO, MOVE.FALL);
     if (out.due()) yield;
   }
 }
@@ -2429,7 +2464,7 @@ function* near(ctx0, emit) {
   note('near props %', ctx.x0, 100 * out.n / ctx.count);
   out.limit = Infinity;
   yield* lowMist(ctx, out, W, 70, ctx.zFar, 30, 0.03, 0.26);
-  yield* terraceLines(ctx, out, W, ctx.zNear, ctx.zFar, 0.12);
+  yield* terraceLines(ctx, out, W, ctx.zNear, ctx.zFar, 3);
   yield* fillView(ctx, out, W, { cover: 3.4, strips: 4, maxR: 0.03 });
 }
 
@@ -2456,7 +2491,7 @@ function* mid(ctx0, emit) {
   yield* cloudCap(ctx, out, W, ctx.zNear, ctx.zFar, 110, 0.12, 0.8);
   yield* lowMist(ctx, out, W, ctx.zNear, 1400, 90, 0.03, 0.3);
   yield* rainVeils(ctx, out, W, ctx.zNear, ctx.zFar, 0.04);
-  yield* terraceLines(ctx, out, W, ctx.zNear, ctx.zFar, 0.25);
+  yield* terraceLines(ctx, out, W, ctx.zNear, ctx.zFar, 8 / Math.sqrt(Math.max(0.25, Math.min(1, out.density))));
   yield* fillView(ctx, out, W, { cover: 3.3, strips: 10, far: true });
 }
 
