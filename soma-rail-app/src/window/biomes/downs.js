@@ -8,13 +8,14 @@
 // hashed from the world seed. Only the ground fill uses the chunk's own rng.
 //
 // Arable fields carry a crop (pickCrop): ripe wheat and barley, green barley and oilseed rape in
-// flower stand up off the ground (cropSurface lifts the fill, cropWalls draws their edges), with
-// tramlines, a combed and wind-waved top; stubble, mown grass and plough lie flat in stripes and
-// furrows. Cut fields have round bales (straw, or wrapped black and green), stacks of them and rows
+// flower stand as plants in the trackside and near bands (cropPlants: stalks and ears, rape's
+// stems, leaves and flowers, then sheaves and drifts further out), every piece swaying with the
+// music's tempo (MOVE.SWAY), in drill rows with tramlines as gaps; beyond, the crop is a colour
+// with wind swathes. Stubble, mown grass and plough lie flat in stripes and furrows. Cut fields have round bales (straw, or wrapped black and green), stacks of them and rows
 // of small squares (fieldBales). About one site a kilometre or two has a machine at work or parked
 // (makeSite, machines): a tractor with a baler, a trailer of bales, a plough or a sprayer, or
 // parked by a gate; now and then a combine opening up a wheat field. Machines and bales swell on
-// the beat (MOVE.BEAT), drivers brighten (MOVE.FLASH); the crops themselves stay still.
+// the beat (MOVE.BEAT), drivers brighten (MOVE.FLASH), standing crops sway (MOVE.SWAY).
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     giant trees and a monolith in the far band
@@ -25,7 +26,7 @@ import { makeTerrain } from '../terrain.js';
 import {
   KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, strip, blob, broadleaf, conifer,
   bush, hedge, house, treeSplats, church, overheadLine, fence, floatingIsland, monolith, stick, jitter, mul3, mix3, shade, smooth, clamp, lerp, MOVE,
-  detail, quatXTo, quatYaw, quatAxis, quatMul,
+  detail, quatXTo, quatYaw, quatAxis, quatMul, swayBlob, swayStrut,
 } from './kit.js';
 
 const PAL = {
@@ -144,18 +145,17 @@ function fieldInfo(L, k, j) {
 function fieldAt(L, wx, d) { const k = rowAt(L, wx, d); return fieldInfo(L, k, colAt(L, k, wx, d)); }
 
 // ---------------------------------------------------------------------------------------------
-// Crops. An arable field may stand in a crop with a real height: its top is lifted off the ground
-// (wheat about 0.9 m, rape 1.4 m) and its edges, inside the grassy headland, are drawn as upright
-// walls (cropWalls), so the near edge of a field reads as a wall of corn with the ground in front.
-// The season drifts slowly along the line: ripe wheat, stubble and bales in summer stretches, rape
+// Crops. An arable field may stand in a crop with a real height (wheat about 0.9 m, rape 1.4 m),
+// drawn as plants (cropPlants, below) inside the grassy headland, so the near edge of a field is
+// simply where the plants start, with the ground in front. The season drifts slowly along the line: ripe wheat, stubble and bales in summer stretches, rape
 // in flower and green barley in spring ones, never wholly one or the other.
 // ---------------------------------------------------------------------------------------------
 const C = { WHEAT: 1, BARLEY: 2, GREEN: 3, RAPE: 4, STUBBLE: 5, CUT: 6, PLOUGH: 7 };
 const CROP = {
-  [C.WHEAT]: { c: [0.7, 0.55, 0.25], lite: [0.79, 0.67, 0.36], stem: [0.43, 0.35, 0.16], h: 0.9, wall: true },
-  [C.BARLEY]: { c: [0.73, 0.63, 0.37], lite: [0.8, 0.73, 0.5], stem: [0.48, 0.42, 0.24], h: 0.78, wall: true },
-  [C.GREEN]: { c: [0.33, 0.48, 0.18], lite: [0.5, 0.6, 0.32], stem: [0.2, 0.3, 0.11], h: 0.72, wall: true },
-  [C.RAPE]: { c: [0.8, 0.69, 0.07], lite: [0.8, 0.75, 0.2], stem: [0.21, 0.31, 0.1], h: 1.4, wall: true },
+  [C.WHEAT]: { c: [0.7, 0.55, 0.25], lite: [0.79, 0.67, 0.36], stem: [0.43, 0.35, 0.16], h: 0.9, wall: true, soil: [0.44, 0.36, 0.22], ear: [0.74, 0.58, 0.26] },
+  [C.BARLEY]: { c: [0.73, 0.63, 0.37], lite: [0.8, 0.73, 0.5], stem: [0.48, 0.42, 0.24], h: 0.78, wall: true, soil: [0.46, 0.39, 0.25], ear: [0.78, 0.7, 0.44] },
+  [C.GREEN]: { c: [0.33, 0.48, 0.18], lite: [0.5, 0.6, 0.32], stem: [0.2, 0.3, 0.11], h: 0.72, wall: true, soil: [0.3, 0.3, 0.18], ear: [0.42, 0.56, 0.24] },
+  [C.RAPE]: { c: [0.8, 0.69, 0.07], lite: [0.8, 0.75, 0.2], stem: [0.21, 0.31, 0.1], h: 1.4, wall: true, soil: [0.22, 0.32, 0.11], ear: [0.8, 0.7, 0.08] },
   [C.STUBBLE]: { c: [0.72, 0.64, 0.42], h: 0.09 },
   [C.CUT]: { c: [0.44, 0.53, 0.25], h: 0.05 },
   [C.PLOUGH]: { c: [0.37, 0.27, 0.18], h: 0.12 },
@@ -260,7 +260,7 @@ function nearVillage(L, wx, d) {
 // Colour of the ground at a world point: the field, with stripes, mottling and a grassy headland.
 // It also leaves the height of a standing crop there in G.lift (0 elsewhere). `cuts` lists the
 // strips a combine has already cut in this chunk (see cutsFor).
-function groundColor(ctx, L, wx, d, rng, y, cuts) {
+function groundColor(ctx, L, wx, d, rng, y, cuts, plants) {
   const k = rowAt(L, wx, d), j = colAt(L, k, wx, d);
   let f = fieldInfo(L, k, j);
   G.lift = 0; G.flat = 0.12;
@@ -275,6 +275,9 @@ function groundColor(ctx, L, wx, d, rng, y, cuts) {
   if (f.crop && edge >= hw && front >= fhw && !vil) {
     if (cuts && f.crop <= C.BARLEY) for (const q of cuts) if (q.k === k && q.j === j && front < fhw + cutDepth(q, wx)) { f = q.stub; break; }
     c = cropSurface(L, f, wx, d, rng);
+    // where the plants stand (cropPlants), the ground under them is soil with a tint of the crop;
+    // further out, as the plants thin, the ground carries more of the crop's colour
+    if (plants && CROP[f.crop].wall) { G.lift = 0; G.flat = 0.12; c = mix3(CROP[f.crop].soil, c, 0.45 + 0.45 * smooth(140, 300, d)); }
   } else if (f.stripe) {
     const coord = f.dir ? d : wx + 0.3 * d;
     const s = Math.sin((coord / f.period) * Math.PI * 2) > 0 ? 1 : -1;
@@ -294,7 +297,8 @@ function groundColor(ctx, L, wx, d, rng, y, cuts) {
 }
 
 // The ground fill of the trackside and near bands: kit fillGround, but each disc stands at the
-// height of the crop where it lands (groundColor's G.lift) and takes that crop's thickness.
+// height of what lies on the ground where it lands (groundColor's G.lift: stubble, raked rows,
+// furrows) and takes its thickness. Under standing crops it is the soil the plants stand in.
 function* fieldFill(ctx, out, L, opts) {
   out.limit = Infinity;
   const n = Math.floor(opts.n != null ? opts.n : out.left());
@@ -311,76 +315,164 @@ function* fieldFill(ctx, out, L, opts) {
     const r = clamp(Math.sqrt(cover / (Math.PI * dens)), minR * d, maxR * d);
     const wx = ctx.x0 + x;
     const y = ctx.terrain.height(wx, d);
-    const c = groundColor(ctx, L, wx, d, rng, y, cuts);
+    const c = groundColor(ctx, L, wx, d, rng, y, cuts, true);
     const ax = 0.8 + 0.5 * rng();
     out(x, y + G.lift, -d, r * ax, r * G.flat, r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
     if (out.due()) yield;
   }
 }
 
-// Upright walls of standing crop along the inside of a field's headland: its near edge (or the edge
-// of what a combine has cut) and its two sides, drawn on a world grid so they line up across chunks.
-// Each piece is a darker band of stems under a band of ears, as high as the crop at that point.
-function* cropWalls(ctx, out, L, dLo, dHi, cuts) {
-  const x0 = ctx.x0 - 1, x1 = ctx.x0 + ctx.length + 1;
-  const piece = (f, wx, d, tx, tz, st, rng) => {
-    const c = cropSurface(L, f, wx, d, rng), h = G.lift;
-    if (h < 0.15) return;
-    const s = CROP[f.crop], y0 = ctx.terrain.height(wx, d), q = quatXTo(tx, 0, tz);
-    const stem = mul3(mix3(s.stem, c, 0.3), 0.92 + 0.12 * rng()), top = mul3(c, 0.86);
-    out(wx - ctx.x0, y0 + h * 0.4, -d, st * 0.72, h * 0.42, 0.1, stem[0], stem[1], stem[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
-    out(wx - ctx.x0, y0 + h * 0.84, -d, st * 0.72, h * 0.2, 0.14, top[0], top[1], top[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
-  };
-  for (let k = 0; k + 1 < L.rows.length; k++) {
-    const q = L.rows[k], q1 = L.rows[k + 1];
-    if (q.D - q.amp > Math.min(dHi, 330)) break;
-    if (q1.D + q1.amp < dLo) continue;
-    const a = Math.floor((x0 - 80) / q.W) - 1, b = Math.floor((x1 + 80) / q.W) + 1;
-    for (let j = a; j <= b; j++) {
-      const f = fieldInfo(L, k, j);
-      if (!f.crop || !CROP[f.crop].wall) continue;
-      const rng = worldRng(ctx, 75, k, j);
-      const cut = cuts && cuts.find((u) => u.k === k && u.j === j);
-      // the near edge
-      const dRef = Math.max(q.D, 8);
-      const st = Math.max(0.16, detail(out, dRef, 0.8));
-      const xa = colEdge(L, k, j, q.D) - 40, xb = colEdge(L, k, j + 1, q.D) + 40;
-      for (let g = Math.ceil(Math.max(xa, x0) / st); g * st < Math.min(xb, x1); g++) {
-        const wx = g * st;
-        const e = edgeD(L, k, wx), slope = (edgeD(L, k, wx + 1) - e);
-        const hw = 2.5 + 0.004 * e;
-        const d = e + frontHw(L, k, wx, e) + (cut ? cutDepth(cut, wx) : 0);
-        if (d < dLo || d >= dHi) continue;
-        if (wx - colEdge(L, k, j, d) < hw || colEdge(L, k, j + 1, d) - wx < hw) continue;
-        if (edgeD(L, k + 1, wx) - d < hw) continue;
-        if (d < 1800 && nearVillage(L, wx, d)) continue;
-        piece(f, wx, d, 1, -slope, st, rng);
-        if (out.due()) yield;
+// ---------------------------------------------------------------------------------------------
+// Standing crops as plants. In the trackside and near bands wheat, barley and rape are drawn as
+// plants standing in their soil, every piece swaying (kit swayBlob / swayStrut, MOVE.SWAY: a lean
+// along the line once for every two beats of the music, as a wave running across the field). By
+// the line single plants: stalks with ears (gold nodding ears for wheat, drooping pale heads with
+// long awns for ripe barley, green upright ones for unripe barley), rape with green stems, leaves
+// and clusters of yellow flowers; they stand in the drill rows and leave the tramlines as gaps.
+// Further out, sheaves (a body of stalks with a few ears on top), then drifts (a tussock of the
+// crop with its colour on top), sized so nothing is smaller than about a pixel and a half. The
+// mid band takes the crop's colour only.
+// ---------------------------------------------------------------------------------------------
+const PLANT_PX = 0.00075;            // the smallest piece's radius per metre of distance (~1.6 px across)
+// The field at (wx, d) if it is standing crop there: not its headland or a lane's verge, not in a
+// village, not what a combine has cut, not a tramline's wheel track. Otherwise null.
+function standing(L, wx, d, cuts) {
+  const k = rowAt(L, wx, d), j = colAt(L, k, wx, d), f = fieldInfo(L, k, j);
+  if (!f.crop || !CROP[f.crop].wall) return null;
+  const hw = 2.5 + 0.004 * d, front = d - edgeD(L, k, wx), fhw = frontHw(L, k, wx, d);
+  if (front < fhw || (k + 1 < L.rows.length && edgeD(L, k + 1, wx) - d < hw)) return null;
+  if (wx - colEdge(L, k, j, d) < hw || colEdge(L, k, j + 1, d) - wx < hw) return null;
+  if (cuts) for (const q of cuts) if (q.k === k && q.j === j && front < fhw + cutDepth(q, wx)) return null;
+  const v = f.dir ? d : wx + 0.3 * d, p = ((v + f.phase) % 24 + 24) % 24;
+  if (p < 0.7 || (p > 1.9 && p < 2.6)) return null;
+  if (d < 1800 && nearVillage(L, wx, d)) return null;
+  return f;
+}
+// Where the crop is in this chunk: cells 8 m along the line, deepening with distance, kept if any
+// corner or the middle lies in a standing crop field, each weighted by its area times d^-p (so the
+// plants are spread by how much of the window each part fills). Flat [x, d, depth, cumulative].
+function cropCells(ctx, L, dLo, dHi, p) {
+  const cells = [], CX = 8;
+  let tot = 0, all = 0;
+  for (let d = dLo; d < dHi;) {
+    const cd = Math.min(dHi - d, Math.max(2.5, 0.08 * d)), w = CX * cd * Math.pow(d + cd / 2, -p);
+    for (let x = 0; x < ctx.length; x += CX) {
+      all += w;
+      const wx = ctx.x0 + x;
+      let hit = false;
+      for (let c = 0; c < 5 && !hit; c++) {
+        const f = fieldAt(L, wx + (c === 0 ? 0.5 : c & 1) * CX, d + (c === 0 ? 0.5 : (c >> 1) & 1) * cd);
+        hit = !!f.crop && !!CROP[f.crop].wall;
       }
-      // the sides, which come into view as the field passes
-      const da = Math.max(dLo, q.D - q.amp), db = Math.min(dHi, q1.D + q1.amp);
-      for (const side of [0, 1]) {
-        const skew = (colEdge(L, k, j + side, 1000) - colEdge(L, k, j + side, 0)) / 1000;
-        for (let g = Math.ceil(da / 0.5); g * 0.5 < db;) {
-          const d = g * 0.5, hw = 2.5 + 0.004 * d;
-          const wx = colEdge(L, k, j + side, d) + (side ? -hw : hw);
-          const gs = Math.max(1, Math.round(Math.max(0.16, detail(out, d, 0.8)) / 0.5)), sd = gs * 0.5;
-          g += gs;
-          if (wx < x0 || wx >= x1) continue;
-          const front = d - edgeD(L, k, wx);
-          if (front < frontHw(L, k, wx, d) + (cut ? cutDepth(cut, wx) : 0) || edgeD(L, k + 1, wx) - d < hw) continue;
-          if (d < 1800 && nearVillage(L, wx, d)) continue;
-          piece(f, wx, d, skew, -1, sd, rng);
-          if (out.due()) yield;
-        }
-      }
-      // where a combine is at work, the face of the standing crop beside its header
-      if (cut && cut.xh >= x0 && cut.xh < x1) {
-        const e = edgeD(L, k, cut.xh) + frontHw(L, k, cut.xh, q.D);
-        for (let d = e + cut.all; d < e + cut.pass; d += 0.3) piece(f, cut.xh, d, 0, -1, 0.4, rng);
-        if (out.due()) yield;
-      }
+      if (hit) { tot += w; cells.push(x, d, cd, tot); }
     }
+    d += cd;
+  }
+  return { cells, tot, all };
+}
+// One clump of crop at chunk-local x, distance d. lod 0: single plants; 1: a sheaf; 2: a drift.
+// big > 1 at low budgets: fewer, larger pieces.
+function cropClump(ctx, out, L, f, x, d, rng, lod, big) {
+  const s = CROP[f.crop], wx = ctx.x0 + x, y0 = ctx.terrain.height(wx, d), z = -d;
+  const px = Math.max(0.012, PLANT_PX * d);
+  const c = cropSurface(L, f, wx, d, rng);           // the crop's colour here: wind swathes, comb
+  const k = 0.88 + 0.22 * rng();
+  const ear = mul3(mix3(s.ear, c, 0.5), k), stem = mul3(mix3(s.stem, c, 0.35), k);
+  const H0 = s.h * (0.88 + 0.24 * rng()) * (0.92 + 0.16 * noise2(wx / 9, d / 9, L.ws + 29));
+  const rape = f.crop === C.RAPE, K = KIND.OTHER;
+  if (lod === 2) {
+    // a drift: a tussock of the crop, its stalk colour below and the ears' colour on top
+    const w = Math.max(0.5, 0.0045 * d) * big * (0.8 + 0.4 * rng());
+    swayBlob(out, x, y0 + H0 * 0.42, z, w, H0 * 0.42, stem, y0, K);
+    swayBlob(out, x + (rng() - 0.5) * w * 0.4, y0 + H0 * 0.88, z + 0.2 * w, w * 0.92, Math.max(H0 * 0.17, px * 1.2), ear, y0, K);
+    return;
+  }
+  if (lod === 1) {
+    // a sheaf: a body of stalks with a few ears or flower heads on top
+    const w = Math.max(0.35, 0.007 * d) * big;
+    swayBlob(out, x, y0 + H0 * 0.4, z, w * 0.5, H0 * 0.4, stem, y0, K);
+    const n = rape ? 3 : 4;
+    for (let i = 0; i < n; i++) {
+      const hx = x + (rng() - 0.5) * w, hz = z + (rng() - 0.3) * w * 0.6, hy = y0 + H0 * (0.86 + 0.14 * rng());
+      const r = Math.max(px * 1.15, rape ? 0.09 : 0.05) * big;
+      swayBlob(out, hx, hy, hz, r * (rape ? 1.3 : 1), rape ? r * 0.9 : Math.max(r * 1.5, 0.09), ear, y0, K);
+    }
+    return;
+  }
+  // single plants, by the line: a few to a clump, along the drill row
+  const m = rape ? 2 : 3;
+  const ux = f.dir ? 1 : 0.95, uz = f.dir ? 0 : -0.29;       // along the row, in splat space (x, z)
+  const sr = Math.max(0.012, px * 0.6) * big;
+  for (let i = 0; i < m; i++) {
+    const a = (i - (m - 1) / 2) * (rape ? 0.4 : 0.13) + (rng() - 0.5) * 0.06;
+    const bx = x + ux * a, bz = z + uz * a - (rng() - 0.5) * 0.05;
+    const H = H0 * (0.9 + 0.2 * rng()), lean = (rng() - 0.5) * 0.12 * H;
+    const tx = bx + lean, ty = y0 + H;
+    if (rape) {
+      swayStrut(out, bx, y0, bz, tx, ty - 0.08, bz, Math.max(sr, 0.018), stem, 3, y0, K);
+      for (const sg of [-1, 1]) {
+        const ly = y0 + H * (sg < 0 ? 0.35 : 0.58);
+        swayBlob(out, bx + sg * 0.16 + lean * 0.4, ly, bz + 0.02, Math.max(px * 1.2, 0.17) * big, Math.max(px, 0.07), stem, y0, K);
+      }
+      // the flowering top branches into a crowded spray of yellow heads
+      for (let h = 0; h < 5; h++) {
+        const r = Math.max(px * 1.2, 0.07) * big, a2 = (h / 5) * Math.PI * 2 + rng();
+        swayBlob(out, tx + Math.cos(a2) * 0.16, ty - 0.12 * rng(), bz + Math.sin(a2) * 0.1, r, r * 0.8, h === 4 ? mix3(ear, stem, 0.4) : ear, y0, K);
+      }
+      continue;
+    }
+    swayStrut(out, bx, y0, bz, tx, ty - 0.05, bz, sr, stem, 2, y0, K);
+    const er = Math.max(px * 1.1, 0.03) * big;
+    if (f.crop === C.WHEAT) {
+      // a heavy ear, nodding over
+      swayBlob(out, tx + 0.03, ty - 0.02, bz, er * 1.15, Math.max(er, 0.075) * big, ear, y0, K);
+    } else if (f.crop === C.BARLEY) {
+      // ripe barley hangs its head, its long awns trailing
+      swayBlob(out, tx + 0.07, ty - 0.07, bz, er * 1.2, Math.max(er, 0.085) * big, ear, y0, K);
+      swayStrut(out, tx + 0.08, ty - 0.12, bz, tx + 0.22, ty - 0.24, bz, sr * 0.8, mul3(ear, 0.97), 1, y0, K);
+    } else {
+      // green barley: upright ears with their awns standing up
+      swayBlob(out, tx, ty, bz, er, Math.max(er, 0.06) * big, ear, y0, K);
+      swayStrut(out, tx, ty + 0.05, bz, tx + 0.02, ty + 0.18, bz, sr * 0.7, mul3(ear, 1.1), 1, y0, K);
+    }
+  }
+}
+// The plants of the band's standing crops, spending up to `share` of its count where the chunk is
+// all crop (less where it has less), and never so much that the ground fill gets under `keep` of it.
+function* cropPlants(ctx, out, L, dLo, dHi, opts) {
+  const p = opts.power, rng = ctx.rng;
+  const { cells, tot, all } = cropCells(ctx, L, dLo, dHi, p);
+  if (!tot) return;
+  const want = ctx.count * opts.share * Math.min(1, (tot / all) / 0.45);
+  const budget = Math.max(0, Math.min(want, ctx.count * (1 - opts.keep) - out.n));
+  const stop = out.n + budget;
+  // keep clear of a sprayer working in the crop
+  const clear = [];
+  for (const s of sitesAround(ctx, L, 30)) if (s.kind === 'sprayer') clear.push(s);
+  const rel = Math.max(0.3, out.density), big = clamp(Math.pow(rel, -0.3), 1, 1.35);
+  const lod0 = opts.lod0 * Math.sqrt(Math.min(1, rel)), lod1 = opts.lod1 * Math.sqrt(Math.min(1, rel));
+  const n4 = cells.length / 4;
+  for (let i = 0; i < budget * 2 && out.n < stop; i++) {
+    // a cell by weight, then a point in it
+    const u = rng() * tot;
+    let lo = 0, hi = n4 - 1;
+    while (lo < hi) { const mI = (lo + hi) >> 1; if (cells[mI * 4 + 3] < u) lo = mI + 1; else hi = mI; }
+    let x = cells[lo * 4] + rng() * 8, d = cells[lo * 4 + 1] + rng() * cells[lo * 4 + 2];
+    if (x < 0 || x >= ctx.length) continue;
+    let wx = ctx.x0 + x;
+    const lod = d < lod0 ? 0 : d < lod1 ? 1 : 2;
+    const f0 = fieldAt(L, wx, d);
+    if (!f0.crop || !CROP[f0.crop].wall) continue;
+    if (lod === 0) {
+      // onto the drill row (0.5 m apart, wider than life so the rows read from the train)
+      if (f0.dir) d = Math.round((d + f0.phase) / 0.5) * 0.5 - f0.phase;
+      else { wx = Math.round((wx + 0.3 * d) / 0.5) * 0.5 - 0.3 * d; x = wx - ctx.x0; }
+    }
+    if (clear.length && clear.some((s) => Math.abs(wx - s.wx) < 9 && Math.abs(d - s.d) < 3.2)) continue;
+    const f = standing(L, wx, d, opts.cuts);
+    if (!f) continue;
+    cropClump(ctx, out, L, f, x, d, rng, lod, big);
+    if (out.due()) yield;
   }
 }
 
@@ -1095,10 +1187,6 @@ function* trackside(ctx, emit) {
 
   // the boundary: post-and-wire fence, or in places a laid hawthorn hedge just beyond it
   yield* fence(ctx, out, 6.6, { spacing: 2.7 });
-  // standing crops: the walls of their near edges and sides (the canopy is the field fill below),
-  // early, so the prop limit never takes them from under a lifted canopy
-  const cuts = cutsFor(ctx, L);
-  yield* cropWalls(ctx, out, L, 6.7, ctx.zFar, cuts);
   for (const { i, wx0 } of cellsAround(ctx, 30, 2)) {
     if (stretch(wx0, 700, 41) < 0.68) continue;
     yield* hedge(ctx, out, (t) => [wx0 + 30 * t - ctx.x0, 7.6], 30, { rng: worldRng(ctx, 15, i), height: 1.4, width: 1.2, color: [0.17, 0.26, 0.11], gaps: 0.1, wobbleSalt: 5 });
@@ -1130,6 +1218,11 @@ function* trackside(ctx, emit) {
 
   yield* fieldBales(ctx, out, L, 6.7, ctx.zFar);
 
+  // standing crops as plants (the ground fill under them is their soil)
+  const cuts = cutsFor(ctx, L);
+  out.limit = Infinity;
+  yield* cropPlants(ctx, out, L, 8, ctx.zFar, { cuts, power: 0.8, share: 0.6, keep: 0.25, lod0: 60, lod1: 120 });
+
   // ground: ballast and cess (mostly below the window), a tufty verge, then the field
   const rest = out.left();
   const ballast = PAL.ballast;
@@ -1150,10 +1243,8 @@ function* near(ctx, emit) {
   const cap = ctx.count * 0.62;
   out.limit = ctx.count * 0.8;
   const dz = ctx.dials || {};
-  // crops, machines and bales first: they are what this farmland is looked at for, and the crop
-  // walls must stand wherever the fill lifts a field, or the canopy floats
+  // machines and bales first: they are what this farmland is looked at for
   const cuts = cutsFor(ctx, L);
-  yield* cropWalls(ctx, out, L, ctx.zNear, ctx.zFar, cuts);
   yield* machines(ctx, out, L, ctx.zNear, ctx.zFar);
   yield* fieldBales(ctx, out, L, ctx.zNear, ctx.zFar);
   yield* rowHedges(ctx, out, L, ctx.zNear, ctx.zFar, { capAt: cap });
@@ -1162,6 +1253,9 @@ function* near(ctx, emit) {
   yield* villages(ctx, out, L, ctx.zNear, ctx.zFar, { capAt: cap });
   yield* repeatingFarm(ctx, out, dz.logic || 0);
   if (out.n < cap) yield* fieldContents(ctx, out, L, ctx.zNear, ctx.zFar, 25, { woodSpacing: 8, capAt: cap });
+  // standing crops as plants, out of what the ground fill would otherwise take
+  out.limit = Infinity;
+  yield* cropPlants(ctx, out, L, ctx.zNear, ctx.zFar, { cuts, power: 1.3, share: 0.6, keep: 0.22, lod0: 45, lod1: 110 });
   yield* fieldFill(ctx, out, L, { power: 1.5, cover: 3.2, cuts });
 }
 
