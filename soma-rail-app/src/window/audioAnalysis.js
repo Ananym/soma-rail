@@ -116,17 +116,23 @@ export function createOnsetDetector({
   minFlux = 0.03,
   refractory = 0.09,
   warmup = 0.4,          // seconds of statistics before the first onset is reported
+  // Extra [lo, hi] ranges whose own flux (the mean rise of their bins, unweighted) is reported in
+  // result.side, from the same pass: used for the band onsets (createPeakPicker). They must lie
+  // inside the bands above; bins outside every band are never read and add nothing.
+  sideBands = [],
 } = {}) {
   const n = fftSize / 2;
   const ranges = bands.map(([lo, hi]) => binRange(lo, hi, sampleRate, fftSize));
   const weights = bands.map((b) => b[2]);
   const ref = new Float32Array(n);
+  const sideRanges = sideBands.map(([lo, hi]) => binRange(lo, hi, sampleRate, fftSize));
+  const rise = sideRanges.length ? new Float32Array(n) : null;   // this frame's rise per bin
   let primed = false;
   let lastT = null;
   let mean = 0, dev = 0, warm = 0;
   let armed = true;
   let lastOnset = -Infinity;
-  const result = { flux: 0, onset: false, threshold: 0 };
+  const result = { flux: 0, onset: false, threshold: 0, side: new Float64Array(sideRanges.length) };
 
   // Compressed magnitude of bin i, clamped against -Infinity and NaN.
   function comp(specDb, i, offsetDb) {
@@ -145,7 +151,7 @@ export function createOnsetDetector({
     /** Snap the reference to this spectrum without reporting flux (after a volume step). */
     prime(specDb, offsetDb = 0, t = null) { prime(specDb, offsetDb); if (t != null) lastT = t; },
     push(specDb, t, offsetDb = 0) {
-      if (!primed) { prime(specDb, offsetDb); lastT = t; result.flux = 0; result.onset = false; return result; }
+      if (!primed) { prime(specDb, offsetDb); lastT = t; result.flux = 0; result.onset = false; result.side.fill(0); return result; }
       const dt = lastT == null ? 1 / 60 : Math.max(0, Math.min(0.25, t - lastT));
       lastT = t;
       const a = smoothing(dt, refTau);
@@ -157,11 +163,18 @@ export function createOnsetDetector({
           const c = comp(specDb, i, offsetDb);
           const d = c - ref[i];
           if (d > 0) s += d;
+          if (rise) rise[i] = d > 0 ? d : 0;
           ref[i] += d * a;
         }
         flux += weights[b] * s / (i1 - i0);
       }
       // (Bins outside every band are never read, so their reference is left alone.)
+      for (let b = 0; b < sideRanges.length; b++) {
+        const i0 = sideRanges[b][0], i1 = sideRanges[b][1];
+        let s = 0;
+        for (let i = i0; i < i1; i++) s += rise[i];
+        result.side[b] = s / (i1 - i0);
+      }
 
       const threshold = mean + k * dev + minFlux;
       let onset = false;
@@ -193,7 +206,338 @@ export function createOnsetDetector({
       result.flux = flux; result.onset = onset; result.threshold = threshold;
       return result;
     },
-    reset() { primed = false; lastT = null; mean = 0; dev = 0; warm = 0; armed = true; lastOnset = -Infinity; },
+    reset() { primed = false; lastT = null; mean = 0; dev = 0; warm = 0; armed = true; lastOnset = -Infinity; result.side.fill(0); },
+  };
+}
+
+/**
+ * The onset decision of createOnsetDetector on its own, for any flux signal (the band fluxes in
+ * the detector's result.side): above an adaptive threshold (slow mean plus k times the slow mean
+ * absolute deviation, plus minFlux), on the rising edge, re-armed below it, with a refractory
+ * period, after a warm-up. Same arithmetic as the full-band detector.
+ */
+export function createPeakPicker({ k = 4, minFlux = 0.03, meanTau = 0.6, refractory = 0.09, warmup = 0.4 } = {}) {
+  let mean = 0, dev = 0, warm = 0, armed = true, lastOnset = -Infinity;
+  const out = { onset: false, threshold: 0 };
+  return {
+    out,
+    /** One frame: flux, its time t and the frame's dt. Returns true on an onset. */
+    push(flux, t, dt) {
+      if (!(flux >= 0)) flux = 0;
+      const threshold = mean + k * dev + minFlux;
+      out.threshold = threshold; out.onset = false;
+      warm += dt;
+      if (warm < warmup) {
+        const m = smoothing(dt, meanTau * 0.5);
+        mean += (flux - mean) * m;
+        dev += (Math.abs(flux - mean) - dev) * m;
+        return false;
+      }
+      if (flux > threshold) {
+        if (armed && t - lastOnset >= refractory) { out.onset = true; lastOnset = t; }
+        armed = false;
+      } else armed = true;
+      const above = flux >= threshold;
+      const m = smoothing(dt, above ? meanTau * 10 : meanTau);
+      const fc = above ? threshold : flux;
+      mean += (fc - mean) * m;
+      dev += (Math.abs(fc - mean) - dev) * m;
+      return out.onset;
+    },
+    reset() { mean = 0; dev = 0; warm = 0; armed = true; lastOnset = -Infinity; out.onset = false; },
+  };
+}
+
+// ---------- the features the tap reports, and the slow signals made from them ----------
+
+const clamp01 = (x) => (x > 0 ? (x < 1 ? x : 1) : 0);
+/** Linear amplitude to dB, with a floor so silence stays finite. */
+export function ampDb(a) { return 20 * Math.log10(a > 1e-7 ? a : 1e-7); }
+
+/** The band onsets: kicks and bass drums low, hats, snares and claps high. */
+export const ONSET_BANDS = { low: [40, 160], high: [2500, 11000] };
+/** The part of the mid band the voice lift reads: above where a kick or bass note's window
+ *  main lobe reaches (a 140 Hz kick spreads to ~210 Hz through the Blackman window). */
+export const VOICE_BAND = [250, 2500];
+
+/**
+ * Everything the tap measures from one analyser frame, in one place so that audio.js and
+ * scripts/check-audio.mjs run exactly the same code. `out` is filled in place:
+ *   level, bass, mid, treble   auto-gained 0..1 (slow peak normalisation: these sit near the same
+ *                              value on any track, so they carry shape, not loudness)
+ *   loudDb, bassDb, midDb, trebleDb   the same, volume-compensated, in dBFS and NOT auto-gained:
+ *                              for anything that compares loudness over seconds (createDynamics,
+ *                              createLift), since the auto-gain climbs back from a 15 dB fall in ~3 s
+ *   flux, onset                the full-band spectral-flux onset (createOnsetDetector)
+ *   fluxLow, onsetLow          the low band's own flux (auto-gained) and onsets (ONSET_BANDS.low)
+ *   fluxHigh, onsetHigh        the same for the high band
+ *   voiceDb                    VOICE_BAND in dBFS (volume-compensated, not auto-gained)
+ *   bpm, confidence            the tempo estimate
+ * `active` is the caller's business (audio.js decides it from silence).
+ */
+export function createMusicFeatures({
+  sampleRate, fftSize, bands = DEFAULT_BANDS, out = {}, levelTau = 0.12, bandTau = 0.06,
+  onsetBands = ONSET_BANDS, voiceBand = VOICE_BAND,
+  // The low band has only a handful of bins, and a kick's falling pitch keeps moving energy into
+  // them for a while after the hit: a higher floor keeps those (and bass notes gliding) from counting.
+  lowPick = { k: 4, minFlux: 0.3 },
+  highPick = { k: 4, minFlux: 0.05 },
+} = {}) {
+  const names = Object.keys(bands);
+  const dbKeys = names.map((n) => `${n}Db`);
+  const meter = createBandMeter(sampleRate, fftSize, bands);
+  const [v0, v1] = binRange(voiceBand[0], voiceBand[1], sampleRate, fftSize);
+  const detector = createOnsetDetector({ sampleRate, fftSize, sideBands: [onsetBands.low, onsetBands.high] });
+  const tempo = createTempoEstimator();
+  // Slow normalisation, one per output. Floors sit well under any music, so silence reads 0.
+  const levelGain = createAutoGain({ floor: 1e-5 });
+  const bandGains = names.map(() => createAutoGain({ floor: 1e-6 }));
+  const fluxGain = createAutoGain({ floor: 1e-3, decayDbPerSec: 3 });
+  const lowGain = createAutoGain({ floor: 1e-3, decayDbPerSec: 3 });
+  const highGain = createAutoGain({ floor: 1e-3, decayDbPerSec: 3 });
+  const lowPicker = createPeakPicker(lowPick), highPicker = createPeakPicker(highPick);
+  const bandOut = {};
+  for (const b of names) bandOut[b] = 0;
+  let rmsSmooth = 0;
+
+  function quiet() {
+    out.flux = 0; out.onset = false; out.fluxLow = 0; out.onsetLow = false; out.fluxHigh = 0; out.onsetHigh = false;
+  }
+  function tempoOut() { const e = tempo.estimate(); out.bpm = e.bpm; out.confidence = e.confidence; }
+  function reset() {
+    rmsSmooth = 0;
+    levelGain.reset(); fluxGain.reset(); lowGain.reset(); highGain.reset();
+    for (const g of bandGains) g.reset();
+    detector.reset(); tempo.reset(); lowPicker.reset(); highPicker.reset();
+    out.active = false; out.level = 0; out.loudDb = ampDb(0); out.voiceDb = ampDb(0);
+    for (let b = 0; b < names.length; b++) { out[names[b]] = 0; out[dbKeys[b]] = ampDb(0); }
+    quiet(); out.bpm = 0; out.confidence = 0;
+  }
+  reset();
+
+  return {
+    out,
+    detector,
+    tempo,
+    /** One measured frame: dB spectrum, compensated RMS, dt, analysis time, the dB offset. */
+    measure(specDb, rms, dt, time, offsetDb = 0) {
+      rmsSmooth += (rms - rmsSmooth) * smoothing(dt, 0.05);
+      out.level += (levelGain.push(rmsSmooth, dt) - out.level) * smoothing(dt, levelTau);
+      out.loudDb = ampDb(rmsSmooth);
+      meter.measure(specDb, bandOut, offsetDb);
+      const a = smoothing(dt, bandTau);
+      for (let b = 0; b < names.length; b++) {
+        const name = names[b];
+        out[name] += (bandGains[b].push(bandOut[name], dt) - out[name]) * a;
+        out[dbKeys[b]] = ampDb(bandOut[name]);
+      }
+      out.voiceDb = ampDb(bandEnergy(specDb, v0, v1, offsetDb));
+      const r = detector.push(specDb, time, offsetDb);
+      out.flux = fluxGain.push(r.flux, dt);
+      out.onset = r.onset;
+      tempo.push(r.flux, time);
+      out.fluxLow = lowGain.push(r.side[0], dt);
+      out.onsetLow = lowPicker.push(r.side[0], time, dt);
+      out.fluxHigh = highGain.push(r.side[1], dt);
+      out.onsetHigh = highPicker.push(r.side[1], time, dt);
+      tempoOut();
+      return out;
+    },
+    /** A frame whose samples are known to be unreliable (just after a volume step): keep the
+     *  reference spectrum current, report nothing, leave the gains alone. */
+    prime(specDb, offsetDb, time) {
+      detector.prime(specDb, offsetDb, time);
+      tempo.push(0, time);
+      quiet();
+      tempoOut();
+      return out;
+    },
+    /** No frame at all (volume too low to measure): no onsets, everything else held. */
+    hold() { quiet(); return out; },
+    reset,
+  };
+}
+
+/**
+ * Lift of a sustained level (dB) over its own recent average, 0..1: rests at 0 on a steady level,
+ * rises when something enters or swells, falls back as the average catches up.
+ * - The level is first followed by a lower envelope (it falls in envDown, rises in envUp), so the
+ *   decaying hits of drums, which fill the mid band for a few tens of ms at a time, hardly raise it,
+ *   while a held voice or lead raises it in about envUp.
+ * - The average follows that envelope over riseTau (up) and fallTau (down) seconds, and only a
+ *   rise of more than marginDb over it counts (chord changes and the ripple of the beat stay under).
+ * - It reads VOICE_BAND (createMusicFeatures' voiceDb), not the whole mid band, whose lowest bins
+ *   carry every kick and bass note through the analyser's window.
+ * Used for the mid band (vocals, melody): the auto-gained band value cannot show an entry, since
+ * its peak simply follows it up.
+ */
+export function createLift({ envUp = 0.15, envDown = 0.05, riseTau = 6, fallTau = 6, marginDb = 4, rangeDb = 8 } = {}) {
+  let env = 0, slow = 0, started = false;
+  return {
+    push(db, dt) {
+      if (!(db > -140)) db = -140;
+      if (!started) { env = slow = db; started = true; return 0; }
+      env += (db - env) * smoothing(dt, db > env ? envUp : envDown);
+      slow += (env - slow) * smoothing(dt, env > slow ? riseTau : fallTau);
+      return clamp01((env - slow - marginDb) / rangeDb);
+    },
+    reset() { started = false; },
+  };
+}
+
+/**
+ * Loudness over seconds and minutes, from the uncompressed loudness and bass (dB), and the events
+ * it implies. Each frame push(loudDb, bassDb, onset, dt) returns `res`:
+ *   weather   0..1: the 12 s loudness against a loud reference (a running level that climbs in
+ *             ~15 s and sinks over ~2 minutes, so it stands for "this music when it is going"):
+ *             1 within 2 dB of it, 0 at 12 dB under (a 16 s breakdown 12 dB down ends near 0.3)
+ *   event     null, 'drop' or 'breakdown' on the one frame it is detected; strength 0.2..1
+ *   breakdown: the fast loudness more than 6 dB under the reference for 1.5 s with the bass more
+ *             than 8 dB under its own. Re-armed after 2 s of loud music.
+ *   drop:     after at least 3 s more than 6 dB under, the fast loudness comes back within 3 dB of
+ *             the reference suddenly (3 dB above its 2 s average); or, after at least 3 s with the
+ *             bass more than 10 dB under its reference, the bass comes back within 4 dB, 6 dB
+ *             above its 2 s average, with the onset rate up by half.
+ * The first learnSeconds (and again after relearn(), on a change of track) only learn the levels;
+ * meanwhile `weather` holds its last value (1 at the start).
+ */
+export function createDynamics({
+  fastTau = 0.25, medTau = 2, slowTau = 12, refUpTau = 15, refDownTau = 120,
+  learnSeconds = 8, learnTau = 1.5,
+  weatherDb = [-12, -2],
+  quietDb = 6, loudDb = 3, loudReset = 2,
+  breakdownBassDb = 8, breakdownHold = 1.5,
+  dropQuiet = 3, dropRiseDb = 3,
+  bassGoneDb = 10, bassBackDb = 4, bassJumpDb = 6,
+  minGap = 8,
+} = {}) {
+  let started = false, learn = 0;
+  let fast = 0, med = 0, slow = 0, ref = 0, bFast = 0, bMed = 0, bRef = 0, oFast = 0, oSlow = 0;
+  let quiet = 0, quietMin = Infinity, loudFor = 0, armedB = true, bassGone = 0, bLoudFor = 0, since = Infinity;
+  const res = { weather: 1, event: null, strength: 0, fast: 0, slow: 0, ref: 0 };
+  function clearEpisode() { quiet = 0; quietMin = Infinity; loudFor = 0; armedB = true; bassGone = 0; bLoudFor = 0; }
+  return {
+    res,
+    push(loud, bass, onset, dt) {
+      res.event = null; res.strength = 0;
+      if (!(loud > -140)) loud = -140;
+      if (!(bass > -140)) bass = -140;
+      if (!started) {
+        started = true; learn = learnSeconds;
+        fast = med = slow = ref = loud; bFast = bMed = bRef = bass; oFast = oSlow = 0; clearEpisode();
+      }
+      fast += (loud - fast) * smoothing(dt, fastTau);
+      med += (loud - med) * smoothing(dt, medTau);
+      bFast += (bass - bFast) * smoothing(dt, fastTau);
+      bMed += (bass - bMed) * smoothing(dt, medTau);
+      oFast = oFast * Math.exp(-dt / 1.5) + (onset ? 1 / 1.5 : 0);
+      oSlow = oSlow * Math.exp(-dt / 10) + (onset ? 1 / 10 : 0);
+      since += dt;
+      if (learn > 0) {
+        learn -= dt;
+        const a = smoothing(dt, learnTau);
+        slow += (fast - slow) * a; ref += (fast - ref) * a; bRef += (bFast - bRef) * a;
+        clearEpisode();
+      } else {
+        slow += (loud - slow) * smoothing(dt, slowTau);
+        ref += (fast - ref) * smoothing(dt, fast > ref ? refUpTau : refDownTau);
+        bRef += (bFast - bRef) * smoothing(dt, bFast > bRef ? refUpTau : refDownTau);
+        // a quiet stretch: how long, and how low
+        if (ref - fast > quietDb) { quiet += dt; if (fast < quietMin) quietMin = fast; } else quiet = Math.max(0, quiet - dt);
+        if (bRef - bFast > bassGoneDb) bassGone += dt; else bassGone = Math.max(0, bassGone - 0.5 * dt);
+        if (fast > ref - loudDb) loudFor += dt; else loudFor = 0;
+        if (bFast > bRef - bassBackDb) bLoudFor += dt; else bLoudFor = 0;
+        let ev = null, st = 0;
+        if (armedB && quiet >= breakdownHold && bRef - bFast > breakdownBassDb) {
+          ev = 'breakdown'; st = clamp01((ref - fast) / 15); armedB = false;
+        } else if (quiet >= dropQuiet && fast > ref - loudDb && fast - med > dropRiseDb) {
+          ev = 'drop'; st = clamp01((fast - Math.min(quietMin, med)) / 15);
+          quiet = 0; quietMin = Infinity; bassGone = 0;
+        } else if (bassGone >= dropQuiet && bFast > bRef - bassBackDb && bFast - bMed > bassJumpDb && oFast > 1.5 * oSlow + 0.5) {
+          ev = 'drop'; st = clamp01((bFast - bMed) / 15);
+          quiet = 0; quietMin = Infinity; bassGone = 0;
+        }
+        if (loudFor > loudReset) { quiet = 0; quietMin = Infinity; armedB = true; }
+        if (bLoudFor > loudReset) bassGone = 0;
+        if (ev && since >= minGap) { res.event = ev; res.strength = Math.max(0.2, st); since = 0; }
+      }
+      // (while learning, the last weather is held: the caller eases it out, see director.js)
+      if (learn <= 0) res.weather = clamp01((slow - ref - weatherDb[0]) / (weatherDb[1] - weatherDb[0]));
+      res.fast = fast; res.slow = slow; res.ref = ref;
+      return res;
+    },
+    /** Learn the levels afresh (a change of track): no events and full weather while it lasts. */
+    relearn(seconds = learnSeconds) { if (started) { learn = Math.max(learn, seconds); clearEpisode(); } },
+    reset() { started = false; since = Infinity; res.weather = 1; res.event = null; },
+  };
+}
+
+/**
+ * A beat clock: `value` advances one unit per beat at the trusted tempo, and a phase-locked loop
+ * pulls it so whole numbers fall on onsets. `on` (0..1) says whether to believe it.
+ *
+ * step(dt, active, bpm, confidence, onset, onsetLow, frozen) once per frame:
+ * - the tempo is taken whenever confidence > lockConfidence (the mast-spacing test); the lock is
+ *   fresh while that was seen within freshSeconds and a steering onset within onsetGap beats;
+ * - with a kick present (low-band onsets at least kickShare per beat) only low onsets steer it,
+ *   otherwise every full-band onset does;
+ * - the phase detector is sin(2 pi e) / 2 pi of the onset's distance e from the nearest whole
+ *   number: zero on the beat AND half-way between, so off-beat hats do not tug it; an integral
+ *   term trims the rate (up to maxFreq) so a slightly wrong tempo leaves no standing offset;
+ * - the correction is spread over frames (trackTau) and, while `on` is up, limited to maxSlew of
+ *   the clock's own rate: the clock never steps, it only runs a little faster or slower. With `on`
+ *   down nobody is watching, so it pulls in fast (acquireTau);
+ * - quality: the running mean of cos(4 pi e) (1 for onsets on the beat or half-beat grid, about 0
+ *   for a clock that does not match the music). `on` rises (upTau) while the lock is fresh and the
+ *   quality above 0.5, and falls (downTau) otherwise;
+ * - `latency` is the detector's own delay (seconds), taken off before measuring the phase;
+ * - frozen (a stopped train) holds everything.
+ */
+export function createBeatClock({
+  lockConfidence = 0.6, freshSeconds = 1, onsetGap = 3, kickShare = 0.4,
+  latency = 0, trackTau = 0.4, acquireTau = 0.08, maxSlew = 0.25, ki = 0.03, maxFreq = 0.05,
+  upTau = 0.6, downTau = 0.35, quality = 0.5, wrap = 1024,
+} = {}) {
+  const TWO_PI = 2 * Math.PI;
+  const s = { value: 0, on: 0, tempo: 0, perr: 0, quality: 0, fcorr: 0, kick: false, locked: false };
+  let t = 0, lastLock = -Infinity, lastOnset = -Infinity, lowRate = 0;
+  return {
+    state: s,
+    step(dt, active, bpm, confidence, onset, onsetLow, frozen = false) {
+      if (frozen || !(dt > 0)) return s;
+      t += dt;
+      if (active && bpm > 40 && confidence > lockConfidence) {
+        if (s.tempo > 0 && Math.abs(bpm / s.tempo - 1) > 0.03) s.fcorr = 0;   // a new tempo: the old trim is meaningless
+        s.tempo = bpm; lastLock = t;
+      }
+      lowRate = lowRate * Math.exp(-dt / 4) + (active && onsetLow ? 0.25 : 0);
+      s.kick = s.tempo > 0 && lowRate >= (kickShare * s.tempo) / 60;
+      const rate = (s.tempo / 60) * (1 + s.fcorr);
+      if (active && s.tempo > 0 && (s.kick ? onsetLow : onset)) {
+        let e = s.value - latency * rate;
+        e -= Math.round(e);
+        const pd = Math.sin(TWO_PI * e) / TWO_PI;
+        s.perr += (pd - s.perr) * 0.5;
+        s.quality += (Math.cos(2 * TWO_PI * e) - s.quality) * 0.25;
+        s.fcorr = Math.max(-maxFreq, Math.min(maxFreq, s.fcorr - ki * pd));
+        lastOnset = t;
+      }
+      s.locked = active && s.tempo > 0 && t - lastLock < freshSeconds && (t - lastOnset) * s.tempo / 60 < onsetGap;
+      if (s.tempo > 0 && (s.locked || s.on > 0)) {
+        const tau = acquireTau + (trackTau - acquireTau) * s.on;
+        const lim = (0.9 - (0.9 - maxSlew) * s.on) * rate * dt;
+        let d = -s.perr * smoothing(dt, tau);
+        if (d > lim) d = lim; else if (d < -lim) d = -lim;
+        s.value += rate * dt + d;
+        s.perr += d;
+        if (s.value >= wrap) s.value -= wrap;
+      }
+      const target = s.locked && s.quality > quality ? 1 : 0;
+      s.on += (target - s.on) * smoothing(dt, target > s.on ? upTau : downTau);
+      if (target === 0 && s.on < 0.002) s.on = 0;
+      return s;
+    },
+    reset() { s.on = 0; s.perr = 0; s.quality = 0; s.fcorr = 0; s.locked = false; lastLock = -Infinity; lastOnset = -Infinity; lowRate = 0; },
   };
 }
 

@@ -8,10 +8,10 @@
 //   each frame: director.setAudio(tap.update(dt));
 //
 // update() returns the same features object every frame (it is mutated in place, so nothing is
-// allocated per frame); copy fields out if you need to keep them.
-import {
-  DEFAULT_BANDS, createBandMeter, createOnsetDetector, createTempoEstimator, createAutoGain, smoothing,
-} from './audioAnalysis.js';
+// allocated per frame); copy fields out if you need to keep them. Its fields are listed at
+// createMusicFeatures (audioAnalysis.js), which does the per-frame measuring for this file and
+// for scripts/check-audio.mjs alike; `active` is decided here, from silence.
+import { DEFAULT_BANDS, createMusicFeatures, ampDb } from './audioAnalysis.js';
 
 // A media element can feed only one MediaElementAudioSourceNode, ever: a second call throws, and
 // once the first exists the element is heard only through that node's AudioContext. So the graph
@@ -56,19 +56,16 @@ export function createAudioTap({
 } = {}) {
   let ctx = null, analyser = null, input = null, element = null;
   let td = null, fd = null;
-  let meter = null, detector = null, tempo = null;
+  let fx = null;   // createMusicFeatures for the current sample rate
   const bandNames = Object.keys(bands);
-  const bandOut = {};
-  for (const b of bandNames) bandOut[b] = 0;
 
-  // Slow normalisation, one per output. Floors sit well under any music, so silence reads 0.
-  const levelGain = createAutoGain({ floor: 1e-5 });
-  const bandGains = {};
-  for (const b of bandNames) bandGains[b] = createAutoGain({ floor: 1e-6 });
-  const fluxGain = createAutoGain({ floor: 1e-3, decayDbPerSec: 3 });
-
-  const features = { active: false, level: 0, flux: 0, onset: false, bpm: 0, confidence: 0 };
-  for (const b of bandNames) features[b] = 0;
+  // The features object (see createMusicFeatures for every field). It is created once and kept,
+  // so callers may hold on to it; each setup refills it in place.
+  const features = {
+    active: false, level: 0, loudDb: ampDb(0), voiceDb: ampDb(0), flux: 0, onset: false, bpm: 0, confidence: 0,
+    fluxLow: 0, onsetLow: false, fluxHigh: 0, onsetHigh: false,
+  };
+  for (const b of bandNames) { features[b] = 0; features[`${b}Db`] = ampDb(0); }
   const stats = { rms: 0, rawRms: 0, volume: 1, sampleRate: 0, state: 'none' };
 
   let time = 0;            // analysis clock: advances only while measuring, so holds leave no gap
@@ -77,13 +74,11 @@ export function createAudioTap({
   let holding = false;
   let lastEff = 1;
   let grace = 0;
-  let rmsSmooth = 0;
 
   function resetAnalysis() {
-    time = 0; lastSignal = -Infinity; seen = false; holding = false; lastEff = 1; grace = 0; rmsSmooth = 0;
-    levelGain.reset(); fluxGain.reset();
-    for (const b of bandNames) { bandGains[b].reset(); features[b] = 0; }
-    features.active = false; features.level = 0; features.flux = 0; features.onset = false; features.bpm = 0; features.confidence = 0;
+    time = 0; lastSignal = -Infinity; seen = false; holding = false; lastEff = 1; grace = 0;
+    if (fx) fx.reset();
+    features.active = false;
   }
 
   function detach() {
@@ -101,9 +96,7 @@ export function createAudioTap({
     node.connect(analyser);
     if (!td || td.length !== fftSize) { td = new Float32Array(fftSize); fd = new Float32Array(fftSize / 2); }
     const sr = ctx.sampleRate;
-    meter = createBandMeter(sr, fftSize, bands);
-    detector = createOnsetDetector({ sampleRate: sr, fftSize });
-    tempo = createTempoEstimator();
+    fx = createMusicFeatures({ sampleRate: sr, fftSize, bands, out: features, levelTau, bandTau });
     stats.sampleRate = sr;
     resetAnalysis();
   }
@@ -121,8 +114,7 @@ export function createAudioTap({
     stats.volume = eff;
     if (eff < minVolume) {
       holding = true;
-      features.onset = false;
-      features.flux = 0;
+      fx.hold();   // no onsets (of any band); everything else held
       return;
     }
     // The distraction mechanic ramps the volume a little every frame; that is simply compensated.
@@ -158,26 +150,8 @@ export function createAudioTap({
       // The analyser window still mixes samples from before the volume step: keep the reference
       // spectrum current but report nothing, and leave the gain peaks alone.
       grace -= dt;
-      detector.prime(fd, offsetDb, time);
-      tempo.push(0, time);
-      features.flux = 0; features.onset = false;
-    } else {
-      rmsSmooth += (rms - rmsSmooth) * smoothing(dt, 0.05);
-      features.level += (levelGain.push(rmsSmooth, dt) - features.level) * smoothing(dt, levelTau);
-      meter.measure(fd, bandOut, offsetDb);
-      const a = smoothing(dt, bandTau);
-      for (let b = 0; b < bandNames.length; b++) {
-        const name = bandNames[b];
-        features[name] += (bandGains[name].push(bandOut[name], dt) - features[name]) * a;
-      }
-      const r = detector.push(fd, time, offsetDb);
-      features.flux = fluxGain.push(r.flux, dt);
-      features.onset = r.onset;
-      tempo.push(r.flux, time);
-    }
-    const e = tempo.estimate();
-    features.bpm = e.bpm;
-    features.confidence = e.confidence;
+      fx.prime(fd, offsetDb, time);
+    } else fx.measure(fd, rms, dt, time, offsetDb);
   }
 
   return {
@@ -209,12 +183,16 @@ export function createAudioTap({
     update(dt) {
       if (!(dt > 0)) dt = 1 / 60;
       if (dt > 0.25) dt = 0.25;   // a stalled tab: treat as one long frame, not a jump in time
-      if (!analyser) { features.active = false; features.onset = false; features.flux = 0; return features; }
+      if (!analyser) {
+        features.active = false; features.onset = false; features.flux = 0;
+        features.onsetLow = false; features.onsetHigh = false; features.fluxLow = 0; features.fluxHigh = 0;
+        return features;
+      }
       try {
         stats.state = ctx.state;
         measure(dt);
       } catch {
-        features.onset = false;
+        features.onset = false; features.onsetLow = false; features.onsetHigh = false;
       }
       return features;
     },

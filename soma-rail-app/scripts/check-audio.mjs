@@ -15,7 +15,9 @@ import http from 'node:http';
 import fs from 'node:fs';
 import {
   createOnsetDetector, createTempoEstimator, createAutoGain, createBandMeter, DEFAULT_BANDS,
+  createMusicFeatures, createLift, createDynamics, createBeatClock,
 } from '../src/window/audioAnalysis.js';
+import { createDirector } from '../src/window/director.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -361,6 +363,288 @@ console.log('\nAutomatic gain');
   check(h.push(0, dt) === 0 && h.push(NaN, dt) === 0, 'silence and NaN normalise to 0');
 }
 
+// ---------- music signals: band onsets, mid lift, weather, events, beat clock ----------
+// These run the tap's own per-frame code (createMusicFeatures, shared with audio.js) on
+// synthesised music, and then the director on what it reports.
+
+// A small sequencer for "songs": parts switched on and off by time, on a beat grid whose tempo
+// may change. Returns the buffer and the true times of each kind of hit.
+function song(sr, secs, { bpm = 120, bpmAt = null, parts, seed = 21, gain = 1 }) {
+  const buf = new Float32Array(Math.round(sr * secs)), rnd = mulberry32(seed);
+  const hits = { kick: [], hat: [], snare: [], beat: [], lead: [] };
+  const on = (name, t) => { const p = parts[name]; return typeof p === 'function' ? p(t) : (p || 0); };
+  let beat = 0;
+  for (let t = 0.5; t < secs - 0.05; beat++) {
+    const T = 60 / (bpmAt ? bpmAt(t) : bpm), inBar = beat % 4;
+    hits.beat.push(t);
+    let a;
+    if ((a = on('kick', t))) { addKick(buf, sr, t, 0.8 * a * gain); hits.kick.push(t); }
+    if ((a = on('hat', t))) { addHat(buf, sr, t + T / 2, 0.25 * a * gain, rnd); hits.hat.push(t + T / 2); }
+    if ((a = on('snare', t)) && (inBar === 1 || inBar === 3)) { addSnare(buf, sr, t, 0.35 * a * gain, rnd); hits.snare.push(t); }
+    if ((a = on('bass', t))) {   // a bass note on every beat: 55 or 73 Hz with a second harmonic
+      const hz = [55, 55, 73.4, 65.4][Math.floor(beat / 4) % 4], i0 = Math.round(t * sr), len = Math.round(T * sr);
+      for (let i = 0; i < len && i0 + i < buf.length; i++) {
+        const s = i / sr, env = Math.min(1, s / 0.01) * Math.exp(-s / (T * 0.6));
+        buf[i0 + i] += 0.25 * a * gain * env * (Math.sin(2 * Math.PI * hz * s) + 0.4 * Math.sin(4 * Math.PI * hz * s));
+      }
+    }
+    if ((a = on('lead', t))) {   // a legato lead, one note a beat, 2 harmonics, soft attack
+      const hz = [523, 587, 659, 784, 659, 587, 523, 440][beat % 8], i0 = Math.round(t * sr), len = Math.round(T * sr);
+      for (let i = 0; i < len && i0 + i < buf.length; i++) {
+        const s = i / sr, env = Math.min(1, s / 0.03) * Math.min(1, (len - i) / (0.02 * sr));
+        buf[i0 + i] += 0.12 * a * gain * env * (Math.sin(2 * Math.PI * hz * s) + 0.3 * Math.sin(4 * Math.PI * hz * s));
+      }
+      hits.lead.push(t);
+    }
+    if ((a = on('pluck', t))) {   // a plucked note a beat (5 ms attack, 0.3 s decay), mid register
+      const hz = [392, 440, 494, 587][beat % 4], i0 = Math.round(t * sr);
+      for (let i = 0; i < 1.2 * sr && i0 + i < buf.length; i++) {
+        const s = i / sr, env = Math.min(1, s / 0.005) * Math.exp(-s / 0.3);
+        buf[i0 + i] += 0.2 * a * gain * env * (Math.sin(2 * Math.PI * hz * s) + 0.5 * Math.sin(4 * Math.PI * hz * s) + 0.25 * Math.sin(6 * Math.PI * hz * s));
+      }
+      hits.lead.push(t);
+    }
+    t += T;
+  }
+  // a pad underneath, cross-fading chords
+  const chords = [[220, 277.2, 329.6], [196, 246.9, 293.7], [174.6, 220, 261.6]];
+  for (let i = 0; i < buf.length; i++) {
+    const t = i / sr, a = on('pad', t);
+    if (!a) continue;
+    const c = t / 4, ci = Math.floor(c) % 3, f = c - Math.floor(c), x = Math.min(1, f / 0.4);
+    let s = 0;
+    for (let k = 0; k < 3; k++) s += x * Math.sin(2 * Math.PI * chords[ci][k] * t) + (1 - x) * Math.sin(2 * Math.PI * chords[(ci + 2) % 3][k] * t);
+    buf[i] += 0.03 * a * gain * s;
+  }
+  return { buf, hits };
+}
+
+// The tap's per-frame features (createMusicFeatures, as audio.js runs it) over a buffer.
+function features(buf, sr, fps, onFrame, { fftSize = 2048 } = {}) {
+  const an = makeAnalyser(fftSize);
+  const fx = createMusicFeatures({ sampleRate: sr, fftSize });
+  const f = fx.out;
+  f.active = true;
+  const dur = buf.length / sr, dt = 1 / fps;
+  let cost = 0, frames = 0;
+  for (let i = 1; i / fps <= dur; i++) {
+    const t = i / fps, end = Math.round(t * sr);
+    const spec = an.frame(buf, end);
+    let ss = 0;
+    for (let j = end - fftSize; j < end; j++) { const v = j >= 0 ? buf[j] : 0; ss += v * v; }
+    const t0 = performance.now();
+    fx.measure(spec, Math.sqrt(ss / fftSize), dt, t);
+    cost += performance.now() - t0; frames++;
+    onFrame(t, f, dt);
+  }
+  return cost / frames;
+}
+
+const DIRECTOR_PARAMS = { seed: 'check', kmh: 100, hour: 12, level: 0, biome: '', slot: '', beat: 1, sparkle: 1, events: 1 };
+const near = (times, t, tol) => times.some((x) => Math.abs(x - t) <= tol);
+const mean = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+// Onset timing tolerance: 40 ms, or 50 ms at 30 fps, where frames alone are 33 ms apart.
+const tolFor = (fps) => (fps <= 30 ? 0.05 : 0.04);
+
+console.log('\nBand onsets');
+let worstFxCost = 0;
+for (const { sr, fps } of CONFIGS) {
+  // four-on-the-floor kick, hats only on the off-beat
+  const { buf, hits } = song(sr, 16, { bpm: 124, parts: { kick: 1, hat: 1 } });
+  const low = [], high = [], full = [];
+  worstFxCost = Math.max(worstFxCost, features(buf, sr, fps, (t, f) => { if (f.onsetLow) low.push(t); if (f.onsetHigh) high.push(t); if (f.onset) full.push(t); }));
+  const tol = tolFor(fps), lk = onsetScore(low, hits.kick, tol), hh = onsetScore(high, hits.hat, tol);
+  const lowOnHats = low.filter((t) => near(hits.hat, t, tol)).length, highOnKicks = high.filter((t) => near(hits.kick, t, tol)).length;
+  check(lk.hit >= 0.95 * hits.kick.length && lowOnHats <= 0.05 * hits.hat.length && lk.fp - lowOnHats <= 1,
+    `kick + off-beat hats @ ${sr}/${fps}: low onsets ${lk.hit}/${hits.kick.length} kicks, ${lowOnHats} on hats, ${lk.fp - lowOnHats} elsewhere, worst ${(lk.worst * 1000).toFixed(1)} ms`);
+  check(hh.hit >= 0.95 * hits.hat.length && highOnKicks <= 0.05 * hits.kick.length && hh.fp - highOnKicks <= 1,
+    `kick + off-beat hats @ ${sr}/${fps}: high onsets ${hh.hit}/${hits.hat.length} hats, ${highOnKicks} on kicks, ${hh.fp - highOnKicks} elsewhere, worst ${(hh.worst * 1000).toFixed(1)} ms`);
+}
+for (const { sr, fps } of CONFIGS) {
+  // with a snare on 2 and 4 (noise plus a 190 Hz body): the snare belongs to the high band
+  const { buf, hits } = song(sr, 16, { bpm: 110, parts: { kick: 1, hat: 1, snare: 1 } });
+  const low = [], high = [];
+  features(buf, sr, fps, (t, f) => { if (f.onsetLow) low.push(t); if (f.onsetHigh) high.push(t); });
+  const tol = tolFor(fps), snHigh = hits.snare.filter((t) => near(high, t, tol)).length;
+  const lowOff = low.filter((t) => !near(hits.kick, t, tol)).length;
+  const lk = onsetScore(low, hits.kick, tol);
+  check(snHigh >= 0.95 * hits.snare.length && lk.hit >= 0.95 * hits.kick.length && lowOff <= 1,
+    `kick + snare + hats @ ${sr}/${fps}: high onsets on ${snHigh}/${hits.snare.length} snares; low onsets ${lk.hit}/${hits.kick.length} kicks, ${lowOff} off the kicks`);
+}
+{
+  // a pad with no percussion: no band onsets at all
+  const sr = 48000;
+  for (const fps of [60, 30]) {
+    let low = 0, high = 0, full = 0;
+    features(sinePad(sr, 14).buf, sr, fps, (t, f) => { low += f.onsetLow; high += f.onsetHigh; full += f.onset; });
+    check(low === 0 && high === 0, `slow sine pad @ ${fps} fps: ${low} low, ${high} high band onsets in 14 s (full band ${full})`);
+  }
+  // a plucked melody over the pad (no drums): full-band onsets with no band onsets; through the
+  // director, big things still follow the full-band pulse at 0.45 of it
+  const { buf, hits } = song(sr, 14, { bpm: 90, parts: { pad: 1, pluck: 1 } });
+  const dir = createDirector({ params: DIRECTOR_PARAMS });
+  let low = 0, high = 0, full = 0, ratioOk = 0, frames = 0, maxBig = 0;
+  features(buf, sr, 60, (t, f, dt) => {
+    low += f.onsetLow; high += f.onsetHigh; full += f.onset;
+    dir.setAudio(f); dir.update(dt);
+    const S = dir.state;
+    if (S.beat > 0.05) { frames++; if (Math.abs(S.beatBig - 0.45 * S.beat) < 1e-9 && Math.abs(S.beatSmall - 0.45 * S.beat) < 1e-9) ratioOk++; }
+    maxBig = Math.max(maxBig, S.beatBig);
+  });
+  check(full >= 0.6 * hits.lead.length && low + high <= 2 && ratioOk === frames && maxBig > 0.2,
+    `melody over a pad, no drums: ${full} full-band onsets for ${hits.lead.length} notes, ${low} low and ${high} high; beatBig = 0.45 x beat on ${ratioOk}/${frames} pulsing frames (peak ${maxBig.toFixed(2)})`);
+}
+{
+  // through the director: kicks move big things, hats small ones
+  const sr = 48000, { buf, hits } = song(sr, 16, { bpm: 124, parts: { kick: 1, hat: 1 } });
+  const dir = createDirector({ params: DIRECTOR_PARAMS });
+  const atKick = [], atHatBig = [], atHatSmall = [], atKickSmall = [];
+  const frames = [];
+  features(buf, sr, 60, (t, f, dt) => { dir.setAudio(f); dir.update(dt); frames.push([t, dir.state.beatBig, dir.state.beatSmall]); });
+  const peak = (t0, i) => Math.max(...frames.filter(([t]) => t >= t0 && t < t0 + 0.08).map((r) => r[i]));
+  for (const k of hits.kick.slice(2)) { atKick.push(peak(k, 1)); atKickSmall.push(peak(k, 2)); }
+  for (const h of hits.hat.slice(2)) { atHatBig.push(peak(h, 1)); atHatSmall.push(peak(h, 2)); }
+  check(mean(atKick) > 0.7 && mean(atHatSmall) > 0.7 && mean(atHatBig) < 0.45 && mean(atKickSmall) < 0.45,
+    `director: beatBig peaks ${mean(atKick).toFixed(2)} on kicks, ${mean(atHatBig).toFixed(2)} on hats; beatSmall ${mean(atHatSmall).toFixed(2)} on hats, ${mean(atKickSmall).toFixed(2)} on kicks`);
+}
+check(worstFxCost < 1, `average per-frame cost of the whole feature step ${worstFxCost.toFixed(3)} ms (< 1 ms)`);
+
+console.log('\nMid band lift');
+for (const { sr, fps } of [{ sr: 48000, fps: 60 }, { sr: 44100, fps: 30 }]) {
+  // a steady backing (kick, hats, snare, bass, pad); a lead enters at 12 s and stops at 20 s
+  const { buf } = song(sr, 30, { bpm: 120, parts: { kick: 1, hat: 1, snare: 1, bass: 1, pad: 1, lead: (t) => (t >= 12 && t < 20 ? 1 : 0) } });
+  const dir = createDirector({ params: DIRECTOR_PARAMS });
+  const rows = [];
+  features(buf, sr, fps, (t, f, dt) => { dir.setAudio(f); dir.update(dt); rows.push([t, dir.state.mid]); });
+  const over = (a, b) => rows.filter(([t]) => t >= a && t < b).map((r) => r[1]);
+  const before = Math.max(...over(4, 11.9)), rise = rows.find(([t, m]) => t >= 12 && m > 0.3), peak = Math.max(...over(12, 14));
+  const held = mean(over(14, 20)), after = Math.max(...over(21.5, 30));
+  const fallT = rows.find(([t, m]) => t >= 20 && m < 0.1);
+  let maxStep = 0;
+  for (let i = 1; i < rows.length; i++) maxStep = Math.max(maxStep, Math.abs(rows[i][1] - rows[i - 1][1]) / (rows[i][0] - rows[i - 1][0]));
+  check(before < 0.2 && rise && rise[0] - 12 < 0.5 && peak > 0.5 && after < 0.1 && fallT && fallT[0] - 20 < 1.5 && maxStep < 8,
+    `lead entering @ ${sr}/${fps}: mid ${before.toFixed(2)} at most before, ${rise ? ((rise[0] - 12) * 1000).toFixed(0) : 'never'} ms to 0.3, peak ${peak.toFixed(2)}, ${held.toFixed(2)} mean while held, under 0.1 ${fallT ? (fallT[0] - 20).toFixed(2) + ' s' : 'never'} after it stops, ${after.toFixed(2)} at most after; fastest change ${maxStep.toFixed(1)}/s`);
+}
+
+console.log('\nWeather and events');
+// A dance track: 6 s intro (pad), full from 6 s, a 16 s breakdown (pad only) from 50 s, the drop at
+// 66 s, full to 110 s.
+const FULL = (t) => (t >= 6 && (t < 50 || t >= 66) ? 1 : 0);
+function danceTrack(sr, secs = 110, gain = 1, seed = 21) {
+  return song(sr, secs, { bpm: 126, gain, seed, parts: { kick: FULL, hat: FULL, snare: FULL, bass: FULL, pad: 1, lead: (t) => (t >= 30 && t < 50) || t >= 82 ? 1 : 0 } });
+}
+{
+  const sr = 44100, fps = 30, { buf } = danceTrack(sr);
+  const dyn = createDynamics(), events = [], weather = [];
+  features(buf, sr, fps, (t, f, dt) => {
+    const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt);
+    if (r.event) events.push({ t: +t.toFixed(2), kind: r.event, strength: +r.strength.toFixed(2) });
+    weather.push([t, r.weather]);
+  });
+  const w = (a, b) => weather.filter(([t]) => t >= a && t < b).map((r) => r[1]);
+  const bd = events.filter((e) => e.kind === 'breakdown'), dr = events.filter((e) => e.kind === 'drop');
+  console.log('   events', JSON.stringify(events));
+  check(events.length === 2 && bd.length === 1 && dr.length === 1 && bd[0].t > 50 && bd[0].t < 53.5 && dr[0].t >= 66 && dr[0].t < 66.6,
+    `dance track (detector): ${bd.length} breakdown at ${bd.map((e) => e.t).join()} s (begins 50 s), ${dr.length} drop at ${dr.map((e) => e.t).join()} s (66 s), ${events.length} events in all`);
+  const full = Math.min(...w(20, 50)), deep = Math.min(...w(50, 66)), at58 = w(58, 58.1)[0], back = w(80, 81)[0], back2 = w(92, 93)[0];
+  check(full > 0.95 && deep < 0.5 && at58 < 0.8 && back > 0.8 && back2 > 0.97,
+    `dance track weather: ${full.toFixed(2)} at least in the full part, ${at58.toFixed(2)} 8 s into the breakdown, ${deep.toFixed(2)} at its lowest, ${back.toFixed(2)} 14 s and ${back2.toFixed(2)} 26 s after the drop`);
+}
+{
+  // through the director, with every guard: the start of the stream, the 45 s gap between events of a kind
+  const sr = 44100, fps = 30, { buf } = danceTrack(sr);
+  const dir = createDirector({ params: DIRECTOR_PARAMS }), events = [];
+  let last = 0;
+  features(buf, sr, fps, (t, f, dt) => { dir.setAudio(f); dir.update(dt); const e = dir.state.event; if (e && e.seq !== last) { last = e.seq; events.push({ t: +t.toFixed(2), kind: e.kind }); } });
+  check(events.length === 2 && events[0].kind === 'breakdown' && events[1].kind === 'drop' && events[1].t - events[0].t > 8,
+    `dance track (director): ${JSON.stringify(events)} (a drop may follow the breakdown that set it up; the 45 s gap is between events of a kind)`);
+  const dir2 = createDirector({ params: { ...DIRECTOR_PARAMS, events: 0 } });
+  let any = false;
+  features(buf, sr, fps, (t, f, dt) => { dir2.setAudio(f); dir2.update(dt); if (dir2.state.event) any = true; });
+  check(!any, 'dance track with events=0: no events');
+}
+{
+  // steady music for five minutes (the lead comes and goes, as do the hats): no events, full weather
+  const sr = 44100, fps = 30, secs = 300;
+  const { buf } = song(sr, secs, { bpm: 122, seed: 5, parts: { kick: 1, snare: 1, bass: 1, pad: 1, hat: (t) => (Math.floor(t / 16) % 3 ? 1 : 0), lead: (t) => (Math.floor(t / 24) % 2 ? 1 : 0) } });
+  const dyn = createDynamics(), dir = createDirector({ params: DIRECTOR_PARAMS });
+  let ev = 0, minW = 1, dirEv = 0, minDirW = 1;
+  features(buf, sr, fps, (t, f, dt) => {
+    const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt);
+    if (r.event) ev++;
+    if (t > 10) minW = Math.min(minW, r.weather);
+    dir.setAudio(f); dir.update(dt);
+    if (dir.state.event) dirEv++;
+    minDirW = Math.min(minDirW, dir.state.weather);
+  });
+  check(ev === 0 && dirEv === 0 && minW > 0.85 && minDirW > 0.85, `five minutes of steady music: ${ev} detector events, ${dirEv} director events, weather never under ${Math.min(minW, minDirW).toFixed(2)}`);
+}
+{
+  // a change of track: a loud track ends, a second of silence, a quieter one starts 9 dB down
+  // with its own 6 s intro (pad only, then everything: a drop, were it not for the guard); the
+  // metadata arrives 1.5 s before the new audio
+  const sr = 44100, fps = 30;
+  const steady = (secs, gain, seed) => song(sr, secs, { bpm: 124, gain, seed, parts: { kick: 1, hat: 1, snare: 1, bass: 1, pad: 1, lead: (t) => (t >= 20 ? 1 : 0) } }).buf;
+  const intro = (t) => (t >= 6 ? 1 : 0);
+  const a = steady(58, 1, 7), b = song(sr, 60, { bpm: 100, gain: 0.35, seed: 8, parts: { kick: intro, hat: intro, snare: intro, bass: intro, pad: 1 } }).buf;
+  const buf = new Float32Array(a.length + sr + b.length);
+  buf.set(a, 0); buf.set(b, a.length + sr);
+  const dir = createDirector({ params: DIRECTOR_PARAMS }), dyn = createDynamics();
+  let dirEv = 0, seq = 0, sent = false, minW = 1, maxJump = 0, prevW = 1;
+  const rawEv = [];
+  features(buf, sr, fps, (t, f, dt) => {
+    if (!sent && t >= 57.5) { dir.onTrack({ artist: 'b', title: 'b' }); sent = true; }
+    const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt); if (r.event) rawEv.push(`${r.event}@${t.toFixed(1)}`);
+    dir.setAudio(f); dir.update(dt);
+    const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; dirEv++; }
+    if (t > 50) { minW = Math.min(minW, dir.state.weather); maxJump = Math.max(maxJump, Math.abs(dir.state.weather - prevW)); }
+    prevW = dir.state.weather;
+  });
+  check(dirEv === 0 && minW > 0.9 && maxJump < 0.02,
+    `change of track to one 9 dB quieter: ${dirEv} director events (the detector alone, not told of the track change: ${rawEv.join(' ') || 'none'}), weather never under ${minW.toFixed(2)} around it, largest step ${maxJump.toFixed(3)} per frame`);
+  // the start of a stream: the first seconds of analysis hold weather at exactly 1
+  const d3 = createDirector({ params: DIRECTOR_PARAMS });
+  let exact = true;
+  features(danceTrack(sr, 12).buf, sr, fps, (t, f, dt) => { d3.setAudio(f); d3.update(dt); if (t < 8 && d3.state.weather !== 1) exact = false; });
+  check(exact, 'stream start: weather exactly 1 for the first 8 s of analysis');
+}
+
+console.log('\nBeat clock');
+{
+  // 120 BPM for 40 s, then 140 BPM for 40 s (kick, off-beat hats, snare): the clock must relock,
+  // whole numbers within 60 ms of the kicks, and chaseOn dip during the change rather than the
+  // phase jump.
+  const sr = 48000, CHANGE = 40;
+  for (const fps of [60, 30]) {
+    const { buf, hits } = song(sr, 80, { bpmAt: (t) => (t < CHANGE ? 120 : 140), parts: { kick: 1, hat: 1, snare: 1, bass: 1, pad: 1 } });
+    const dir = createDirector({ params: DIRECTOR_PARAMS });
+    const rows = [];
+    let unwrapped = 0, prevChase = 0;
+    features(buf, sr, fps, (t, f, dt) => {
+      dir.setAudio(f); dir.update(dt);
+      const S = dir.state;
+      let d = S.chase - prevChase; if (d < -512) d += 1024; unwrapped += d; prevChase = S.chase;
+      rows.push({ t, c: unwrapped, on: S.chaseOn, bpm: f.bpm, conf: f.confidence, step: d, dt });
+    });
+    const at = (t) => { let i = rows.findIndex((r) => r.t >= t); if (i <= 0) return null; const a = rows[i - 1], b = rows[i]; return a.c + (b.c - a.c) * (t - a.t) / (b.t - a.t); };
+    const errMs = (k, bpm) => { const c = at(k); return c == null ? null : (c - Math.round(c)) * 60000 / bpm; };
+    const e1 = hits.kick.filter((k) => k > 20 && k < CHANGE).map((k) => errMs(k, 120));
+    const e2 = hits.kick.filter((k) => k > 65).map((k) => errMs(k, 140));
+    const worst1 = Math.max(...e1.map(Math.abs)), worst2 = Math.max(...e2.map(Math.abs));
+    const onFirst = rows.find((r) => r.on > 0.9), onDuring = Math.min(...rows.filter((r) => r.t > CHANGE && r.t < CHANGE + 15).map((r) => r.on));
+    const back = rows.find((r) => r.t > CHANGE + 2 && r.on > 0.9);
+    // the clock never steps: while it is on, each frame advances it by its tempo give or take 25 %
+    let worstStep = 0;
+    for (const r of rows) if (r.on > 0.5 && r.bpm > 0) worstStep = Math.max(worstStep, Math.abs(r.step / (r.dt * r.bpm / 60) - 1));
+    const bpmRows = rows.filter((r) => r.t > CHANGE - 1 && r.t < CHANGE + 15 && Math.round(r.t * 4) === r.t * 4 || false);
+    console.log(`   ${fps} fps: on ${onFirst ? onFirst.t.toFixed(1) : '-'} s; mean error ${mean(e1).toFixed(1)} ms at 120, ${mean(e2).toFixed(1)} ms at 140; relocked (on > 0.9) ${back ? (back.t - CHANGE).toFixed(1) + ' s' : 'never'} after the change`);
+    console.log(`      through the change (t, bpm, conf, on): ${rows.filter((r) => r.t > CHANGE - 1 && r.t < CHANGE + 14 && Math.abs(r.t - Math.round(r.t)) < 0.5 / fps).map((r) => `${r.t.toFixed(0)}:${r.bpm.toFixed(0)}/${r.conf.toFixed(2)}/${r.on.toFixed(2)}`).join(' ')}`);
+    void bpmRows;
+    check(onFirst && onFirst.t < 12 && worst1 <= 60 && worst2 <= 60 && onDuring < 0.5 && back && worstStep <= 0.3,
+      `120 -> 140 BPM @ ${fps} fps: whole numbers within ${worst1.toFixed(1)} ms of the kicks at 120 and ${worst2.toFixed(1)} ms at 140 (after relock); chaseOn fell to ${onDuring.toFixed(2)} in the change; steps never more than ${(worstStep * 100).toFixed(0)} % off the tempo while on`);
+  }
+}
+
 // ---------- browser ----------
 
 let pw = null;
@@ -425,20 +709,21 @@ window.ready = true;
       const tap = window.createAudioTap();
       tap.attachNode(ac, src);
       src.start();
-      const t0 = performance.now(); let last = t0, f, onsets = 0, frames = 0, lock = null, maxUpdateMs = 0, sumUpdateMs = 0;
+      const t0 = performance.now(); let last = t0, f, onsets = 0, onsetsHigh = 0, onsetsLow = 0, finite = true, frames = 0, lock = null, maxUpdateMs = 0, sumUpdateMs = 0;
       await new Promise((done) => {
         const loop = (now) => {
           const a = performance.now();
           f = tap.update((now - last) / 1000); last = now;
           const b = performance.now(); sumUpdateMs += b - a; maxUpdateMs = Math.max(maxUpdateMs, b - a);
-          frames++; if (f.onset) onsets++;
+          frames++; if (f.onset) onsets++; if (f.onsetHigh) onsetsHigh++; if (f.onsetLow) onsetsLow++;
+          if (!Number.isFinite(f.loudDb) || !Number.isFinite(f.voiceDb)) finite = false;
           if (lock == null && Math.abs(f.bpm - 120) < 2.4) lock = (now - t0) / 1000;
           if (now - t0 > 10000) return done();
           requestAnimationFrame(loop);
         };
         requestAnimationFrame(loop);
       });
-      const res = { ...f, onsets, frames, lock, avgUpdateMs: sumUpdateMs / frames, maxUpdateMs, sampleRate: sr };
+      const res = { ...f, onsets, onsetsHigh, onsetsLow, finite, frames, lock, avgUpdateMs: sumUpdateMs / frames, maxUpdateMs, sampleRate: sr };
       src.stop(); tap.dispose(); await ac.close();
       return res;
     });
@@ -446,6 +731,8 @@ window.ready = true;
     check(Math.abs(r1.bpm / 120 - 1) <= 0.02, `browser click track: bpm ${r1.bpm.toFixed(2)} (lock ${r1.lock == null ? 'never' : r1.lock.toFixed(2) + ' s'}, conf ${r1.confidence.toFixed(2)})`);
     check(r1.active === true, 'browser click track: active');
     check(r1.onsets >= 15 && r1.onsets <= 23, `browser click track: ${r1.onsets} onsets in 10 s (20 clicks)`);
+    // (white-noise clicks in silence are broadband, so the low band may answer them too)
+    check(r1.onsetsHigh >= 15 && r1.onsetsHigh <= 23 && r1.onsetsLow <= 23 && r1.finite, `browser click track: ${r1.onsetsHigh} high-band onsets (20 clicks), ${r1.onsetsLow} low; loudDb and voiceDb finite throughout`);
     check(r1.frames > 100, `browser rAF loop ran ${r1.frames} frames, update ${r1.avgUpdateMs.toFixed(3)} ms avg`);
 
     // 2. Silence: a constant-zero source must read as inactive and never throw.

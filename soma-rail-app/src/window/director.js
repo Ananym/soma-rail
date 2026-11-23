@@ -3,6 +3,7 @@
 // music (audio features, track and channel) and the seed. It never touches the renderer.
 import { hashString, hashInts, makeRng } from './rng.js';
 import { BIOMES, DEFAULT_BIOME } from './biomes/index.js';
+import { createDynamics, createLift, createBeatClock, smoothing } from './audioAnalysis.js';
 
 // Surreal levels: each is one setting of all five dials, tuned as a whole.
 export const LEVELS = [
@@ -25,6 +26,15 @@ const NEIGHBOURS = {
 };
 const TUNNEL_LEAD = 70;        // metres ahead that a tunnel mouth appears
 const TUNNEL_MIN_SECONDS = 5;  // shortest time spent inside one
+
+// Music signals (see the state fields below and audioAnalysis.js for the detectors).
+const PULSE_TAU = 0.17;        // the band pulses decay as the full-band beat does
+const PULSE_FLOOR = 0.45;      // big and small things always follow at least this much of the full beat
+const MID_RISE = 0.15, MID_FALL = 0.5;   // seconds: how the mid lift follows the band
+const EVENT_QUIET = 20;        // no automatic events this long after a change of track or scenery, or the start of analysis
+const EVENT_GAP = 45;          // nor this long after the last event
+const WEATHER_SETTLE = 8;      // seconds of analysis before the weather may move off 1
+const CLOCK_LATENCY = 0;       // the onset detector's own delay, taken off by the beat clock (see check-audio.mjs)
 
 export function createDirector({ params, reducedMotion = false }) {
   const baseSeed = hashString(params.seed || String(Date.now()));
@@ -67,6 +77,21 @@ export function createDirector({ params, reducedMotion = false }) {
   const recent = [];   // the kinds of scenery shown lately, newest last (see chooseBiome)
   const seen = (b) => { if (recent[recent.length - 1] !== b) { recent.push(b); if (recent.length > 6) recent.shift(); } };
   let hourDir = 1;   // which way the clock runs for a biome that holds it inside its hours
+
+  // Music signals. setAudio only latches the frame's features (it has no dt, and it is not called
+  // at all without analysis, nor on idle frames); update(dt) does all the integrating, and treats a
+  // frame with no setAudio since the last update as "not listening", which holds every signal at
+  // its neutral value.
+  const heard = { fresh: false, active: false, onset: false, onsetLow: false, loudDb: -140, bassDb: -140, voiceDb: -140, bpm: 0, confidence: 0 };
+  let lowPulse = 0, highPulse = 0;
+  const dynamics = createDynamics();
+  const midLift = createLift();
+  const clock = createBeatClock({ latency: CLOCK_LATENCY });
+  let listenedFor = 0;            // seconds of analysis since it (re)started
+  let deafFor = Infinity;         // seconds since the last analysed frame
+  let weatherWeight = 0;          // 0..1: how far the measured weather is let through
+  let trackAt = -Infinity;        // state.time of the last change of track or channel
+  let guardAt = -Infinity;        // ... or of scenery (a swap, any frame with a tunnel)
 
   // Each change of scenery arrives at a time of day drawn from these slots, so journeys spend real
   // time in the low light of dawn and dusk and not only at midday. A biome can ask for its own
@@ -163,12 +188,78 @@ export function createDirector({ params, reducedMotion = false }) {
   // The moment of change, out of sight in the tunnel: the director's state becomes the destination
   // and the engine is told to build that world (it answers with worldReady()).
   function swap(t) {
+    guardAt = state.time;
     state.seed = t.next.seed; state.biome = t.next.biome; state.level = t.next.level;
     seen(state.biome);
     state.dials = { ...LEVELS[state.level] };
     placeHour();
     t.ready = false;
     for (const fn of listeners.swap) fn(t.next);
+  }
+
+  // Raise a music event. By hand (debug, the fire= URL parameter, tests) it is never refused.
+  function fireEvent(kind, strength = 1) {
+    state.event = { seq: (state.event ? state.event.seq : 0) + 1, kind, strength, at: state.time };
+  }
+
+  // New music (a change of track or of channel): the loudness is learnt afresh, the weather eases
+  // back to full, and no event may follow for a while.
+  function newMusic() {
+    trackAt = state.time; guardAt = state.time;
+    dynamics.relearn(EVENT_QUIET);
+  }
+
+  // An event the music raised: only where it cannot be mistaken for the scenery changing, the
+  // stream starting or the train standing, and never one hard on the heels of another.
+  let lastDropAt = -1e9;
+  function musicEvent(kind, strength, still) {
+    if ((params.events ?? 1) <= 0 || reducedMotion || still || state.tunnel) return;
+    if (state.time - guardAt < EVENT_QUIET || listenedFor < EVENT_QUIET) return;
+    // The gap is between events of a kind, and a drop may always follow the breakdown that set it
+    // up (they come about a quarter of a minute apart: one gap for both would cancel every drop).
+    const last = state.event;
+    if (last && state.time - last.at < EVENT_GAP && !(kind === 'drop' && last.kind === 'breakdown')) return;
+    if (kind === 'drop' && state.time - lastDropAt < EVENT_GAP) return;
+    if (kind === 'drop') lastDropAt = state.time;
+    fireEvent(kind, strength);
+  }
+
+  // The music signals, once per frame (see the state fields). Everything here is neutral unless
+  // this frame was analysed.
+  function music(dt, still) {
+    const listening = heard.fresh && heard.active;
+    heard.fresh = false;
+    if (listening) { listenedFor += dt; deafFor = 0; } else {
+      deafFor += dt;
+      if (deafFor > 3 && listenedFor > 0) { listenedFor = 0; dynamics.reset(); midLift.reset(); }   // analysis stopped: start afresh when it returns
+    }
+    // beatBig / beatSmall: the band pulses, never under PULSE_FLOOR x the full-band beat
+    const k = Math.exp(-dt / PULSE_TAU);
+    lowPulse *= k; highPulse *= k;
+    if (listening) {
+      state.beatBig = Math.max(lowPulse, PULSE_FLOOR * state.beat);
+      state.beatSmall = Math.max(highPulse, PULSE_FLOOR * state.beat);
+    } else { lowPulse = 0; highPulse = 0; state.beatBig = state.beat; state.beatSmall = state.beat; }
+    // mid: the mid band's lift over its own recent average, smoothed
+    const lift = listening ? midLift.push(heard.voiceDb, dt) * (reducedMotion ? 0 : 1) : 0;
+    if (dt > 0) state.mid += (lift - state.mid) * smoothing(dt, lift > state.mid ? MID_RISE : MID_FALL);
+    if (!listening && state.mid < 0.002) state.mid = 0;
+    // weather and events, from the loudness over seconds and minutes
+    if (listening) {
+      const d = dynamics.push(heard.loudDb, heard.bassDb, heard.onset, dt);
+      if (d.event) musicEvent(d.event, d.strength, still);
+    }
+    // (a stopped train holds it, as it holds everything: idle frames come without setAudio)
+    if (!still) {
+      const settled = listening && listenedFor > WEATHER_SETTLE && state.time - trackAt > EVENT_QUIET;
+      if (dt > 0) weatherWeight += ((settled ? 1 : 0) - weatherWeight) * smoothing(dt, settled ? 3 : listening ? 2 : 0.7);
+      if (!settled && weatherWeight < 0.002) weatherWeight = 0;
+      state.weather = weatherWeight === 0 ? 1 : 1 - weatherWeight * (1 - dynamics.res.weather);
+    }
+    // chase / chaseOn: the beat clock (frozen while the train stands)
+    const c = clock.step(dt, listening, heard.bpm, heard.confidence, heard.onset, heard.onsetLow, still);
+    state.chase = c.value;
+    state.chaseOn = reducedMotion ? 0 : c.on;
   }
 
   return {
@@ -178,6 +269,7 @@ export function createDirector({ params, reducedMotion = false }) {
 
     // A channel profile: { biomes: [...], level: 0 | 1 }. See profiles.json.
     setProfile(profile, { immediate = false } = {}) {
+      newMusic();
       state.profile = profile || null;
       const seed = hashInts(baseSeed, hashString(JSON.stringify(profile || {})));
       const next = { seed, biome: chooseBiome(seed, !immediate), level: params.levelFixed ? pendingLevel() : (profile && profile.level != null ? profile.level : state.level) };
@@ -188,6 +280,7 @@ export function createDirector({ params, reducedMotion = false }) {
     // has that many to offer.
     onTrack(song) {
       if (!song || (!song.title && !song.artist)) return;
+      newMusic();
       const seed = hashInts(baseSeed & 0xffff, hashString(`${song.artist}|${song.title}`));
       // (the level that is on its way, if the listener has just asked for one: a new track must
       // not undo a press of Dreamlike that has not yet reached its tunnel)
@@ -196,7 +289,18 @@ export function createDirector({ params, reducedMotion = false }) {
 
     // Per-frame audio features, or null when there is no signal. See audio.js.
     setAudio(f) {
+      heard.fresh = true;
+      heard.active = !!(f && f.active);
+      heard.onset = false; heard.onsetLow = false;
       if (!f || !f.active) { state.energy *= 0.98; state.breath *= 0.9; state.trebleNow = 0; return; }
+      heard.onset = !!f.onset; heard.onsetLow = !!f.onsetLow;
+      heard.loudDb = f.loudDb; heard.bassDb = f.bassDb; heard.voiceDb = f.voiceDb;
+      heard.bpm = f.bpm; heard.confidence = f.confidence;
+      if (!reducedMotion) {
+        // the band pulses: the same shape as the beat, from the low (kick) and high (hats, snares) onsets
+        if (f.onsetLow) lowPulse = Math.max(lowPulse, (0.55 + 0.45 * Math.min(1, f.fluxLow * 2.5)) * params.beat);
+        if (f.onsetHigh) highPulse = Math.max(highPulse, (0.55 + 0.45 * Math.min(1, f.fluxHigh * 2.5)) * params.beat);
+      }
       state.energy += (f.level - state.energy) * 0.02;
       if (!reducedMotion) {
         state.breath = 0.035 * f.bass;
@@ -215,9 +319,7 @@ export function createDirector({ params, reducedMotion = false }) {
     },
 
     // Raise a music event by hand (debug, the fire= URL parameter, tests).
-    fireEvent(kind, strength = 1) {
-      state.event = { seq: (state.event ? state.event.seq : 0) + 1, kind, strength, at: state.time };
-    },
+    fireEvent,
 
     // The engine calls this when the world has been rebuilt behind the tunnel wall.
     worldReady() { if (state.tunnel) state.tunnel.ready = true; },
@@ -255,11 +357,12 @@ export function createDirector({ params, reducedMotion = false }) {
       state.sparkle += (lift - state.sparkle) * (1 - Math.exp(-dt / 0.1));
       const wantDissolve = reducedMotion ? 0 : state.dials.matter * Math.max(0, state.energy - 0.35) * 0.9;
       state.dissolve += (wantDissolve - state.dissolve) * Math.min(1, dt * 0.5);
-      state.beatBig = state.beat; state.beatSmall = state.beat;   // (neutral, until band onsets are wired in)
+      music(dt, still);
       if (still) { state.beat = 0; state.beatBig = 0; state.beatSmall = 0; state.mid = 0; state.sparkle = 0; state.breath = 0; }
 
       const t = state.tunnel;
       if (t) {
+        guardAt = state.time;
         if (t.phase === 'approach' && state.travelled > t.x0 + 12) {
           t.phase = 'inside';
           swap(t);
