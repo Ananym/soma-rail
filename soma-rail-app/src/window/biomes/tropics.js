@@ -1032,7 +1032,7 @@ function* stiltHouse(ctx, out, W, hs, x, d, night) {
   const lx0 = x + fx * (hs.dep / 2 + 1.1), lz0 = -d + fz * (hs.dep / 2 + 1.1);
   for (const sg of [-0.35, 0.35]) strut(lad, lx0 + ex * sg, y0, lz0 + ez * sg, lx0 + ex * sg - fx * 1.0, yf, lz0 + ez * sg - fz * 1.0, limb(0.05, d), C.post, 2, 1, KIND.BUILDING);
   for (let k = 1; k < 4; k++) { const t = k / 4; strut(lad, lx0 - ex * 0.35 - fx * t, y0 + t * hs.stilt, lz0 - ez * 0.35 - fz * t, lx0 + ex * 0.35 - fx * t, y0 + t * hs.stilt, lz0 + ez * 0.35 - fz * t, limb(0.04, d), C.post, 1, 1, KIND.BUILDING); }
-  if (night) yield* lamp(ctx, out, x + fx * (hs.dep / 2 + 0.2), yf + 2.2, d - fz * (hs.dep / 2 + 0.2), WARM, { size: 0.12, halo: 1 });
+  if (night) yield* lamp(ctx, out, x + fx * (hs.dep / 2 + 0.2), yf + 2.2, d - fz * (hs.dep / 2 + 0.2), WARM, { size: 0.12, halo: 1, chase: false });
   if (hs.wash) yield* washing(out, x - ex * hs.w * 0.2, d - hs.dep / 2 - 4.5, W.H(hs.wx, d - hs.dep / 2 - 4.5), r);
 }
 // A line of washing on two posts: shirts, sarongs and towels that flutter (MOVE.FLAG).
@@ -1061,7 +1061,7 @@ function* bungalow(ctx, out, x, d, r, night, side) {
   yield* panel(out, [x - (w + 2) / 2, yf - 0.25, -(d - (dep + 2) / 2)], [1, 0, 0], [0, 1, 0], w + 2, 0.3, s, () => mul3(C.plank, 0.75), KIND.BUILDING, r);
   yield* panel(out, [x - (w + 2) / 2, yf, -(d - (dep + 2) / 2)], [1, 0, 0], [0, 0, -1], w + 2, dep + 2, s * 1.3, () => C.plank, KIND.BUILDING, r);
   yield* hut(ctx, out, x, yf, d, { w, dep, h: 2.6, roof: 'hip', wall: r() < 0.5 ? C.bamboo : WALLS[3], lit: night ? 0.8 : 0, seed: Math.floor(r() * 1e6), s, rng: r });
-  if (night) yield* lamp(ctx, out, x + side * (w / 2 + 0.6), yf + 1.6, d - dep / 2 - 0.6, WARM, { size: 0.12, halo: 1 });
+  if (night) yield* lamp(ctx, out, x + side * (w / 2 + 0.6), yf + 1.6, d - dep / 2 - 0.6, WARM, { size: 0.12, halo: 1, chase: false });
 }
 // A jetty running out from the beach with bungalows either side of it: boards on paired piles,
 // a hand rope, lamps by night. Each band draws the pieces whose centres lie in it.
@@ -1121,7 +1121,7 @@ function* beachBar(ctx, out, W, x, d, r, night) {
     stools(sx, y0 + 0.78, -(d - dep * 0.2 - 0.9), 0.22, 0.05, 0.22, 0.6, 0.25, 0.15, 1, 0, 0, 0, 1, KIND.BUILDING);
   }
   // inside: bottles on a shelf, and a warm light by night
-  if (night) yield* lamp(ctx, out, x, y0 + h - 0.4, d, WARM, { size: 0.16, halo: 1.6 });
+  if (night) yield* lamp(ctx, out, x, y0 + h - 0.4, d, WARM, { size: 0.16, halo: 1.6, chase: false });
   // the lanterns: a string sagging between the front posts
   const nlz = 7 + Math.floor(r() * 4);
   for (let k = 0; k < nlz; k++) {
@@ -1237,8 +1237,8 @@ function* ferry(ctx, out0, x, d, r, night) {
   yield* blob(ctx, out, x - L * 0.25, hy1 + 5.8, d, 0.9, 1.4, 0.9, { n: 14, color: stripe, rng: r, kind: K, inner: 0.2, clump: 0 });
   strut(out, x + L * 0.15, hy1 + 4.8, -d, x + L * 0.15, hy1 + 9, -d, limb(0.06, d), [0.3, 0.3, 0.3], 3, 1, K);
   if (night) {
-    yield* lamp(ctx, out0, x + L * 0.15, hy1 + 9.1, d, [1, 0.95, 0.85], { size: 0.14, halo: 1 });
-    yield* lamp(ctx, out0, x + L / 2 + 1, hy1 + 1, d - 1, [0.3, 1, 0.4], { size: 0.12, halo: 0.6 });
+    yield* lamp(ctx, out0, x + L * 0.15, hy1 + 9.1, d, [1, 0.95, 0.85], { size: 0.14, halo: 1, chase: false });
+    yield* lamp(ctx, out0, x + L / 2 + 1, hy1 + 1, d - 1, [0.3, 1, 0.4], { size: 0.12, halo: 0.6, chase: false });
   }
 }
 
@@ -1865,7 +1865,7 @@ function* villages(ctx, out, W, dLo, dHi, night) {
       if (x > -10 && x < ctx.length + 10) {
         const r = makeRng(v.stall.seed);
         yield* marketStall(ctx, out, W, x, v.stall.d, r);
-        if (night) yield* lamp(ctx, out, x, W.H(v.stall.wx, v.stall.d) + 2.1, v.stall.d - 0.6, WARM, { size: 0.12, halo: 1.2 });
+        if (night) yield* lamp(ctx, out, x, W.H(v.stall.wx, v.stall.d) + 2.1, v.stall.d - 0.6, WARM, { size: 0.12, halo: 1.2, chase: false });
       }
     }
   }

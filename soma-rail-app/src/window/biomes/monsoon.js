@@ -1058,7 +1058,7 @@ function pole(ctx, out, pl, night) {
   if (pl.lamp) {
     const ly = top[1] - 1.4, lz = top[2] + 1.6;
     bar(out, top[0], ly + 0.3, top[2], top[0], ly, lz, r * 0.5, [0.36, 0.36, 0.36], 1, KIND.MAST);
-    if (night) { out(top[0], ly - 0.1, lz, 0.16, 0.1, 0.16, 1, 0.84, 0.52, 1, 0, 0, 0, 1, KIND.LIGHT); out(top[0], ly - 0.2, lz, 0.9, 0.7, 0.9, 1, 0.8, 0.5, 0.15, 0, 0, 0, 1, KIND.LIGHT); }
+    if (night) { out(top[0], ly - 0.1, lz, 0.16, 0.1, 0.16, 1, 0.84, 0.52, 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE); out(top[0], ly - 0.2, lz, 0.9, 0.7, 0.9, 1, 0.8, 0.5, 0.15, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE); }
   }
 }
 // Wires from one pole's top to the next, sagging (several, as the lines along a Vietnamese road).
@@ -1640,7 +1640,7 @@ function* stationDraw(ctx, out, W, st, night) {
     const lx = x0 + u;
     if (!inX(ctx, st.x0 + u, 1)) continue;
     bar(out, lx, 0.88, -7, lx, 4.6, -7, 0.06, [0.3, 0.32, 0.32], 2, KIND.MAST);
-    out(lx, 4.6, -7, 0.18, 0.12, 0.18, 1, 0.92, 0.7, 1, 0, 0, 0, 1, KIND.LIGHT);
+    out(lx, 4.6, -7, 0.18, 0.12, 0.18, 1, 0.92, 0.7, 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
   }
 }
 

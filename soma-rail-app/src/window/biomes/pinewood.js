@@ -924,7 +924,7 @@ function* cabin(ctx, out, W, wx, d, rng, opts = {}) {
   // a lit window at night
   const hour = ctx.hour;
   if (hour != null && (hour < 6.5 || hour > 19) && (opts.lit || rng() < 0.6)) {
-    yield* lamp(ctx, out, x + ex * w * 0.2, y + 0.4 + h * 0.5, d - dep / 2 - 0.1, [1, 0.78, 0.45], { size: 0.35, halo: 0.6 });
+    yield* lamp(ctx, out, x + ex * w * 0.2, y + 0.4 + h * 0.5, d - dep / 2 - 0.1, [1, 0.78, 0.45], { size: 0.35, halo: 0.6, chase: false });
   }
 }
 function* jetty(ctx, out, wx, d0, d1, y, rng) {

@@ -2854,7 +2854,7 @@ function* haltProps(ctx, out, W) {
         if (x < 0 || x >= ctx.length) continue;
         bar(out, x, 0.6, -6.6, x, 4.3, -6.6, 0.07, [0.16, 0.22, 0.18], 5, KIND.MAST);
         bar(out, x, 4.3, -6.6, x, 4.3, -6.15, 0.05, [0.16, 0.22, 0.18], 1, KIND.MAST);
-        if (night) { out(x, 4.15, -6.15, 0.1, 0.1, 0.1, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT); out(x, 4.15, -6.2, 0.45, 0.45, 0.3, LAMP[0], LAMP[1], LAMP[2], 0.18, 0, 0, 0, 1, KIND.LIGHT); }
+        if (night) { out(x, 4.15, -6.15, 0.1, 0.1, 0.1, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE); out(x, 4.15, -6.2, 0.45, 0.45, 0.3, LAMP[0], LAMP[1], LAMP[2], 0.18, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE); }
         else out(x, 4.15, -6.15, 0.14, 0.1, 0.14, 0.7, 0.7, 0.66, 1, 0, 0, 0, 1, KIND.MAST);
         // a tub of flowers at the foot of each post
         out(x, 0.85, -6.9, 0.32, 0.2, 0.3, 0.8, 0.14, 0.1, 1, 0, 0, 0, 1, KIND.OTHER);

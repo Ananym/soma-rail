@@ -95,17 +95,17 @@ function lightState(ctx, out) {
 }
 
 // Emit a light-source splat (always KIND.LIGHT; colour passed straight through).
-function light(out, x, y, d, sx, sy, sz, c, o) {
-  return out(x, y, -d, sx, sy, sz, c[0], c[1], c[2], o, 0, 0, 0, 1, KIND.LIGHT);
+function light(out, x, y, d, sx, sy, sz, c, o, mv = 0) {
+  return out(x, y, -d, sx, sy, sz, c[0], c[1], c[2], o, 0, 0, 0, 1, KIND.LIGHT, mv);
 }
 // A glowing point with a soft halo; the core grows with distance so far lamps stay visible.
-function glowPoint(out, x, y, d, c, r, halo = 0.16, hk = 4.5) {
-  light(out, x, y, d, r, r, r, c, 1);
-  if (halo > 0) light(out, x, y, d + 0.05, r * hk, r * hk, r * 2, c, halo);
+function glowPoint(out, x, y, d, c, r, halo = 0.16, hk = 4.5, mv = 0) {
+  light(out, x, y, d, r, r, r, c, 1, mv);
+  if (halo > 0) light(out, x, y, d + 0.05, r * hk, r * hk, r * 2, c, halo, mv);
 }
 // A faint pool of light lying on the ground (the road under a lamp, the pavement by a shop).
-function pool(out, x, y, d, R, c, o) {
-  light(out, x, y + 0.06, d, R, R * 0.02, R * 0.8, c, o);
+function pool(out, x, y, d, R, c, o, mv = 0) {
+  light(out, x, y + 0.06, d, R, R * 0.02, R * 0.8, c, o, mv);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -342,17 +342,17 @@ export function* streetLamp(ctx, out, x, d, o = {}) {
   const L = out.L || lightState(ctx, out);
   const H = o.h || 8, c = o.color || SODIUM;
   const y0 = o.y != null ? o.y : groundY(ctx, x, d);
-  const near = d < 320;
+  const near = d < 320, mv = o.chase === false ? MOVE.NONE : MOVE.CHASE;
   if (near) yield* stick(ctx, out, x, y0, d, H, Math.max(0.07, detail(out, d, 0.5)), { color: [0.3, 0.31, 0.32], kind: KIND.OTHER, n: Math.max(2, Math.round(H / Math.max(0.6, detail(out, d, 1.5)))) });
   const hx = x + (o.dx || 0), hd = d + (o.dd || 0);
   if (!L.lamps) { out(hx, y0 + H, -hd, 0.35, 0.12, 0.2, 0.3, 0.3, 0.3, 1, 0, 0, 0, 1, KIND.OTHER); return; }
   const rc = Math.max(0.16, 0.0016 * d / Math.sqrt(Math.min(1, out.density)));
   // far lamps drop their halo at small budgets (the core alone still reads as a dot)
-  glowPoint(out, hx, y0 + H - 0.1, hd, c, rc, near ? 0.15 : out.density < 0.5 ? 0 : 0.11, near ? 6 : 4);
+  glowPoint(out, hx, y0 + H - 0.1, hd, c, rc, near ? 0.15 : out.density < 0.5 ? 0 : 0.11, near ? 6 : 4, mv);
   if (o.pool !== false) {
     const R = o.R || H * 0.85;
-    pool(out, hx, y0, hd, R, c, 0.16);
-    pool(out, hx, y0, hd, R * 0.45, c, 0.2);
+    pool(out, hx, y0, hd, R, c, 0.16, mv);
+    pool(out, hx, y0, hd, R * 0.45, c, 0.2, mv);
   }
   if (out.due()) yield;
 }
@@ -522,9 +522,9 @@ function* trackside(ctx, emit) {
       if (x < -3 || x > ctx.length + 3) continue;
       yield* stick(ctx, out, x, 0.9, 9.5, 4, 0.06, { color: [0.3, 0.32, 0.34], kind: KIND.OTHER, n: 6 });
       if (Ls.lamps) {
-        light(out, x, 4.85, 9.2, 0.28, 0.05, 0.08, LED, 1);
-        light(out, x, 4.8, 9.25, 0.45, 0.35, 0.3, LED, 0.08);
-        pool(out, x, 0.9, 8.3, 3.2, LED, 0.14);
+        light(out, x, 4.85, 9.2, 0.28, 0.05, 0.08, LED, 1, MOVE.CHASE);
+        light(out, x, 4.8, 9.25, 0.45, 0.35, 0.3, LED, 0.08, MOVE.CHASE);
+        pool(out, x, 0.9, 8.3, 3.2, LED, 0.14, MOVE.CHASE);
       }
     }
     // a shelter: back wall, roof and a lit advertising panel
@@ -758,7 +758,7 @@ function* nearBlock(ctx, out, L, k, j, opts) {
       const tx = lerp(xa, xb, r()) - ctx.x0, td = lerp(da, db, r());
       yield* broadleaf(ctx, out, tx, td, { height: 10 + 8 * r(), rng: r, color: [0.12, 0.19, 0.1] });
     }
-    for (let t = 0; t < 4; t++) yield* streetLamp(ctx, out, lerp(xa, xb, r()) - ctx.x0, lerp(da, db, r()), { h: 4, color: r() < 0.5 ? LED : [1.0, 0.85, 0.6], R: 4 });
+    for (let t = 0; t < 4; t++) yield* streetLamp(ctx, out, lerp(xa, xb, r()) - ctx.x0, lerp(da, db, r()), { h: 4, color: r() < 0.5 ? LED : [1.0, 0.85, 0.6], R: 4, chase: false });
   }
 }
 

@@ -1500,7 +1500,7 @@ function* cyclist(ctx, out, f, r, load, night) {
   else ell(out, f, 0.02, 1.76, 0, 0.11, 0.07, 0.11, [0.08, 0.07, 0.07]);
   MV = m0;
   if (load) { const c = pick(LOADS, r); ell(out, f, -0.62, 1.08, 0, 0.26, 0.22, 0.3, c); ell(out, f, -0.6, 1.4, 0, 0.2, 0.14, 0.24, mul3(c, 0.85)); }
-  if (night) { const p = f.P(0.5, 0.95, 0); yield* lamp(ctx, out, p[0], p[1], -p[2], [1, 0.9, 0.62], { size: 0.1, halo: 1 }); }
+  if (night) { const p = f.P(0.5, 0.95, 0); yield* lamp(ctx, out, p[0], p[1], -p[2], [1, 0.9, 0.62], { size: 0.1, halo: 1, chase: false }); }
 }
 // A two-wheeled cart: a flat bed between spoked wheels, shafts forward, a load on it. The bed is
 // at u 0, the shafts run forward to u = `reach` at height `sh`.
@@ -1737,7 +1737,7 @@ function* bankScene(ctx, out, s, r, night) {
       strutM(out, tip[0], tip[1], tip[2], tip[0], wy + 0.1, tip[2] - 0.5, f.thin * 0.7, [0.7, 0.7, 0.68], 2, KO, STILL);
       out(tip[0], wy + 0.14, tip[2] - 0.5, 0.09 * kk, 0.09 * kk, 0.09 * kk, 0.78, 0.16, 0.1, 1, 0, 0, 0, 1, KO, STILL);
       ell(out, f, -0.2, 0.2, -0.5, 0.2, 0.18, 0.2, WICKER);
-      if (night) { const p = f.P(0.3, 0.45, 0.5); yield* lamp(ctx, out, p[0], p[1], -p[2], [1, 0.66, 0.32], { size: 0.12, halo: 1 }); }
+      if (night) { const p = f.P(0.3, 0.45, 0.5); yield* lamp(ctx, out, p[0], p[1], -p[2], [1, 0.66, 0.32], { size: 0.12, halo: 1, chase: false }); }
     }
   } else if (what === 'wash') {
     // washing clothes at the water's edge: squatting on the stones, bright cloth in the water
@@ -2373,7 +2373,7 @@ function* boat(ctx, out, x, y, d, r, night) {
     ell(out, f, -hl * 0.05, 0.3, 0.1, 0.27, 0.22, 0.27, WICKER);                                     // the fish basket
     const nc = 2 + Math.floor(r() * 3);
     for (let k = 0; k < nc; k++) cormorant(out, sub(f, hl * (0.3 + 0.22 * k), (k % 2 ? 0.25 : -0.2), 1.7 * kk, r() < 0.3 ? Math.PI : 0, 0.08), k === nc - 1 && r() < 0.6);
-    if (night) yield* lamp(ctx, out, x + dir * len * 0.45, y + 1.6, d, [1, 0.62, 0.3], { size: 0.12, halo: 1 });
+    if (night) yield* lamp(ctx, out, x + dir * len * 0.45, y + 1.6, d, [1, 0.62, 0.3], { size: 0.12, halo: 1, chase: false });
   } else {
     // long-tail boat: dark hull, an arched canopy of cane matting, a pennant at the stern
     const hc = [0.16, 0.14, 0.12];
@@ -2390,7 +2390,7 @@ function* boat(ctx, out, x, y, d, r, night) {
     strutM(out, sx, y + 0.5, -d, sx, y + 2.6, -d, 0.035, [0.3, 0.28, 0.24], 3, K, B);
     out(sx - dir * 0.4, y + 2.45, -d, 0.38, 0.14, 0.03, 0.74, 0.12, 0.09, 1, 0, 0, 0, 1, K, MOVE.FLAG);
     person(out, frame(sx + dir * 0.9, y + 0.55, d, dir > 0 ? 0 : Math.PI, PK * farK(d)), r, { pose: 'sit', seat: 0.1, arms: 'fwd' });
-    if (night) yield* lamp(ctx, out, x, y + 1.7, d - 0.8, [1, 0.8, 0.5], { size: 0.1, halo: 1 });
+    if (night) yield* lamp(ctx, out, x, y + 1.7, d - 0.8, [1, 0.8, 0.5], { size: 0.1, halo: 1, chase: false });
   }
   if (out.due()) yield;
 }
@@ -2877,7 +2877,7 @@ function* crossingLanes(ctx, out, W, dLo, dHi) {
           const c2 = k % 2 ? [0.72, 0.72, 0.7] : [0.62, 0.12, 0.1];
           out(wx - ctx.x0, y + 1.5 + k * 0.5, -6.8, 0.06, 0.25, 0.06, c2[0], c2[1], c2[2], 1, 0, 0, 0, 1, KIND.OTHER);
         }
-        if (isNight(ctx)) yield* lamp(ctx, out, wx - ctx.x0, y + 1.25, 6.6, [1, 0.25, 0.15], { size: 0.06, halo: 0.6 });
+        if (isNight(ctx)) yield* lamp(ctx, out, wx - ctx.x0, y + 1.25, 6.6, [1, 0.25, 0.15], { size: 0.06, halo: 0.6, chase: false });
       }
     }
   }

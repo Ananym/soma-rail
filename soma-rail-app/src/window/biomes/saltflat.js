@@ -632,7 +632,7 @@ function* shack(ctx, out, x, d, rng, night) {
   const wall = jitter([0.5, 0.44, 0.36], rng, 0.08);
   yield* house(ctx, out, x, d, { w: 6.5, depth: 4.5, h: 2.7, roofH: 0.8, wall, roof: [0.46, 0.34, 0.28], windows: true, chimney: false, windowColor: [0.16, 0.15, 0.14], rng, yaw: (rng() - 0.5) * 0.3 });
   yield* house(ctx, out, x + 8.5, d + 3, { w: 3.4, depth: 2.6, h: 2.1, roofH: 0.4, wall: mul3(wall, 0.9), roof: [0.5, 0.5, 0.48], windows: false, chimney: false, rng });
-  if (night) yield* lamp(ctx, out, x - 1.2, groundY(ctx, x, d) + 1.5, d - 2.3, [1, 0.82, 0.5], { size: 0.1 });
+  if (night) yield* lamp(ctx, out, x - 1.2, groundY(ctx, x, d) + 1.5, d - 2.3, [1, 0.82, 0.5], { size: 0.1, chase: false });
 }
 
 // A wrecked car, abandoned on the flat: rusted, windowless, sunk on its rims.

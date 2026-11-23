@@ -113,18 +113,18 @@ function lightState(ctx) {
 // ---------------------------------------------------------------------------------------------
 // Emit helpers
 // ---------------------------------------------------------------------------------------------
-function L(out, x, y, d, sx, sy, sz, c, o) { return out(x, y, -d, sx, sy, sz, c[0], c[1], c[2], o, 0, 0, 0, 1, KIND.LIGHT); }
+function L(out, x, y, d, sx, sy, sz, c, o, mv = 0) { return out(x, y, -d, sx, sy, sz, c[0], c[1], c[2], o, 0, 0, 0, 1, KIND.LIGHT, mv); }
 // A point light: a small bright core and at most a slightly larger faint halo.
-function point(out, x, y, d, c, r, halo = 0.12, hk = 3.2) {
-  L(out, x, y, d, r, r, r, c, 1);
-  if (halo > 0) L(out, x, y, d + 0.05, r * hk, r * hk, r * hk * 0.6, c, halo);
+function point(out, x, y, d, c, r, halo = 0.12, hk = 3.2, mv = 0) {
+  L(out, x, y, d, r, r, r, c, 1, mv);
+  if (halo > 0) L(out, x, y, d + 0.05, r * hk, r * hk, r * hk * 0.6, c, halo, mv);
 }
 // A pool of light lying on the ground: rx along the track, rz across.
 // It is cut into strips across the line of sight: splats are sorted by their centres, so one big
 // disc would be covered by every ground splat in front of its centre.
-function pool(out, x, y, d, rx, rz, c, o) {
+function pool(out, x, y, d, rx, rz, c, o, mv = 0) {
   const k = Math.max(1, Math.round(rz / 1.6)), sz = rz / k;
-  for (let i = 0; i < k; i++) L(out, x, y + 0.08, d - rz + (2 * i + 1) * sz, rx, Math.max(0.02, rx * 0.01), sz * 1.25, c, o);
+  for (let i = 0; i < k; i++) L(out, x, y + 0.08, d - rz + (2 * i + 1) * sz, rx, Math.max(0.02, rx * 0.01), sz * 1.25, c, o, mv);
 }
 function nat(out, x, y, d, sx, sy, sz, c, o = 1, kind = KIND.OTHER, move = 0) { return out(x, y, -d, sx, sy, sz, c[0], c[1], c[2], o, 0, 0, 0, 1, kind, move); }
 // A rigid movable thing (a vehicle, a fuel pump): MOVE.STILL, so nothing on the beat.
@@ -668,7 +668,7 @@ function* motorwayLamps(ctx, out, W, R, Ls, dz) {
         px = nx; py = ny;
       }
       for (const oh of spec[1]) {
-        if (Ls.on) { point(out, px, py - 0.4, D + oh, col, Math.max(0.16, 0.0017 * D), 0.12); pool(out, px, Y, D + oh, 12, 8, col, 0.12); }
+        if (Ls.on) { point(out, px, py - 0.4, D + oh, col, Math.max(0.16, 0.0017 * D), 0.12, 3.2, MOVE.CHASE); pool(out, px, Y, D + oh, 12, 8, col, 0.12, MOVE.CHASE); }
       }
       if (out.due()) yield;
       continue;
@@ -678,9 +678,9 @@ function* motorwayLamps(ctx, out, W, R, Ls, dz) {
       const dh = D + oh;
       bar(out, x, Y + H - 0.1, dCol, x, Y + H + 0.25, dh, r * 0.7, C.column, 2);
       if (Ls.on) {
-        point(out, x, Y + H + 0.05, dh, col, Math.max(0.15, 0.0017 * dh), 0.11, 3.4);
-        pool(out, x, Y, dh, 8, 8, col, 0.22);
-        pool(out, x, Y, dh, 3.6, 3.6, col, 0.32);
+        point(out, x, Y + H + 0.05, dh, col, Math.max(0.15, 0.0017 * dh), 0.11, 3.4, MOVE.CHASE);
+        pool(out, x, Y, dh, 8, 8, col, 0.22, MOVE.CHASE);
+        pool(out, x, Y, dh, 3.6, 3.6, col, 0.32, MOVE.CHASE);
       } else nat(out, x, Y + H + 0.1, dh, 0.35, 0.1, 0.2, [0.3, 0.3, 0.32]);
     }
     if (out.due()) yield;
@@ -968,8 +968,8 @@ function* bridge(ctx, out, R, bx, deckY, w, Ls, lamps, ramps, hs = 26) {
       const dd = D + o;
       if (!inBand(ctx, dd)) continue;
       bar(out, x - w / 2 - 0.3, deckY, dd, x - w / 2 - 0.3, deckY + 6, dd, thin(dd, 1.3), C.column, 2);
-      point(out, x - w / 2 + 0.5, deckY + 6, dd, SODIUM, Math.max(0.14, 0.0017 * dd), 0.12);
-      pool(out, x, deckY + 0.1, dd, 5, 5, SODIUM, 0.15);
+      point(out, x - w / 2 + 0.5, deckY + 6, dd, SODIUM, Math.max(0.14, 0.0017 * dd), 0.12, 3.2, MOVE.CHASE);
+      pool(out, x, deckY + 0.1, dd, 5, 5, SODIUM, 0.15, MOVE.CHASE);
     }
   }
 }
@@ -988,9 +988,9 @@ function* sideLamp(ctx, out, x, y, d, col, Ls, H = 10, reach = 0) {
   if (!inBand(ctx, d)) return;
   bar(out, x, y - 0.3, d, x, y + H, d, thin(d, 1.4), C.column, 3);
   if (Ls.on) {
-    point(out, x, y + H, d - reach, col, Math.max(0.15, 0.0017 * d), 0.11);
-    pool(out, x, y, d - reach, 9, 7, col, 0.12);
-    pool(out, x, y, d - reach, 4, 3.2, col, 0.15);
+    point(out, x, y + H, d - reach, col, Math.max(0.15, 0.0017 * d), 0.11, 3.2, MOVE.CHASE);
+    pool(out, x, y, d - reach, 9, 7, col, 0.12, MOVE.CHASE);
+    pool(out, x, y, d - reach, 4, 3.2, col, 0.15, MOVE.CHASE);
   }
   if (out.due()) yield;
 }
@@ -1663,14 +1663,14 @@ function* villages(ctx, out, W, Ls, dz) {
         const wx = v.cx + k * 30, d = v.dc - 4;
         if (!inBand(ctx, d)) continue;
         const x = wx - ctx.x0, y = W.H(wx, d);
-        point(out, x, y + 6, d, lampC, Math.max(0.3, 0.0017 * d), d < 900 ? 0.1 : 0);
-        if (d < 900) pool(out, x, y, d, 8, 5, lampC, 0.1);
+        point(out, x, y + 6, d, lampC, Math.max(0.3, 0.0017 * d), d < 900 ? 0.1 : 0, 3.2, MOVE.CHASE);
+        if (d < 900) pool(out, x, y, d, 8, 5, lampC, 0.1, MOVE.CHASE);
       }
       for (let k = 1; k < nl; k++) {
         const d = v.dc + k * 26;
         if (!inBand(ctx, d)) continue;
         const wx = v.cx + 8, x = wx - ctx.x0;
-        point(out, x, W.H(wx, d) + 6, d, lampC, Math.max(0.3, 0.0017 * d), 0);
+        point(out, x, W.H(wx, d) + 6, d, lampC, Math.max(0.3, 0.0017 * d), 0, 3.2, MOVE.CHASE);
       }
     }
     if (v.church && inBand(ctx, v.dc + 18)) {

@@ -2218,8 +2218,8 @@ function* borgoDraw(ctx, out, W, v, lights, sz) {
 function* lampPost(ctx, out, W, wx, d) {
   const y = W.H(wx, d), x = wx - ctx.x0;
   bar(out, x, y, -d, x, y + 3.6, -d, Math.max(0.05, thin(d)), [0.12, 0.12, 0.12], 2, KIND.FENCE);
-  out(x, y + 3.7, -d, 0.16, 0.2, 0.16, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT);
-  out(x, y + 3.7, -(d - 0.1), 0.9, 0.9, 0.3, LAMP[0], LAMP[1], LAMP[2], 0.15, 0, 0, 0, 1, KIND.LIGHT);
+  out(x, y + 3.7, -d, 0.16, 0.2, 0.16, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
+  out(x, y + 3.7, -(d - 0.1), 0.9, 0.9, 0.3, LAMP[0], LAMP[1], LAMP[2], 0.15, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
   if (out.due()) yield;
 }
 
@@ -2609,7 +2609,7 @@ function* pergolaTable(ctx, out, W, wx, d, yaw, r, lights) {
       yield* person(ctx, out, p[0] + ctx.x0, base, -p[2], { yaw: yaw + (sg > 0 ? -Math.PI / 2 : Math.PI / 2), coat: shirt, pose: 'sit', hat: r() < 0.25 ? 'sun' : null, hair: r() < 0.5 ? [0.16, 0.12, 0.08] : [0.6, 0.58, 0.54], kid, k: FIG * 0.95 });
     }
   }
-  if (lights) for (let j = 0; j < 9; j++) { const p = f.P((j - 4) * L * 0.12, 2.5 - 0.15 * Math.sin(j * 0.8), 0); out(p[0], p[1], p[2], 0.1, 0.1, 0.1, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT); }
+  if (lights) for (let j = 0; j < 9; j++) { const p = f.P((j - 4) * L * 0.12, 2.5 - 0.15 * Math.sin(j * 0.8), 0); out(p[0], p[1], p[2], 0.1, 0.1, 0.1, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE); }
 }
 // A paddock beside a villa: a post-and-rail fence and horses.
 function* paddock(ctx, out, W, wx, d, seed) {

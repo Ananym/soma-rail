@@ -146,9 +146,9 @@ function glow(out, x, y, d, c, r, halo = 0.14, hk = 4, move = 0) {
   if (halo > 0) L(out, x, y, d + 0.05, r * hk, r * hk, r * hk * 0.6, c, halo, move);
 }
 // A pool of light lying on the snow, cut into strips across the line of sight (splats sort by centre).
-function pool(out, x, y, d, rx, rz, c, o) {
+function pool(out, x, y, d, rx, rz, c, o, move = 0) {
   const k = Math.max(1, Math.round(rz / 1.6)), sz = rz / k;
-  for (let i = 0; i < k; i++) L(out, x, y + 0.06, d - rz + (2 * i + 1) * sz, rx, Math.max(0.02, rx * 0.01), sz * 1.25, c, o);
+  for (let i = 0; i < k; i++) L(out, x, y + 0.06, d - rz + (2 * i + 1) * sz, rx, Math.max(0.02, rx * 0.01), sz * 1.25, c, o, move);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1344,7 +1344,7 @@ function* xmasTree(ctx, out, W, wx, d, rng, o = {}) {
 }
 // A string of lights hung between two points (splat-space x, y and distance d): bulbs on a sagging
 // cord, colours in turn.
-function lightString(out, a, b, sag, d, rng, warm = false) {
+function lightString(out, a, b, sag, d, rng, warm = false, move = 0) {
   const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
   const n = Math.max(3, Math.round(len / 0.9));
   const br = Math.max(0.05, 0.0009 * d);
@@ -1353,7 +1353,7 @@ function lightString(out, a, b, sag, d, rng, warm = false) {
     const t = i / n;
     const px = lerp(a[0], b[0], t), py = lerp(a[1], b[1], t) - sag * 4 * t * (1 - t), pd = lerp(a[2], b[2], t);
     const c = warm ? LAMP : BULBS[(i + off) % BULBS.length];
-    L(out, px, py, pd, br, br, br, c, 1);
+    L(out, px, py, pd, br, br, br, c, 1, move);
   }
 }
 
@@ -1419,8 +1419,8 @@ function* streetLamp(ctx, out, W, wx, d, dk, H = 4.6) {
   const sc = snowTone(0, 1, 0.3);
   out(x, y + H + 0.42, -d, 0.26, 0.08, 0.26, sc[0], sc[1], sc[2], 1, 0, 0, 0, 1, KIND.OTHER);
   out(x, y + H + 0.32, -d, 0.22, 0.06, 0.22, 0.1, 0.1, 0.1, 1, 0, 0, 0, 1, KIND.OTHER);
-  glow(out, x, y + H + 0.05, d, LAMP, Math.max(0.11, 0.0013 * d), 0.16, 4.5);
-  if (dk > 0.2) { pool(out, x, y, d, 5, 4, LAMP, 0.12 * dk); pool(out, x, y, d, 2.2, 1.8, LAMP, 0.16 * dk); }
+  glow(out, x, y + H + 0.05, d, LAMP, Math.max(0.11, 0.0013 * d), 0.16, 4.5, MOVE.CHASE);
+  if (dk > 0.2) { pool(out, x, y, d, 5, 4, LAMP, 0.12 * dk, MOVE.CHASE); pool(out, x, y, d, 2.2, 1.8, LAMP, 0.16 * dk, MOVE.CHASE); }
   if (out.due()) yield;
 }
 
@@ -1786,12 +1786,12 @@ function* pondProps(ctx, out, W, p, dLo, dHi) {
     if (inD(d, dLo, dHi) && inX(ctx, wx, 1)) yield* streetLamp(ctx, out, W, wx, d, dk, 4);
     // the lamps light the ice and the skaters on it
     const id = p.dc + (d - p.dc) * 0.55, ix = p.cx + (wx - p.cx) * 0.6;
-    if (dk > 0.2 && inD(id, dLo, dHi) && inX(ctx, ix, 2)) pool(out, ix - ctx.x0, p.level + 0.04, id, p.rx * 0.4, p.rd * 0.45, LAMP, 0.1 * dk);
+    if (dk > 0.2 && inD(id, dLo, dHi) && inX(ctx, ix, 2)) pool(out, ix - ctx.x0, p.level + 0.04, id, p.rx * 0.4, p.rd * 0.45, LAMP, 0.1 * dk, MOVE.CHASE);
   }
   for (let j = 0; j + 1 < lamps.length; j++) {
     const [ax, ad] = lamps[j], [bx, bd] = lamps[j + 1];
     if (!inD((ad + bd) / 2, dLo, dHi) || !inX(ctx, (ax + bx) / 2, 10)) continue;
-    lightString(out, [ax - ctx.x0, W.H(ax, ad) + 3.8, ad], [bx - ctx.x0, W.H(bx, bd) + 3.8, bd], 0.5, ad, r);
+    lightString(out, [ax - ctx.x0, W.H(ax, ad) + 3.8, ad], [bx - ctx.x0, W.H(bx, bd) + 3.8, bd], 0.5, ad, r, false, MOVE.CHASE);
   }
   // a bench on the near bank
   const bx = p.cx + (r() - 0.5) * p.rx, bd = p.dc - p.rd * 1.2;
@@ -2388,8 +2388,8 @@ function* haltProps(ctx, out, W) {
         if (x < 0 || x >= ctx.length) continue;
         bar(out, x, 0.6, -6.5, x, 4.4, -6.5, 0.07, [0.16, 0.16, 0.17], 5, KIND.MAST);
         bar(out, x, 4.4, -6.5, x, 4.4, -6.1, 0.05, [0.16, 0.16, 0.17], 1, KIND.MAST);
-        glow(out, x, 4.25, 6.15, LAMP, 0.1, 0.2, 4);
-        if (dk > 0.2) { pool(out, x, 0.62, 4.6, 3.5, 1.6, LAMP, 0.18 * dk); pool(out, x, W.H(wx, 8.5), 8.5, 4, 2.2, LAMP, 0.12 * dk); }
+        glow(out, x, 4.25, 6.15, LAMP, 0.1, 0.2, 4, MOVE.CHASE);
+        if (dk > 0.2) { pool(out, x, 0.62, 4.6, 3.5, 1.6, LAMP, 0.18 * dk, MOVE.CHASE); pool(out, x, W.H(wx, 8.5), 8.5, 4, 2.2, LAMP, 0.12 * dk, MOVE.CHASE); }
       }
     }
     // shelter and nameboard (beyond 6 m)

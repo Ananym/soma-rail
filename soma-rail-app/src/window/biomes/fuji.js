@@ -1846,8 +1846,8 @@ function* villages(ctx, out, W, dLo, dHi, opts = {}) {
         if (!inX(ctx, wx, 1) || blocked(W, wx, ld, 0)) continue;
         const y = W.H(wx, ld);
         strut(out, wx - ctx.x0, y, -ld, wx - ctx.x0, y + 5.2, -ld, 0.08, [0.4, 0.4, 0.4], 3, 1, KIND.OTHER);
-        out(wx - ctx.x0, y + 5.3, -(ld - 0.4), 0.16, 0.12, 0.16, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT);
-        out(wx - ctx.x0, y + 5.2, -(ld - 0.45), 0.9, 0.9, 0.4, LAMP[0], LAMP[1], LAMP[2], 0.16, 0, 0, 0, 1, KIND.LIGHT);
+        out(wx - ctx.x0, y + 5.3, -(ld - 0.4), 0.16, 0.12, 0.16, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
+        out(wx - ctx.x0, y + 5.2, -(ld - 0.45), 0.9, 0.9, 0.4, LAMP[0], LAMP[1], LAMP[2], 0.16, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
       }
     }
     if ((opts.topo || 0) > 0 && night && v.houses.length > 4) yield* risingLanterns(ctx, out, W, v, dLo, dHi, opts.topo);
@@ -1884,8 +1884,8 @@ function* roadside(ctx, out, W, dLo, dHi) {
       if ((i % 4) === 0) for (const sz of [-1, 1]) out(x + 0.35, y + 8, z + sz * 0.35, 0.28, 0.42, 0.28, 0.5, 0.52, 0.5, 1, 0, 0, 0, 1, KIND.MAST);
       if (night && (i % 3) === 0) {
         strut(out, x, y + 7.5, z, x, y + 7.8, z + 1.4, 0.05, [0.4, 0.4, 0.4], 2, 1, KIND.MAST);
-        out(x, y + 7.75, z + 1.45, 0.14, 0.07, 0.14, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT);
-        out(x, y + 7.6, z + 1.5, 0.8, 0.8, 0.4, LAMP[0], LAMP[1], LAMP[2], 0.15, 0, 0, 0, 1, KIND.LIGHT);
+        out(x, y + 7.75, z + 1.45, 0.14, 0.07, 0.14, LAMP[0], LAMP[1], LAMP[2], 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
+        out(x, y + 7.6, z + 1.5, 0.8, 0.8, 0.4, LAMP[0], LAMP[1], LAMP[2], 0.15, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
       }
     }
     // the span to the next pole
@@ -2685,8 +2685,8 @@ function* crossing(ctx, out, W) {
         beam(out, px + t0 * 1.5, y0 + 3.45 + sl * t0 * 1.0, z + 0.1, px + t1 * 1.5, y0 + 3.45 + sl * t1 * 1.0, z + 0.1, 0.06, s % 2 ? blk : yel, 1, 1, KIND.OTHER);
       }
       for (const u of [-0.32, 0.32]) {
-        out(px + u, y0 + 2.6, z + 0.12, 0.13, 0.13, 0.06, 1, 0.12, 0.06, 1, 0, 0, 0, 1, KIND.LIGHT);
-        out(px + u, y0 + 2.6, z + 0.16, 0.5, 0.5, 0.2, 1, 0.12, 0.06, 0.16, 0, 0, 0, 1, KIND.LIGHT);
+        out(px + u, y0 + 2.6, z + 0.12, 0.13, 0.13, 0.06, 1, 0.12, 0.06, 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
+        out(px + u, y0 + 2.6, z + 0.16, 0.5, 0.5, 0.2, 1, 0.12, 0.06, 0.16, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
         out(px + u, y0 + 2.6, z + 0.04, 0.2, 0.2, 0.05, 0.08, 0.08, 0.08, 1, 0, 0, 0, 1, KIND.OTHER);
       }
       // the barrier, down across its half of the lane
@@ -2818,8 +2818,8 @@ function* lineside(ctx, out, W) {
       if (x < 0 || x >= ctx.length) continue;
       strut(out, x, 1.0, -6.6, x, 5.4, -6.6, 0.07, [0.42, 0.44, 0.45], 4, 1, KIND.OTHER);
       if (night) {
-        out(x, 5.3, -6.3, 0.5, 0.06, 0.12, 1, 0.97, 0.9, 1, 0, 0, 0, 1, KIND.LIGHT);
-        out(x, 5.2, -6.2, 1.2, 0.8, 0.5, 1, 0.97, 0.9, 0.12, 0, 0, 0, 1, KIND.LIGHT);
+        out(x, 5.3, -6.3, 0.5, 0.06, 0.12, 1, 0.97, 0.9, 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
+        out(x, 5.2, -6.2, 1.2, 0.8, 0.5, 1, 0.97, 0.9, 0.12, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
       } else out(x, 5.3, -6.4, 0.5, 0.06, 0.12, 0.7, 0.7, 0.68, 1, 0, 0, 0, 1, KIND.OTHER);
     }
     const sx = pf.x0 + pf.len * 0.45 - ctx.x0;
