@@ -320,8 +320,9 @@ const outDir = process.argv[2] || '.';
     await page.screenshot({ path: path.join(outDir, `app-${name}.png`), timeout: 120000 }).catch(() => console.log('(screenshot skipped: renderer too slow)'));
     // Only the case that breaks the streams on purpose may log load failures.
     let ours = c.noisy ? errors.filter((e) => !/Failed to load resource|net::ERR|Audio error|server attempts/i.test(e)) : errors;
-    // The minutes-long IDLE run rides out the odd dropped poll through a proxy; nothing else is excused.
-    if (process.env.IDLE === '1') for (let i = ours.length - 1; i >= 0; i--) if (/net::ERR_CONNECTION_RESET/.test(ours[i])) ours.splice(i, 1);
+    // A case that runs for minutes (the tuned one, and any IDLE run) rides out the odd dropped poll
+    // through a proxy: a connection reset on a request that is simply made again. Nothing else is excused.
+    if (process.env.IDLE === '1' || c.distraction) for (let i = ours.length - 1; i >= 0; i--) if (/net::ERR_CONNECTION_RESET/.test(ours[i])) ours.splice(i, 1);
     if (youtube.length) ours.push(`requests to YouTube hosts: ${youtube.length}`);
     console.log(`\n== ${name}`); console.log(JSON.stringify(state)); if (brake) console.log(c.touch ? 'touch:' : c.budgetControl ? 'budget:' : 'brake:', JSON.stringify(brake));
     if (ours.length) { console.log('errors:'); for (const e of ours) console.log('  ' + e); }
