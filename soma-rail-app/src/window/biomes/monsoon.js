@@ -36,7 +36,7 @@
 // also move: copy what you need from it before calling anything that may lay out a site.)
 //
 // The beat: buildings, trees and lights answer it (beatKinds); people and animals flash
-// (MOVE.FLASH), boats and parked mopeds swell (MOVE.BEAT), whatever rides the road rides.
+// (MOVE.FLASH), boats and parked mopeds are rigid (MOVE.STILL), whatever rides the road rides.
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     giant lotus standing in the paddies and ponds
@@ -107,7 +107,7 @@ const CAMY = 2.6;
 // ---------------------------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------------------------
-const B = MOVE.BEAT, FL = MOVE.FLASH, KO = KIND.OTHER;
+const STL = MOVE.STILL, FL = MOVE.FLASH, KO = KIND.OTHER;   // STL: rigid things (boats, parked mopeds): nothing on the beat
 function hourOf(ctx) { const h = ctx.hour != null ? ctx.hour : 12; return ((h % 24) + 24) % 24; }
 // Under the cloud the lights come on early: from late afternoon until well after dawn.
 function lightsOn(ctx) { const h = hourOf(ctx); return h > 15.5 || h < 7.2; }
@@ -921,7 +921,7 @@ function* tinShop(ctx, out, hs, night) {
   for (const ex of [x0 + 0.15, x0 + w - 0.15]) bar(out, ex, y0, zf + ad, ex, y0 + 1.9, zf + ad, Math.max(0.05, thin(hs.d)), [0.4, 0.4, 0.4], 2, K);
   // stools and crates
   const nst = 2 + Math.floor(r() * 4);
-  for (let k = 0; k < nst; k++) { const c = pick([[0.72, 0.1, 0.1], [0.12, 0.3, 0.68], [0.14, 0.5, 0.24]], r); out(x0 + 0.5 + r() * (w - 1), y0 + 0.25, zf + 0.6 + r() * (ad - 0.8), 0.2, 0.22, 0.2, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING); }
+  for (let k = 0; k < nst; k++) { const c = pick([[0.72, 0.1, 0.1], [0.12, 0.3, 0.68], [0.14, 0.5, 0.24]], r); out(x0 + 0.5 + r() * (w - 1), y0 + 0.25, zf + 0.6 + r() * (ad - 0.8), 0.2, 0.22, 0.2, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING, MOVE.STILL); }
   if (out.due()) yield;
 }
 
@@ -968,9 +968,9 @@ function* stiltHouse(ctx, out, hs, night) {
     const ex = sg < 0 ? x0 + 0.6 : x0 + w - 0.6, sl = Math.hypot(1.6, rh);
     yield* panel(out, [ex + sg * 1.6, yr - ov * rh / (dep / 2 + ov), zf - dep - ov], [0, 0, 1], [-sg * 1.6 / sl, rh / sl, 0], dep + 2 * ov, sl, s, (a, b) => (Math.abs(a - 0.5) * 2 > 1 - b * 0.9 ? null : mul3(PALMTHATCH, sg < 0 ? 0.92 : 0.66)), K, r);
   }
-  // the ladder
-  bar(out, x0 + w * 0.5 - 0.3, hs.y, zf + 1.2, x0 + w * 0.5 - 0.3, y1, zf + 0.05, Math.max(0.05, thin(hs.d) * 0.7), post, 2, K);
-  bar(out, x0 + w * 0.5 + 0.3, hs.y, zf + 1.2, x0 + w * 0.5 + 0.3, y1, zf + 0.05, Math.max(0.05, thin(hs.d) * 0.7), post, 2, K);
+  // the ladder (a loose, rigid thing: MOVE.STILL)
+  bar(out, x0 + w * 0.5 - 0.3, hs.y, zf + 1.2, x0 + w * 0.5 - 0.3, y1, zf + 0.05, Math.max(0.05, thin(hs.d) * 0.7), post, 2, K, MOVE.STILL);
+  bar(out, x0 + w * 0.5 + 0.3, hs.y, zf + 1.2, x0 + w * 0.5 + 0.3, y1, zf + 0.05, Math.max(0.05, thin(hs.d) * 0.7), post, 2, K, MOVE.STILL);
   if (out.due()) yield;
 }
 
@@ -1122,7 +1122,7 @@ function* kiln(ctx, out, k) {
     out(cx + t * 26, y0 + ch + 2 + t * 10, zf - 5 + t * 3, sz, sz * 0.7, sz, 0.5 + 0.2 * t, 0.5 + 0.2 * t, 0.52 + 0.2 * t, 0.55 - 0.35 * t, 0, 0, 0, 1, KO, MOVE.VAPOUR);
   }
   // stacks of bricks drying under thatch beside it
-  for (let j = 0; j < 3; j++) out(x - 14 - j * 5, y0 + 0.8, zf - 2, 2, 0.8, 1.2, brick[0] * 1.1, brick[1] * 1.1, brick[2] * 1.1, 1, 0, 0, 0, 1, K);
+  for (let j = 0; j < 3; j++) out(x - 14 - j * 5, y0 + 0.8, zf - 2, 2, 0.8, 1.2, brick[0] * 1.1, brick[1] * 1.1, brick[2] * 1.1, 1, 0, 0, 0, 1, K, MOVE.STILL);
 }
 const KILNCELL = 2300;
 function kilnAt(W, i) {
@@ -1605,9 +1605,9 @@ function* market(ctx, out, W, m, night) {
     const tilt = 0.5, sl = Math.hypot(tdp, tilt);
     yield* panel(out, [tx - tw / 2, y + th + tilt, -(td + tdp)], [1, 0, 0], [0, -tilt / sl, tdp / sl], tw, sl, s, () => soft(c, 0.7), KO, r, 0.1);
     for (let j = 0; j < 3; j++) out(tx - tw / 2 + (j + 0.5) * tw / 3, y + th - 0.1, -td + 0.05, tw / 6, 0.14, 0.04, c[0] * 0.9, c[1] * 0.9, c[2] * 0.9, 1, 0, 0, 0, 1, KO, MOVE.FLAG);
-    for (const ex of [tx - tw / 2 + 0.2, tx + tw / 2 - 0.2]) bar(out, ex, y, -td, ex, y + th, -td, Math.max(0.05, thin(m.d)), [0.5, 0.44, 0.28], 2, KIND.BUILDING);
+    for (const ex of [tx - tw / 2 + 0.2, tx + tw / 2 - 0.2]) bar(out, ex, y, -td, ex, y + th, -td, Math.max(0.05, thin(m.d)), [0.5, 0.44, 0.28], 2, KIND.BUILDING, MOVE.STILL);
     // the trays of produce and a seller
-    for (let j = 0; j < 3; j++) { const g = pick(GOODS, r); out(tx - 1.2 + j * 1.2, y + 0.55, -(td + 1.2), 0.5, 0.22, 0.45, g[0], g[1], g[2], 1, 0, 0, 0, 1, KIND.BUILDING); }
+    for (let j = 0; j < 3; j++) { const g = pick(GOODS, r); out(tx - 1.2 + j * 1.2, y + 0.55, -(td + 1.2), 0.5, 0.22, 0.45, g[0], g[1], g[2], 1, 0, 0, 0, 1, KIND.BUILDING, MOVE.STILL); }
     if (r() < 0.8) personAt(out, tx + (r() - 0.5) * 2, y, td + 2.2, r() < 0.5 ? 0 : Math.PI, r, { pose: r() < 0.5 ? 'squat' : 'stand', hat: true });
     if (night && r() < 0.7) out(tx, y + th - 0.3, -(td + 1), 0.12, 0.12, 0.12, 1, 0.86, 0.6, 1, 0, 0, 0, 1, KIND.LIGHT);
     if (out.due()) yield;
@@ -1649,7 +1649,7 @@ function* stationDraw(ctx, out, W, st, night) {
 // so that they read from a moving train; a fixed handful of shaped splats each, whatever the
 // budget; limbs, poles and cords are bars sized from distance. Each figure is built in its own
 // frame: u along its heading, h up, v to its left, in life-size metres times the frame's scale.
-// People and animals flash on the beat (MOVE.FLASH); boats and parked machines swell (MOVE.BEAT);
+// People and animals flash on the beat (MOVE.FLASH); boats and parked machines do nothing on the beat (MOVE.STILL);
 // whatever rides the road is carried along it (MOVE.RIDE). (After karst.js.)
 // ---------------------------------------------------------------------------------------------
 const PK = 1.8, BK = 1.8;
@@ -1807,7 +1807,7 @@ function duck(out, f, c) {
 
 // A moped and its rider in a poncho that covers rider and handlebars, sometimes a passenger behind
 // (a second poncho) or a child in front, a load strapped behind; the headlamp always lit in the
-// rain. f.move is MOVE.RIDE on the road (or BEAT when parked).
+// rain. f.move is MOVE.RIDE on the road (or STILL when parked).
 function moped(out, f, r, o = {}) {
   const pc = o.poncho || pick(PONCHO, r), body = pick([[0.7, 0.7, 0.68], [0.12, 0.12, 0.14], [0.6, 0.12, 0.1], [0.2, 0.3, 0.5], [0.74, 0.62, 0.3]], r);
   const tyre = [0.07, 0.07, 0.07];
@@ -1886,7 +1886,7 @@ function sampan(out, f, r, night) {
   pf.move = FL;
   person(out, pf, r, { arms: 'pole', hat: true, poncho: r() < 0.3 ? pick(PONCHO, r) : null });
   lim(out, f, f.P(-len * 0.7 + 0.25, 1.4 + 0.3, 0.1), f.P(-len * 1.5, -0.4, 0.3), 0.03, [0.46, 0.4, 0.26], 4);   // the oar
-  if (night) { const p = f.P(len * 0.5, 1.2, 0); out(p[0], p[1], p[2], 0.1, 0.1, 0.1, 1, 0.76, 0.42, 1, 0, 0, 0, 1, KIND.LIGHT, f.move); }
+  if (night) { const p = f.P(len * 0.5, 1.2, 0); out(p[0], p[1], p[2], 0.1, 0.1, 0.1, 1, 0.76, 0.42, 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.BEAT); }   // (the lamp is a light: it keeps the beat)
 }
 // The ferry: a flat steel deck with rails, a small wheelhouse at one end, mopeds and people
 // standing in ponchos for the crossing.
@@ -1901,7 +1901,7 @@ function ferry(out, f, r, night) {
   const fl = (g) => { g.move = FL; return g; };   // (the people aboard flash, as people do)
   for (let k = 0; k < m; k++) moped(out, fl(sub(f, -len * 0.35 + k * 2.3, (k % 2 ? 0.9 : -0.9), f.k, 0, 0.75)), r, { pillion: r() < 0.3 });
   for (let k = 0; k < 3; k++) person(out, fl(sub(f, len * 0.55 + k * 0.8, (r() - 0.5) * 2.6, f.k, Math.PI / 2 * (r() - 0.5), 0.75)), r, { poncho: r() < 0.6 ? pick(PONCHO, r) : null, umbrella: r() < 0.3 ? pick(UMBRELLA, r) : null });
-  if (night) { const p = f.P(-len * 0.8, 2.6, 1.22); out(p[0], p[1], p[2], 0.4 * f.k, 0.25 * f.k, 0.05, 1, 0.85, 0.55, 1, 0, 0, 0, 1, KIND.LIGHT, f.move); }
+  if (night) { const p = f.P(-len * 0.8, 2.6, 1.22); out(p[0], p[1], p[2], 0.4 * f.k, 0.25 * f.k, 0.05, 1, 0.85, 0.55, 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.BEAT); }   // (the lamp is a light: it keeps the beat)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1933,14 +1933,14 @@ function* roadTraffic(ctx, out, W, dLo, dHi, night) {
     if (out.due()) yield;
   }
 }
-// Mopeds parked on the frontage of a village street, in front of the shops (still: they swell).
+// Mopeds parked on the frontage of a village street, in front of the shops (rigid: nothing on the beat).
 function* parked(ctx, out, W, dLo, dHi) {
   for (const { i, wx0 } of cellsAround(ctx, 9, 4)) {
     const r = worldRng(ctx, 211, i);
     if (r() > 0.4) continue;
     const wx = wx0 + 9 * r(), x = xAt(W, wx), d = x.rd + 3.8, y = x.rdY + 0.02, rd = x.rd;   // (copied: villageYard moves X)
     if (d < dLo || d >= dHi || !villageYard(W, wx, rd + 6)) continue;
-    moped(out, frame(wx - ctx.x0, y, d, Math.PI / 2 + (r() - 0.5) * 0.4, 1.75, B), r, { parked: true });
+    moped(out, frame(wx - ctx.x0, y, d, Math.PI / 2 + (r() - 0.5) * 0.4, 1.75, STL), r, { parked: true });
   }
   if (out.due()) yield;
 }
@@ -2080,7 +2080,7 @@ function* riverLife(ctx, out, W, dLo, dHi, night) {
     const d = x.rc + (r() - 0.5) * x.rw * 0.6;
     if (d < dLo || d >= dHi || !inX(ctx, wx, 10)) continue;
     note('sampan', wx, d);
-    const f = frame(wx - ctx.x0, x.wl, d, (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.4, PK * farK(d) * 1.4, B);
+    const f = frame(wx - ctx.x0, x.wl, d, (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.4, PK * farK(d) * 1.4, STL);
     ripple(out, wx - ctx.x0, x.wl, d, 6 * f.k, 0.8 * f.k);
     sampan(out, f, r, night);
     if (out.due()) yield;
@@ -2091,7 +2091,7 @@ function* riverLife(ctx, out, W, dLo, dHi, night) {
     const wx = wx0 + FERRYCELL * (0.3 + 0.4 * r()), x = xAt(W, wx), d = x.rc - x.rw * 0.12;
     if (d < dLo || d >= dHi || !inX(ctx, wx, 25)) continue;
     note('ferry', wx, d);
-    const f = frame(wx - ctx.x0, x.wl, d, r() < 0.5 ? 0 : Math.PI, 2.25 * farK(d), B);
+    const f = frame(wx - ctx.x0, x.wl, d, r() < 0.5 ? 0 : Math.PI, 2.25 * farK(d), STL);
     ripple(out, wx - ctx.x0, x.wl, d, 14 * f.k, 2.5 * f.k);
     ferry(out, f, r, night);
     // the landing on the near bank: a ramp of concrete down to the water
@@ -2515,7 +2515,7 @@ export const monsoonBiome = {
   // day and dusk under cloud; never night (the rain needs light to be seen)
   slots: { dawn: 0.12, day: 0.5, dusk: 0.38, night: 0 },
   // Buildings, trees and lights answer the beat; people and animals flash (MOVE.FLASH); boats and
-  // vehicles tag their own splats MOVE.BEAT. The land, the forest mass and the water stay still.
+  // vehicles tag their own splats MOVE.STILL. The land, the forest mass and the water stay still.
   beatKinds: [KIND.BUILDING, KIND.TREE, KIND.LIGHT],
   sky: { overcast: 1 },
   generators: { trackside, near, mid, far },

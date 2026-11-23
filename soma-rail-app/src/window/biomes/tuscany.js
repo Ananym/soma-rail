@@ -49,7 +49,7 @@
 // share (nothing should: see scan scripts).
 //
 // The beat: trees, buildings and lights answer it (beatKinds); vehicles, crates, barrels and bales
-// tag their own splats with MOVE.BEAT; people and animals flash (MOVE.FLASH), the hovering kestrel
+// tag their own splats with MOVE.STILL (rigid: nothing on the beat); people and animals flash (MOVE.FLASH), the hovering kestrel
 // too (it holds its place over the ground, so it is not carried along); cyclists ride (MOVE.RIDE)
 // where the white road runs straight and level for sixty metres either way, and stand still
 // (FLASH) elsewhere; swallows fly (MOVE.FLY). The vines, the ground and the hills stay still.
@@ -160,7 +160,7 @@ const CAMY = 2.6;
 // Small helpers (after alps.js)
 // ---------------------------------------------------------------------------------------------
 const SX = SUN[0], SY = SUN[1], SZ = SUN[2];
-const B = MOVE.BEAT, FL = MOVE.FLASH;
+const STL = MOVE.STILL, FL = MOVE.FLASH;   // STL: rigid things (vehicles, crates, barrels, bales): nothing on the beat
 function hourOf(ctx) { const h = ctx.hour != null ? ctx.hour : 12; return ((h % 24) + 24) % 24; }
 // Lights are on from just before the dusk slot until just after the dawn one.
 function lightsOn(ctx) { const h = hourOf(ctx); return h > 18.8 || h < 6.9; }
@@ -1369,7 +1369,7 @@ function* bales(ctx, out, W, plots, dLo, dHi) {
   }
 }
 function* bale(ctx, out0, W, wx, d, ca, sa, h) {
-  const out = withMove(out0, B), x = wx - ctx.x0, R = 0.95, Wd = 0.75;
+  const out = withMove(out0, STL), x = wx - ctx.x0, R = 0.95, Wd = 0.75;
   const y = W.H(wx, d) + R * 0.92, z = -d;
   const q = quatXTo(ca, 0, -sa);
   const tone = 0.85 + 0.3 * ((h >>> 12) & 255) / 255;
@@ -2025,7 +2025,7 @@ function lemonPot(ctx, out, W, wx, d) {
 }
 // Barrels in a winery's yard: rows of oak casks on their sides, iron hoops; a basket press.
 function* barrels(ctx, out0, W, wx, d, yaw, r) {
-  const out = withMove(out0, B), y0 = W.H(wx, d), K = KIND.OTHER;
+  const out = withMove(out0, STL), y0 = W.H(wx, d), K = KIND.OTHER;
   const ca = Math.cos(yaw), sa = Math.sin(yaw);
   const q = quatXTo(-sa, 0, -ca);
   for (let row = 0; row < 2; row++) {
@@ -2048,7 +2048,7 @@ function* barrels(ctx, out0, W, wx, d, yaw, r) {
 }
 // Grape crates stacked in a pile: red, green, or the old wooden ones.
 function* crates(ctx, out0, W, wx, d, n, r, full = true) {
-  const out = withMove(out0, B), y0 = W.H(wx, d), x0 = wx - ctx.x0, K = KIND.OTHER;
+  const out = withMove(out0, STL), y0 = W.H(wx, d), x0 = wx - ctx.x0, K = KIND.OTHER;
   const col = r() < 0.45 ? C.crateRed : r() < 0.6 ? C.crateGreen : C.crateWood;
   for (let j = 0; j < n; j++) {
     const col_ = j % 3, lay = Math.floor(j / 3);
@@ -2312,7 +2312,7 @@ function* towns(ctx, out, W, dLo, dHi, plan, lights, sk, dz = {}) {
 // Figures: animals and people (after alps.js). A handful of shaped, oriented splats each, drawn
 // larger than life so they read in one still at 40 to 150 m. Each part is placed in the figure's
 // own frame (u forward, h up, v to its left) and turned by its heading. People and animals flash on
-// the beat (MOVE.FLASH); the things they ride or work with swell (MOVE.BEAT); a cyclist rides
+// the beat (MOVE.FLASH); the things they ride or work with are rigid (MOVE.STILL); a cyclist rides
 // (MOVE.RIDE, the bicycle with it).
 // ---------------------------------------------------------------------------------------------
 const FIG = 1.6;
@@ -2461,7 +2461,7 @@ function* cyclist(ctx, out0, wx, y, d, yaw, r, move = FL) {
 // with grapes), 'ape' (the three-wheeled Piaggio truck), 'vespa', 'car' (a small old Fiat).
 function* vehicle(ctx, out0, W, wx, d, yaw, type, r, k = 1.35, yAt = null) {
   const y = (yAt != null ? yAt : W.H(wx, d)) + 0.05, rng = r, K_ = KIND.OTHER;
-  const out = withMove(out0, B);
+  const out = withMove(out0, STL);
   const s = Math.max(0.1, detail(out0, d, 0.9));
   const box = function* (u0, L, Wd, H, y0, paintSide, top) {
     const f = frame(ctx, wx, y + y0 * k, d, yaw);

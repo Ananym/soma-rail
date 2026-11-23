@@ -21,7 +21,7 @@
 // (xTable) on a world-x grid, so the fill reads them with one lookup and both chunks at a seam agree.
 //
 // The beat: palms (KIND.TREE) and buildings (KIND.BUILDING) swell on the beat; jungle crowns are
-// KIND.HEDGE and stay still; boats are tagged MOVE.BEAT by hand; people and animals MOVE.FLASH (they brighten, they do not swell). Washing,
+// KIND.HEDGE and stay still; boats, the ferry, stalls, nets and balls are rigid (MOVE.STILL); people and animals MOVE.FLASH (they brighten, they do not swell). Washing,
 // pennants, hammocks and drying nets flutter (MOVE.FLAG); spray, smoke and the volcano's plume billow
 // (MOVE.VAPOUR); rain falls (MOVE.FALL).
 //
@@ -100,7 +100,8 @@ const LANTERNS = [[1.0, 0.32, 0.14], [1.0, 0.72, 0.2], [1.0, 0.5, 0.5], [0.4, 0.
 const SEA = -3.4;                                     // sea level: the line runs on a low embankment
 const TERRAIN = { cutting: 1.2, roll: 2, rollScale: 300, rise: 0, hills: 120, hillScale: 2000, mountains: 0, mountainScale: 9000, mountainStart: 9000 };
 const OFF = 0;    // a still splat
-const B = MOVE.BEAT;      // things: boats, lights, nets
+const B = MOVE.BEAT;      // lights (lanterns, lamps, flames) keep the beat
+const ST = MOVE.STILL;    // rigid things: boats, stalls, nets, a ball: nothing on the beat
 const F = MOVE.FLASH;     // people and animals
 
 // ---------------------------------------------------------------------------------------------
@@ -170,6 +171,16 @@ const lit = (c) => { const l = [c[0], c[1], c[2]]; l.light = true; return l; };
 // An out that tags every splat with a motion class.
 function withMove(out, move) {
   const m = (x, y, z, sx, sy, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = KIND.OTHER, mv) => out(x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind, mv != null && mv !== 0 ? mv : move);
+  m.q = (x, y, z, sx, sy, sz, c, o, q, k) => m(x, y, z, sx, sy, sz, c[0], c[1], c[2], o, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, k);
+  m.due = out.due; m.left = out.left; m.density = out.density; m.detailK = out.detailK; m.ctx = out.ctx;
+  Object.defineProperty(m, 'n', { get: () => out.n });
+  Object.defineProperty(m, 'limit', { get: () => out.limit, set: (v) => { out.limit = v; } });
+  return m;
+}
+
+// An out that tags every splat MOVE.STILL except lights (KIND.LIGHT), which keep whatever tag they had.
+function stillOut(out) {
+  const m = (x, y, z, sx, sy, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = KIND.OTHER, mv) => out(x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind, kind === KIND.LIGHT ? mv : mv != null && mv !== 0 ? mv : ST);
   m.q = (x, y, z, sx, sy, sz, c, o, q, k) => m(x, y, z, sx, sy, sz, c[0], c[1], c[2], o, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, k);
   m.due = out.due; m.left = out.left; m.density = out.density; m.detailK = out.detailK; m.ctx = out.ctx;
   Object.defineProperty(m, 'n', { get: () => out.n });
@@ -1016,10 +1027,11 @@ function* stiltHouse(ctx, out, W, hs, x, d, night) {
   const ft = faceTone(C.plank, fx, fz);
   yield* panel(out, [x - ex * (hs.w / 2 + 0.3) + fx * (hs.dep / 2 + 0.3), yf - 0.3, -d + -ez * (hs.w / 2 + 0.3) + fz * (hs.dep / 2 + 0.3)], [ex, 0, ez], [0, 1, 0], hs.w + 0.6, 0.3, s, () => mul3(ft, 0.7), KIND.BUILDING, r);
   yield* hut(ctx, out, x, yf, d, { w: hs.w, dep: hs.dep, h: 2.5, roof: 'gable', tin: hs.tin, rust: hs.tin && r() < 0.5, wall: hs.wall, yaw, lit: night ? 0.7 : 0, seed: hs.seed, s, rng: r });
-  // the ladder up to the door
+  // the ladder up to the door (a loose, rigid thing: MOVE.STILL)
+  const lad = stillOut(out);
   const lx0 = x + fx * (hs.dep / 2 + 1.1), lz0 = -d + fz * (hs.dep / 2 + 1.1);
-  for (const sg of [-0.35, 0.35]) strut(out, lx0 + ex * sg, y0, lz0 + ez * sg, lx0 + ex * sg - fx * 1.0, yf, lz0 + ez * sg - fz * 1.0, limb(0.05, d), C.post, 2, 1, KIND.BUILDING);
-  for (let k = 1; k < 4; k++) { const t = k / 4; strut(out, lx0 - ex * 0.35 - fx * t, y0 + t * hs.stilt, lz0 - ez * 0.35 - fz * t, lx0 + ex * 0.35 - fx * t, y0 + t * hs.stilt, lz0 + ez * 0.35 - fz * t, limb(0.04, d), C.post, 1, 1, KIND.BUILDING); }
+  for (const sg of [-0.35, 0.35]) strut(lad, lx0 + ex * sg, y0, lz0 + ez * sg, lx0 + ex * sg - fx * 1.0, yf, lz0 + ez * sg - fz * 1.0, limb(0.05, d), C.post, 2, 1, KIND.BUILDING);
+  for (let k = 1; k < 4; k++) { const t = k / 4; strut(lad, lx0 - ex * 0.35 - fx * t, y0 + t * hs.stilt, lz0 - ez * 0.35 - fz * t, lx0 + ex * 0.35 - fx * t, y0 + t * hs.stilt, lz0 + ez * 0.35 - fz * t, limb(0.04, d), C.post, 1, 1, KIND.BUILDING); }
   if (night) yield* lamp(ctx, out, x + fx * (hs.dep / 2 + 0.2), yf + 2.2, d - fz * (hs.dep / 2 + 0.2), WARM, { size: 0.12, halo: 1 });
   if (hs.wash) yield* washing(out, x - ex * hs.w * 0.2, d - hs.dep / 2 - 4.5, W.H(hs.wx, d - hs.dep / 2 - 4.5), r);
 }
@@ -1102,10 +1114,11 @@ function* beachBar(ctx, out, W, x, d, r, night) {
   const ct = faceTone(C.bamboo, 0, 1);
   yield* panel(out, [x - w * 0.35, y0, -(d - dep * 0.2)], [1, 0, 0], [0, 1, 0], w * 0.7, 1.15, s, (a, b) => (b > 0.85 ? mul3(C.plank, 1.1) : mul3(ct, 0.9 + 0.12 * ((Math.floor(a * 18) & 1)))), KIND.BUILDING, r);
   for (const sg of [-1, 1]) yield* panel(out, [x + sg * w * 0.35, y0, -(d - dep * 0.2)], [0, 0, -1], [0, 1, 0], dep * 0.5, 1.15, s, () => faceTone(C.bamboo, sg, 0), KIND.BUILDING, r);
+  const stools = stillOut(out);   // the stools are loose, rigid things: MOVE.STILL
   for (let k = 0; k < 4; k++) {
     const sx = x - w * 0.3 + k * w * 0.2;
-    strut(out, sx, y0, -(d - dep * 0.2 - 0.9), sx, y0 + 0.75, -(d - dep * 0.2 - 0.9), limb(0.04, d), [0.25, 0.2, 0.15], 1, 1, KIND.BUILDING);
-    out(sx, y0 + 0.78, -(d - dep * 0.2 - 0.9), 0.22, 0.05, 0.22, 0.6, 0.25, 0.15, 1, 0, 0, 0, 1, KIND.BUILDING);
+    strut(stools, sx, y0, -(d - dep * 0.2 - 0.9), sx, y0 + 0.75, -(d - dep * 0.2 - 0.9), limb(0.04, d), [0.25, 0.2, 0.15], 1, 1, KIND.BUILDING);
+    stools(sx, y0 + 0.78, -(d - dep * 0.2 - 0.9), 0.22, 0.05, 0.22, 0.6, 0.25, 0.15, 1, 0, 0, 0, 1, KIND.BUILDING);
   }
   // inside: bottles on a shelf, and a warm light by night
   if (night) yield* lamp(ctx, out, x, y0 + h - 0.4, d, WARM, { size: 0.16, halo: 1.6 });
@@ -1117,7 +1130,7 @@ function* beachBar(ctx, out, W, x, d, r, night) {
     if (night) {
       out(lx, ly, -(d - dep / 2 - 0.7), 0.17, 0.2, 0.17, lc[0], lc[1], lc[2], 1, 0, 0, 0, 1, KIND.LIGHT, B);
       out(lx, ly, -(d - dep / 2 - 0.65), 0.55, 0.55, 0.3, lc[0], lc[1], lc[2], 0.16, 0, 0, 0, 1, KIND.LIGHT, B);
-    } else out(lx, ly, -(d - dep / 2 - 0.7), 0.17, 0.2, 0.17, lc[0] * 0.75, lc[1] * 0.75, lc[2] * 0.75, 1, 0, 0, 0, 1, KIND.OTHER, B);
+    } else out(lx, ly, -(d - dep / 2 - 0.7), 0.17, 0.2, 0.17, lc[0] * 0.75, lc[1] * 0.75, lc[2] * 0.75, 1, 0, 0, 0, 1, KIND.OTHER, ST);   // (by day the lantern's body is rigid; lit at night it is a light)
   }
   strut(out, x - w / 2 - 0.3, y0 + h - 0.35, -(d - dep / 2 - 0.7), x + w / 2 + 0.3, y0 + h - 0.35, -(d - dep / 2 - 0.7), 0.015, [0.2, 0.18, 0.15], 4, 1, KIND.OTHER);
   // a few people at the counter and on the sand
@@ -1191,7 +1204,8 @@ function* pier(ctx, out, W, site, dLo, dHi, night) {
   const fd = d1 + 7;
   if (fd >= dLo && fd < dHi) yield* ferry(ctx, out, x + 8, fd, r, night);
 }
-function* ferry(ctx, out, x, d, r, night) {
+function* ferry(ctx, out0, x, d, r, night) {
+  const out = stillOut(out0);   // a vessel: rigid, nothing on the beat (its lit windows keep their tag)
   const s = Math.max(0.12, detail(out, d, 1.0));
   const L = 30 + 10 * r(), Bm = 7;
   const hullC = [0.8, 0.79, 0.76], stripe = [[0.15, 0.3, 0.6], [0.7, 0.15, 0.12], [0.15, 0.45, 0.35]][Math.floor(r() * 3)];
@@ -1223,16 +1237,16 @@ function* ferry(ctx, out, x, d, r, night) {
   yield* blob(ctx, out, x - L * 0.25, hy1 + 5.8, d, 0.9, 1.4, 0.9, { n: 14, color: stripe, rng: r, kind: K, inner: 0.2, clump: 0 });
   strut(out, x + L * 0.15, hy1 + 4.8, -d, x + L * 0.15, hy1 + 9, -d, limb(0.06, d), [0.3, 0.3, 0.3], 3, 1, K);
   if (night) {
-    yield* lamp(ctx, out, x + L * 0.15, hy1 + 9.1, d, [1, 0.95, 0.85], { size: 0.14, halo: 1 });
-    yield* lamp(ctx, out, x + L / 2 + 1, hy1 + 1, d - 1, [0.3, 1, 0.4], { size: 0.12, halo: 0.6 });
+    yield* lamp(ctx, out0, x + L * 0.15, hy1 + 9.1, d, [1, 0.95, 0.85], { size: 0.14, halo: 1 });
+    yield* lamp(ctx, out0, x + L / 2 + 1, hy1 + 1, d - 1, [0.3, 1, 0.4], { size: 0.12, halo: 0.6 });
   }
 }
 
 // --- Boats ---------------------------------------------------------------------------------------
 // An outrigger canoe: a slim dark hull, a float on booms to one side, sometimes a crab-claw sail and
-// a paddler. A handful of shaped splats tagged MOVE.BEAT (the paddler is MOVE.FLASH). y is the water (or sand) level.
+// a paddler. A handful of shaped splats, rigid (MOVE.STILL; the paddler is MOVE.FLASH). y is the water (or sand) level.
 function* canoe(ctx, out, x, y, d, r, opts = {}) {
-  const K = opts.kind != null ? opts.kind : KIND.OTHER, mv = opts.move != null ? opts.move : B;
+  const K = opts.kind != null ? opts.kind : KIND.OTHER, mv = opts.move != null ? opts.move : ST;
   const dir = r() < 0.5 ? -1 : 1, L = 5.5 + 2.5 * r();
   const hull = [[0.22, 0.16, 0.11], [0.15, 0.3, 0.55], [0.7, 0.2, 0.14], [0.75, 0.72, 0.62]][Math.floor(r() * 4)];
   const side = r() < 0.5 ? -1 : 1;
@@ -1248,14 +1262,14 @@ function* canoe(ctx, out, x, y, d, r, opts = {}) {
     const fx = x + dir * L * 0.1, h = 4.2 + r();
     strutM(out, fx, y + 0.4, -d, fx - dir * 1.2, y + h, -d, limb(0.04, d), [0.4, 0.33, 0.22], 3, K, mv);
     strutM(out, fx, y + 0.4, -d, fx - dir * 3.0, y + h * 0.55, -d, limb(0.04, d), [0.4, 0.33, 0.22], 3, K, mv);
-    yield* patch(out, [fx, y + 0.6, -d], [fx - dir * 1.15, y + h - 0.2, -d], [fx, y + 0.6, -d], [fx - dir * 2.8, y + h * 0.58, -d], Math.max(0.2, detail(out, d, 1.0)), (a, b) => faceTone(sc, 0, 1), K, r, 0.12, mv === B ? B : mv);
+    yield* patch(out, [fx, y + 0.6, -d], [fx - dir * 1.15, y + h - 0.2, -d], [fx, y + 0.6, -d], [fx - dir * 2.8, y + h * 0.58, -d], Math.max(0.2, detail(out, d, 1.0)), (a, b) => faceTone(sc, 0, 1), K, r, 0.12, mv);
   }
   if (out.due()) yield;
 }
 // A fishing boat: a painted plank hull with an upswept bow, a small cabin, a mast and now and then a
 // sail; a lamp on the mast by night.
 function* fishingBoat(ctx, out, x, y, d, r, night, opts = {}) {
-  const K = opts.kind != null ? opts.kind : KIND.OTHER, mv = opts.move != null ? opts.move : B;
+  const K = opts.kind != null ? opts.kind : KIND.OTHER, mv = opts.move != null ? opts.move : ST;
   const dir = r() < 0.5 ? -1 : 1, L = 8 + 4 * r(), Bm = 2.4;
   const body = [[0.2, 0.42, 0.62], [0.75, 0.74, 0.7], [0.62, 0.18, 0.12], [0.2, 0.5, 0.4]][Math.floor(r() * 4)];
   const trim = [[0.78, 0.62, 0.12], [0.75, 0.74, 0.7], [0.2, 0.3, 0.55]][Math.floor(r() * 3)];
@@ -1336,7 +1350,7 @@ function* children(ctx, out, x, d, r) {
     for (let j = 0; j < 3; j++) out(cx + (r() - 0.5) * 1.2, SEA + 0.2 + 0.4 * r(), -(cd - 0.3), 0.18 + 0.15 * r(), 0.25 + 0.2 * r(), 0.12, 0.8, 0.8, 0.8, 0.8, 0, 0, 0, 1, KIND.OTHER, B);
     out(cx, SEA + 0.03, -cd, 0.9, 0.04, 0.6, 0.72, 0.8, 0.78, 0.8, 0, 0, 0, 1, KIND.GROUND);      // the ripple ring
   }
-  if (r() < 0.6) out(x + (r() - 0.5) * 4, SEA + 1.2 + r(), -d, 0.2, 0.2, 0.2, 0.78, 0.6, 0.12, 1, 0, 0, 0, 1, KIND.OTHER, B);   // a ball in the air
+  if (r() < 0.6) out(x + (r() - 0.5) * 4, SEA + 1.2 + r(), -d, 0.2, 0.2, 0.2, 0.78, 0.6, 0.12, 1, 0, 0, 0, 1, KIND.OTHER, ST);   // a ball in the air
 }
 // A fisherman knee-deep in the lagoon casting a round net: the net opens in the air in front of him
 // as a ring of weighted edge with lines running back to his hands.
@@ -1350,8 +1364,8 @@ function* netCaster(ctx, out, x, d, r) {
     const a0 = (k / nc) * Math.PI * 2, a1 = ((k + 1) / nc) * Math.PI * 2;
     const p0 = [cx + Math.cos(a0) * R, cy + Math.sin(a0) * R * 0.25, -(d + Math.sin(a0) * R * 0.9)];
     const p1 = [cx + Math.cos(a1) * R, cy + Math.sin(a1) * R * 0.25, -(d + Math.sin(a1) * R * 0.9)];
-    strutM(out, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], nr * 1.6, col, 1, KIND.OTHER, B);
-    if (k % 2 === 0) strutM(out, hx, hy, -d, p0[0], p0[1], p0[2], nr, col, 2, KIND.OTHER, B, 0.7);
+    strutM(out, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], nr * 1.6, col, 1, KIND.OTHER, ST);
+    if (k % 2 === 0) strutM(out, hx, hy, -d, p0[0], p0[1], p0[2], nr, col, 2, KIND.OTHER, ST, 0.7);
   }
   out(x, SEA + 0.03, -d, 1.1, 0.04, 0.8, 0.72, 0.8, 0.78, 0.8, 0, 0, 0, 1, KIND.GROUND);
 }
@@ -1456,7 +1470,8 @@ function parrot(out, x, y, d, r, dir) {
   for (const sg of [-1, 1]) flyWing(out, x, y, z, x - dir * 0.15 * S, y + 0.4 * S, z + sg * 0.55 * S, limb(0.07, d), pal[1], 2, y, K);
 }
 // A market stall: a table of fruit under a striped awning on four poles, a vendor and a customer.
-function* marketStall(ctx, out, W, x, d, r) {
+function* marketStall(ctx, out0, W, x, d, r) {
+  const out = stillOut(out0);   // the stall and its goods are rigid; the people go through out0
   const s = Math.max(0.1, detail(out, d, 1.0));
   const y0 = W.H(ctx.x0 + x, d) - 0.05, w = 3.2 + r(), dep = 2;
   const aw = [[0.72, 0.16, 0.12], [0.2, 0.42, 0.62], [0.75, 0.6, 0.12], [0.3, 0.5, 0.3]][Math.floor(r() * 4)];
@@ -1468,8 +1483,8 @@ function* marketStall(ctx, out, W, x, d, r) {
     const c = fruit[Math.floor(r() * fruit.length)];
     out(x - w * 0.42 + k * w * 0.12, y0 + 0.95, -(d - dep * 0.2 + (r() - 0.5) * 0.6), 0.22, 0.14, 0.22, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.BUILDING);
   }
-  yield* person(out, x + (r() - 0.5) * w * 0.6, y0, d + 0.6, r, { hat: r() < 0.5 });
-  yield* person(out, x + (r() - 0.5) * w, y0, d - dep - 1.0, r, { arms: 'carry' });
+  yield* person(out0, x + (r() - 0.5) * w * 0.6, y0, d + 0.6, r, { hat: r() < 0.5 });
+  yield* person(out0, x + (r() - 0.5) * w, y0, d - dep - 1.0, r, { arms: 'carry' });
 }
 // Smoke from a cooking fire, rising and spreading (MOVE.VAPOUR).
 function smoke(out, x, y, d, r, k = 1) {
@@ -2408,7 +2423,7 @@ export const tropicsBiome = {
   // the trackside is mostly beach or verge below the window; the sea and the forest need the rest
   shares: { trackside: 0.15, near: 0.43, mid: 0.26, far: 0.16 },
   // palms (KIND.TREE) and buildings answer the beat; the jungle (KIND.HEDGE) and the land stay
-  // still; boats are tagged MOVE.BEAT by hand; people and animals MOVE.FLASH (they brighten, they do not swell). Lights always do.
+  // still; boats, the ferry, stalls, nets and balls are rigid (MOVE.STILL); people and animals MOVE.FLASH (they brighten, they do not swell). Lights always do.
   beatKinds: [KIND.TREE, KIND.BUILDING],
   sky: { stars: 1.15, deep: 0.4, milkyWay: 0.5 },
   generators: { trackside, near, mid, far },

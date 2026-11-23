@@ -1912,11 +1912,11 @@ function trackX(p, dd) { return p.x + p.tan * dd + (25 + 0.04 * dd) * (2 * noise
 function* places(ctx, out, W) {
   const sc = sandCtx(ctx, W);
   const night = isNight(ctx);
-  const beat = withMove(out, MOVE.BEAT);                   // the lorry
+  const still = withMove(out, MOVE.STILL);                 // the lorry (rigid: nothing on the beat)
   const flash = withMove(out, MOVE.FLASH);                 // people and animals
   for (const { i } of cellsAround(ctx, PC, 1500)) {
     for (const p of placesIn(W, i)) {
-      if (p.kind === 'track') { yield* trackPlace(ctx, out, W, p, beat); continue; }
+      if (p.kind === 'track') { yield* trackPlace(ctx, out, W, p, still); continue; }
       if (p.d < ctx.zNear || p.d >= ctx.zFar) continue;
       if (p.x < ctx.x0 - 240 || p.x > ctx.x0 + ctx.length + 240) continue;
       const r = makeRng(p.seed);
@@ -2157,7 +2157,7 @@ function* townPlace(ctx, out, W, p, r, night) {
 // poles beside it marching off, and a lorry on it trailing a plume of dust. Drawn piecewise by every
 // band it passes through.
 const TRACK_END = 1800;
-function* trackPlace(ctx, out, W, p, beat) {
+function* trackPlace(ctx, out, W, p, still) {
   const dA = Math.max(ctx.zNear, 4.5), dB = Math.min(ctx.zFar, TRACK_END);
   if (dB <= dA) return;
   // quick reject: does the track come near this chunk?
@@ -2240,20 +2240,20 @@ function* trackPlace(ctx, out, W, p, beat) {
       const paint = [[0.62, 0.62, 0.58], [0.2, 0.3, 0.5], [0.55, 0.16, 0.12], [0.3, 0.38, 0.24]][Math.floor(r() * 4)];
       const sz = Math.max(0.12, detail(out, td, 0.45)) / BIG.lorry;
       note('lorry', wx, td, 2.8 * BIG.lorry);
-      beat = magOut(beat, X, y, -td, BIG.lorry);           // the lorry and its dust, larger than life
+      still = magOut(still, X, y, -td, BIG.lorry);           // the lorry and its dust, larger than life
       out = magOut(out, X, y, -td, BIG.lorry);
       const at = (a) => [X + ex * a, td + ed * a];
       const L = p.lorry ? 1 : 0.7;
       // cab, then the bed and (on a lorry) its tarpaulined load
       let [cx, cd] = at(-2.2 * L);
-      yield* box(beat, cx, y + 0.7, cd, ex, ed, 2.1, 2.3, 2.1 * (p.lorry ? 1 : 0.75), paint, sz, KIND.OTHER, r);
+      yield* box(still, cx, y + 0.7, cd, ex, ed, 2.1, 2.3, 2.1 * (p.lorry ? 1 : 0.75), paint, sz, KIND.OTHER, r);
       [cx, cd] = at(0.9 * L);
-      yield* box(beat, cx, y + 0.7, cd, ex, ed, 4.2 * L, 2.4, 0.7, mul3(paint, 0.8), sz, KIND.OTHER, r);
-      if (p.lorry) { [cx, cd] = at(0.9); yield* box(beat, cx, y + 1.4, cd, ex, ed, 3.8, 2.3, 1.4, [0.42, 0.4, 0.3], sz, KIND.OTHER, r); }
+      yield* box(still, cx, y + 0.7, cd, ex, ed, 4.2 * L, 2.4, 0.7, mul3(paint, 0.8), sz, KIND.OTHER, r);
+      if (p.lorry) { [cx, cd] = at(0.9); yield* box(still, cx, y + 1.4, cd, ex, ed, 3.8, 2.3, 1.4, [0.42, 0.4, 0.3], sz, KIND.OTHER, r); }
       // the wheels, dark, on the side toward the line
       for (const a of [-2.6 * L, 0.3 * L, 2.3 * L]) {
         const [wxx, wdd] = at(a);
-        out(wxx + ed * 1.2, y + 0.5, -(wdd - ex * 1.2), 0.48, 0.48, 0.15, 0.07, 0.07, 0.07, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);
+        out(wxx + ed * 1.2, y + 0.5, -(wdd - ex * 1.2), 0.48, 0.48, 0.15, 0.07, 0.07, 0.07, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);
       }
       // dust boiling up behind it, away from the line, so the lorry stands in front of its plume
       for (let k = 0; k < 22; k++) {
@@ -3024,8 +3024,8 @@ export const dunesBiome = {
   terrain: { cutting: 0.8, roll: 4, rollScale: 260, rise: 0.02, hills: 70, hillScale: 1800, mountains: 0, mountainScale: 9000, mountainStart: 7000 },
   hazeDist: 9000,
   // On the beat, the things a viewer can pick out swell and brighten: palms, acacias, tamarisks and
-  // cacti (TREE), houses, towers, forts, tents and wells (BUILDING), and, tagged MOVE.BEAT by hand,
-  // lorries. Camels, goats, people, oryx, ostriches, perched vultures and foxes are tagged MOVE.FLASH
+  // cacti (TREE), houses, towers, forts, tents and wells (BUILDING). The lorry is rigid and tagged MOVE.STILL.
+  // Camels, goats, people, oryx, ostriches, perched vultures and foxes are tagged MOVE.FLASH
   // (they brighten without swelling). The sand itself (the high ground here) stays still: a swell
   // on a mass of overlapping sand splats could not be seen.
   beatKinds: [KIND.TREE, KIND.BUILDING],

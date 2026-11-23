@@ -126,18 +126,20 @@ function pool(out, x, y, d, rx, rz, c, o) {
   const k = Math.max(1, Math.round(rz / 1.6)), sz = rz / k;
   for (let i = 0; i < k; i++) L(out, x, y + 0.08, d - rz + (2 * i + 1) * sz, rx, Math.max(0.02, rx * 0.01), sz * 1.25, c, o);
 }
-function nat(out, x, y, d, sx, sy, sz, c, o = 1, kind = KIND.OTHER) { return out(x, y, -d, sx, sy, sz, c[0], c[1], c[2], o, 0, 0, 0, 1, kind); }
+function nat(out, x, y, d, sx, sy, sz, c, o = 1, kind = KIND.OTHER, move = 0) { return out(x, y, -d, sx, sy, sz, c[0], c[1], c[2], o, 0, 0, 0, 1, kind, move); }
+// A rigid movable thing (a vehicle, a fuel pump): MOVE.STILL, so nothing on the beat.
+function natS(out, x, y, d, sx, sy, sz, c, o = 1) { return nat(out, x, y, d, sx, sy, sz, c, o, KIND.OTHER, MOVE.STILL); }
 // A box lying along x: centre of its base (x, y, d), length L, height H, width Wd across, splat size
 // s. The camera-facing side, both ends and the top, in three tones so the corners read.
-function vbox(out, x, y, d, L, H, Wd, c, s) {
+function vbox(out, x, y, d, L, H, Wd, c, s, move = 0) {
   const nu = Math.max(1, Math.round(L / (s * 1.4))), nv = Math.max(1, Math.round(H / (s * 1.4))), nw = Math.max(1, Math.round(Wd / (s * 1.4)));
   const su = L / nu * 0.66, sv = H / nv * 0.66, sw = Wd / nw * 0.66;
   for (let i = 0; i < nu; i++) {
     const px = x - L / 2 + (i + 0.5) * L / nu;
-    for (let j = 0; j < nv; j++) nat(out, px, y + (j + 0.5) * H / nv, d - Wd / 2, su, sv, 0.05, mul3(c, 0.85));
-    for (let k = 0; k < nw; k++) nat(out, px, y + H, d - Wd / 2 + (k + 0.5) * Wd / nw, su, 0.05, sw, mul3(c, 1.05));
+    for (let j = 0; j < nv; j++) nat(out, px, y + (j + 0.5) * H / nv, d - Wd / 2, su, sv, 0.05, mul3(c, 0.85), 1, KIND.OTHER, move);
+    for (let k = 0; k < nw; k++) nat(out, px, y + H, d - Wd / 2 + (k + 0.5) * Wd / nw, su, 0.05, sw, mul3(c, 1.05), 1, KIND.OTHER, move);
   }
-  for (const e of [-1, 1]) for (let j = 0; j < nv; j++) for (let k = 0; k < nw; k++) nat(out, x + e * L / 2, y + (j + 0.5) * H / nv, d - Wd / 2 + (k + 0.5) * Wd / nw, 0.05, sv, sw, mul3(c, e < 0 ? 1 : 0.6));
+  for (const e of [-1, 1]) for (let j = 0; j < nv; j++) for (let k = 0; k < nw; k++) nat(out, x + e * L / 2, y + (j + 0.5) * H / nv, d - Wd / 2 + (k + 0.5) * Wd / nw, 0.05, sv, sw, mul3(c, e < 0 ? 1 : 0.6), 1, KIND.OTHER, move);
 }
 // A thin straight member between two points given as (x, y, d).
 function bar(out, ax, ay, ad, bx, by, bd, r, c, n = 2, kind = KIND.OTHER, o = 1) { strut(out, ax, ay, -ad, bx, by, -bd, r, c, n, o, kind); }
@@ -1144,7 +1146,7 @@ function* serviceArea(ctx, out, W, R, Ls, dz) {
         else nat(out, cx + ex * cw / 2, ch + 0.25, pd, 0.06, 0.42, 0.56, mul3(brand, 0.7));
       }
       // pumps and the forecourt lit beneath
-      for (const ox of [-10, 0, 10]) for (const od of [-3, 3]) nat(out, cx + ox, Tp + 0.9, cd + od, 0.5, 0.9, 0.35, [0.7, 0.7, 0.68]);
+      for (const ox of [-10, 0, 10]) for (const od of [-3, 3]) natS(out, cx + ox, Tp + 0.9, cd + od, 0.5, 0.9, 0.35, [0.7, 0.7, 0.68]);
       if (Ls.on) { pool(out, cx, Tp, cd - 2, 26, 16, CANOPY, 0.2); pool(out, cx, Tp, cd - 2, 16, 9, CANOPY, 0.22); }
       if (out.due()) yield;
     }
@@ -1207,8 +1209,8 @@ function* serviceArea(ctx, out, W, R, Ls, dz) {
     const px = x - 60 + (k % 20) * 5.2 + r() * 0.6, pd = D + 100 + Math.floor(k / 20) * 14;
     if (r() < 0.35 || !inBand(ctx, pd)) continue;
     const cc = [[0.1, 0.1, 0.11], [0.5, 0.5, 0.52], [0.35, 0.1, 0.08], [0.1, 0.14, 0.28], [0.6, 0.6, 0.58]][Math.floor(r() * 5)];
-    nat(out, px, Tp + 0.65, pd, 0.9, 0.42, 2.0, cc);
-    nat(out, px, Tp + 1.2, pd + 0.2, 0.7, 0.3, 1.1, [0.1, 0.11, 0.13]);
+    natS(out, px, Tp + 0.65, pd, 0.9, 0.42, 2.0, cc);
+    natS(out, px, Tp + 1.2, pd + 0.2, 0.7, 0.3, 1.1, [0.1, 0.11, 0.13]);
     if (out.due()) yield;
   }
   for (let k = 0; k < 8; k++) {
@@ -1226,15 +1228,15 @@ function* lorry(ctx, out, x, y, d, r, Ls, mode) {
   const s = 0.9;
   // trailer: the side facing the camera, the far-side ends, the roof
   for (let a = 0; a < len / s; a++) {
-    for (let b = 0; b < 3; b++) nat(out, x + 1 + (a + 0.5) * s, y + 1.3 + b * 0.95, d - 1.25, s * 0.62, 0.6, 0.06, mul3(box, b === 2 ? 1 : 0.92), 1, KIND.OTHER);
-    nat(out, x + 1 + (a + 0.5) * s, y + 4.05, d, s * 0.62, 0.06, 1.25, mul3(box, 1.05), 1, KIND.OTHER);
+    for (let b = 0; b < 3; b++) natS(out, x + 1 + (a + 0.5) * s, y + 1.3 + b * 0.95, d - 1.25, s * 0.62, 0.6, 0.06, mul3(box, b === 2 ? 1 : 0.92));
+    natS(out, x + 1 + (a + 0.5) * s, y + 4.05, d, s * 0.62, 0.06, 1.25, mul3(box, 1.05));
   }
-  for (const ex of [1, 1 + len]) for (let b = 0; b < 3; b++) nat(out, x + ex, y + 1.3 + b * 0.95, d, 0.06, 0.6, 1.2, mul3(box, 0.8), 1, KIND.OTHER);
+  for (const ex of [1, 1 + len]) for (let b = 0; b < 3; b++) natS(out, x + ex, y + 1.3 + b * 0.95, d, 0.06, 0.6, 1.2, mul3(box, 0.8));
   // cab
-  for (let b = 0; b < 3; b++) nat(out, x - cabL / 2 + 0.5, y + 0.9 + b * 0.85, d - 1.2, cabL * 0.55, 0.5, 0.06, [0.22, 0.24, 0.3], 1, KIND.OTHER);
-  nat(out, x - cabL + 0.6, y + 1.8, d, 0.06, 1.0, 1.2, [0.2, 0.22, 0.27], 1, KIND.OTHER);
+  for (let b = 0; b < 3; b++) natS(out, x - cabL / 2 + 0.5, y + 0.9 + b * 0.85, d - 1.2, cabL * 0.55, 0.5, 0.06, [0.22, 0.24, 0.3]);
+  natS(out, x - cabL + 0.6, y + 1.8, d, 0.06, 1.0, 1.2, [0.2, 0.22, 0.27]);
   // wheels
-  for (const wx of [x - 0.5, x + 9, x + 10.4, x + 11.8]) nat(out, wx, y + 0.5, d - 1.2, 0.5, 0.5, 0.15, [0.06, 0.06, 0.06], 1, KIND.OTHER);
+  for (const wx of [x - 0.5, x + 9, x + 10.4, x + 11.8]) natS(out, wx, y + 0.5, d - 1.2, 0.5, 0.5, 0.15, [0.06, 0.06, 0.06]);
   if (!Ls.on) return;
   L(out, x - 0.6, y + 2.2, d - 1.26, 0.5, 0.3, 0.04, WARM[0], 0.5);     // a light on in the cab
   if (mode === 'parked') return;
@@ -1249,14 +1251,14 @@ function* lorry(ctx, out, x, y, d, r, Ls, mode) {
 function* recovery(ctx, out, x, y, d, r, Ls) {
   const s = 0.7;
   // the car
-  nat(out, x, y + 0.6, d, 2.0, 0.42, 0.85, [0.35, 0.1, 0.08]);
-  nat(out, x - 0.25, y + 1.15, d, 1.1, 0.3, 0.7, [0.1, 0.11, 0.13]);
+  natS(out, x, y + 0.6, d, 2.0, 0.42, 0.85, [0.35, 0.1, 0.08]);
+  natS(out, x - 0.25, y + 1.15, d, 1.1, 0.3, 0.7, [0.1, 0.11, 0.13]);
   // the truck behind it (towards +x: traffic comes from there): a cab and a flat bed as boxes with
   // their sides, ends and tops (it was a few plates facing the line, a yellow blob from the side)
   const tx = x + 8;
-  vbox(out, tx + 3, y + 0.9, d, 8, 0.5, 2.3, [0.62, 0.6, 0.5], s);
-  vbox(out, tx - 2.4, y + 0.7, d, 2.2, 2.1, 2.3, [0.7, 0.62, 0.2], s * 0.7);
-  for (const wx of [tx - 2.2, tx + 4.5]) nat(out, wx, y + 0.5, d - 1.2, 0.5, 0.5, 0.15, [0.06, 0.06, 0.06]);
+  vbox(out, tx + 3, y + 0.9, d, 8, 0.5, 2.3, [0.62, 0.6, 0.5], s, MOVE.STILL);
+  vbox(out, tx - 2.4, y + 0.7, d, 2.2, 2.1, 2.3, [0.7, 0.62, 0.2], s * 0.7, MOVE.STILL);
+  for (const wx of [tx - 2.2, tx + 4.5]) natS(out, wx, y + 0.5, d - 1.2, 0.5, 0.5, 0.15, [0.06, 0.06, 0.06]);
   if (!Ls.on) return;
   for (const o of [-0.5, 0, 0.5]) point(out, tx - 2.4, y + 3.1, d + o, AMBER, 0.13, 0.22, 3.5);
   for (const px of [x - 2, x + 2]) point(out, px, y + 0.7, d - 0.9, AMBER, 0.08, 0.2, 3);
@@ -1323,8 +1325,8 @@ function* farmstead(ctx, out, W, f, Ls) {
   if (f.car) {
     const cx = x + (r() < 0.5 ? -1 : 1) * (w / 2 + 9), cd = front - 9, dir = r() < 0.5 ? -1 : 1;
     const cy = groundY(ctx, cx, cd);
-    nat(out, cx, cy + 0.6, cd, 2.0, 0.42, 0.85, [0.2, 0.22, 0.24]);
-    nat(out, cx - dir * 0.25, cy + 1.15, cd, 1.1, 0.3, 0.7, [0.1, 0.11, 0.13]);
+    natS(out, cx, cy + 0.6, cd, 2.0, 0.42, 0.85, [0.2, 0.22, 0.24]);
+    natS(out, cx - dir * 0.25, cy + 1.15, cd, 1.1, 0.3, 0.7, [0.1, 0.11, 0.13]);
     if (Ls.on) {
       for (const o of [-0.65, 0.65]) point(out, cx + dir * 2.05, cy + 0.68, cd + o, HEAD, 0.08, 0.3, 4);
       for (const o of [-0.65, 0.65]) point(out, cx - dir * 2.05, cy + 0.75, cd + o, RED, 0.06, 0.2, 3);

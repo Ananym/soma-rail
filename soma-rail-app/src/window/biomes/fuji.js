@@ -31,7 +31,8 @@
 //
 // The beat: the mountain stays still. Houses, the pagoda, the torii, lanterns and the viaduct
 // (BUILDING) and lights answer it; people and birds tag their own splats MOVE.FLASH (they brighten
-// without swelling), carts, the portable shrine and the picnic boxes MOVE.BEAT.
+// without swelling); the carts, the portable shrine, the picnic boxes and the angler's bucket are
+// rigid and MOVE.STILL (nothing on the beat).
 //
 // Cyclists ride (MOVE.RIDE, see kit.js rideCell): each stands within a few metres of its 24 m ride
 // cell's middle, faces the cell's way and keeps to that way's side of its track (with the train on
@@ -182,7 +183,7 @@ function faceTone(c, nx, nz) {
 }
 // An emitter that tags every splat with one motion class: MOVE.FLASH for people and animals (they
 // brighten on the beat), MOVE.RIDE for a cyclist and the bicycle under them (carried along the line:
-// see rideCell), MOVE.BEAT for the carts and the portable shrine drawn with the figures' helpers.
+// see rideCell), MOVE.STILL for the carts and the portable shrine drawn with the figures' helpers.
 function moveOut(out, move) {
   const cache = out.moveOuts || (out.moveOuts = {});
   if (cache[move]) return cache[move];
@@ -1652,8 +1653,8 @@ function* cyclist(ctx, out, wx, y, d, o) {
 // spoked wheels, the handles running forward to the puller.
 function* handcart(ctx, out, wx, y, d, o) {
   if (!inX(ctx, wx, 8)) return;
-  // (the cart is a thing: it swells on the beat; the farmer pulling it flashes)
-  const k = o.k || figK(d), yaw = o.yaw || 0, { P, E, L } = fig(ctx, out, wx, y, d, yaw, k, MOVE.BEAT);
+  // (the cart is a rigid thing: nothing on the beat; the farmer pulling it flashes)
+  const k = o.k || figK(d), yaw = o.yaw || 0, { P, E, L } = fig(ctx, out, wx, y, d, yaw, k, MOVE.STILL);
   const steel = [0.36, 0.38, 0.4], tyre = [0.09, 0.09, 0.1];
   E(P(-0.3, 0.64, 0), 0.86, 0.13, 0.47, [0.42, 0.36, 0.28]);
   E(P(-0.3, 1.0, 0), 0.66, 0.27, 0.4, o.load || C.youngRice);
@@ -1737,7 +1738,7 @@ function* nobori(ctx, out, wx, y, d, k, c) {
 // and headbands: black lacquer and gold under a wide roof with a gold bird on top.
 function* mikoshi(ctx, out, wx, y, d, yaw, k, night) {
   if (!inX(ctx, wx, 12)) return;
-  const { P, E, T, L } = fig(ctx, out, wx, y, d, yaw, k, MOVE.BEAT);     // the shrine swells; its bearers flash
+  const { P, E, T, L } = fig(ctx, out, wx, y, d, yaw, k, MOVE.STILL);    // the shrine is rigid, nothing on the beat; its bearers flash
   const gold = [0.8, 0.62, 0.16], lac = [0.09, 0.07, 0.07], red = C.vermilion;
   for (const v of [-0.42, 0.42]) L(P(-2.0, 1.5, v), P(2.0, 1.5, v), 0.05, red, 8);
   E(P(0, 1.68, 0), 0.52, 0.13, 0.52, lac);
@@ -1779,7 +1780,7 @@ function* picnic(ctx, out, W, wx, d, seed, night) {
   // boxes of food and a bottle in the middle
   for (let i = 0; i < 3; i++) {
     const px = wx + (r() - 0.5) * sw * 0.5, pd = d - sd * (0.08 + 0.2 * r()), c = [[0.66, 0.14, 0.12], [0.1, 0.1, 0.1], [0.78, 0.74, 0.5]][i];
-    out(px - ctx.x0, W.H(px, pd) + up + 0.14 * k, -pd, 0.2 * k, 0.1 * k, 0.16 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);
+    out(px - ctx.x0, W.H(px, pd) + up + 0.14 * k, -pd, 0.2 * k, 0.1 * k, 0.16 * k, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);
   }
   if (night) {
     const px = wx + sw * 0.55 - ctx.x0, y = W.H(wx + sw * 0.55, d);
@@ -2523,7 +2524,7 @@ function* riverLife(ctx, out, W, dLo, dHi) {
       // an angler on the lip of the levee, the rod out over the river
       const d = rn - 2.4, k = figK(d), side = r() < 0.5 ? 1 : -1;
       yield* person(ctx, out, wx, W.H(wx, d) + 0.05, d, { what: 'angler', k, yaw: side > 0 ? 0.5 : Math.PI - 0.5, pose: r() < 0.3 ? 'sit' : 'stand', top: r() < 0.5 ? [0.72, 0.34, 0.12] : [0.2, 0.36, 0.62], legs: [0.2, 0.2, 0.24], hat: r() < 0.6 ? 'kasa' : 'cap', hatC: r() < 0.5 ? STRAW : WHITE, arms: 'fwd', tool: 'rod' });
-      out(wx - side * 0.9 * k - ctx.x0, W.H(wx, d) + 0.28 * k, -d, 0.2 * k, 0.2 * k, 0.2 * k, 0.16, 0.36, 0.66, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);
+      out(wx - side * 0.9 * k - ctx.x0, W.H(wx, d) + 0.28 * k, -d, 0.2 * k, 0.2 * k, 0.2 * k, 0.16, 0.36, 0.66, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);
     }
   }
 }
@@ -3045,7 +3046,7 @@ export const fujiBiome = {
   // the mountain itself: one mesh that stays with the journey
   backdrop: { share: 0.11, ...BD, generate: backdrop, pose: backdropPose },
   // Fuji stays still on the beat: buildings (houses, pagoda, torii, lanterns, viaduct) and lights
-  // answer it, carts and the portable shrine by hand (MOVE.BEAT); people and birds flash on it
+  // answer it; carts, the portable shrine, picnic boxes and the angler's bucket are rigid (MOVE.STILL); people and birds flash on it
   // (MOVE.FLASH) and cyclists ride (MOVE.RIDE)
   beatKinds: [KIND.BUILDING, KIND.LIGHT],
   sky: { clear: 0.55 },

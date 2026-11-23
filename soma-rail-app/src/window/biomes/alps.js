@@ -41,8 +41,8 @@
 // Uncut strips along field borders, the river bank and the road's verges flower richer and taller.
 // The plants keep clear of the cattle, the goats, the marmots and the haymakers (clearings).
 //
-// The beat: buildings and lights (beatKinds); vehicles and the cable car's cabins tag their own
-// splats with MOVE.BEAT (they swell); animals and people with MOVE.FLASH (they brighten, never
+// The beat: buildings and lights (beatKinds); vehicles and the cable car's cabins are rigid and tag their
+// own splats with MOVE.STILL (they do nothing on the beat); animals and people with MOVE.FLASH (they brighten, never
 // swell). The flower heads answer in colour groups (kit.js chorus(): one group per colour, a few
 // groups each beat, see CHORUS_OF). The mountains, the forest, stems and grass stay still. Flags
 // and washing flutter (MOVE.FLAG), spray and chimney smoke billow (MOVE.VAPOUR), the eagle and the
@@ -186,7 +186,7 @@ const GRASS_STEM = [0.2, 0.4, 0.12];
 // Small helpers
 // ---------------------------------------------------------------------------------------------
 const SX = SUN[0], SY = SUN[1], SZ = SUN[2];
-const B = MOVE.BEAT, FL_ = MOVE.FLASH;   // B: things that swell on the beat; FL_: people and animals, which only brighten
+const STL = MOVE.STILL, FL_ = MOVE.FLASH;   // STL: rigid things (vehicles, cabins), which do nothing on the beat; FL_: people and animals, which only brighten
 // Snow lit from its surface normal: warm white facing the sun, blue turned away from it.
 function snowTone(nx, ny, nz, res) {
   const l = nx * SX + ny * SY + nz * SZ;
@@ -2395,7 +2395,7 @@ function* cyclist(ctx, out0, wx, y, d, yaw, r, k = 1.45) {
 // tractor with a trailer of hay. Sides, ends and top are all drawn; the window sees the top.
 function* vehicle(ctx, out0, W, wx, d, yaw, type, r, k = 1.25) {
   const y = W.H(wx, d) + 0.08, rng = r, K_ = KIND.OTHER;
-  const out = (x_, y_, z_, sx, sy, sz, cr, cg, cb, o_ = 1, qx = 0, qy = 0, qz = 0, qw = 1, kd = K_, mv = B) => out0(x_, y_, z_, sx, sy, sz, cr, cg, cb, o_, qx, qy, qz, qw, kd, mv || B);
+  const out = (x_, y_, z_, sx, sy, sz, cr, cg, cb, o_ = 1, qx = 0, qy = 0, qz = 0, qw = 1, kd = K_, mv = STL) => out0(x_, y_, z_, sx, sy, sz, cr, cg, cb, o_, qx, qy, qz, qw, kd, mv || STL);
   out.due = out0.due;
   const s = Math.max(0.12, detail(out0, d, 1.0));
   const box = function* (u0, L, Wd, H, y0, paintSide, top) {
@@ -2424,7 +2424,7 @@ function* vehicle(ctx, out0, W, wx, d, yaw, type, r, k = 1.25) {
     yield* box(0.9, 1.9, 1.1, 0.85, 0.75, () => c, c);                        // the bonnet
     wheels([-0.6], 0.82, 1.7); wheels([1.5], 0.45, 1.5);
     const f = frame(ctx, wx, y, d, yaw), tr = Math.max(0.05 * k, thin(d));
-    for (const [u, v] of [[-1.1, 0.6], [-1.1, -0.6], [0.1, 0.6], [0.1, -0.6]]) { const a = f.P(u * k, 1.3 * k, v * k), b = f.P(u * k, 2.55 * k, v * k); bar(out, a[0], a[1], a[2], b[0], b[1], b[2], tr, [0.15, 0.15, 0.16], 2, K_, B); }
+    for (const [u, v] of [[-1.1, 0.6], [-1.1, -0.6], [0.1, 0.6], [0.1, -0.6]]) { const a = f.P(u * k, 1.3 * k, v * k), b = f.P(u * k, 2.55 * k, v * k); bar(out, a[0], a[1], a[2], b[0], b[1], b[2], tr, [0.15, 0.15, 0.16], 2, K_, STL); }
     { const p = f.P(-0.5 * k, 2.6 * k, 0), q = quatYaw(yaw); out(p[0], p[1], p[2], 0.8 * k, 0.06 * k, 0.75 * k, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3]); }
     const pp = f.P(-0.6 * k, 0.85 * k, 0);
     yield* person(ctx, out0, pp[0] + ctx.x0, pp[1], -pp[2], { yaw, k: k * 0.95, coat: [0.24, 0.34, 0.6], pose: 'sit', hat: 'sun' });
@@ -2766,16 +2766,16 @@ function* cableCar(ctx, out, W, dLo, dHi) {
           const g = at(t);
           if (!inD(g[2], dLo, dHi) || !inX(ctx, g[0], 6)) continue;
           const k = K(g[2]), x = g[0] - ctx.x0, hang = 2.6 * k, q = quatXTo(ax, 0, -ad);
-          bar(out, x, g[1], -g[2], x, g[1] - hang, -g[2], Math.max(0.06 * k, thin(g[2])), [0.2, 0.2, 0.22], 2, KIND.OTHER, B);
+          bar(out, x, g[1], -g[2], x, g[1] - hang, -g[2], Math.max(0.06 * k, thin(g[2])), [0.2, 0.2, 0.22], 2, KIND.OTHER, STL);
           // the cabin: a box with a band of windows, red below it, a pale roof (every face drawn)
           const red = [0.76, 0.1, 0.08], glass = [0.1, 0.14, 0.2], Lc = 2.5 * k, Hc = 2.0 * k, Wc = 2.0 * k, cy0 = g[1] - hang - Hc;
           const f = frame(ctx, g[0], cy0, g[2], Math.atan2(ad, ax)), gs = Math.max(Hc / 5, detail(out, g[2], 1.2)), gr = makeRng(hashInts(c.seed, j, Math.round(along), sg));
           const side = (a_, b_) => (b_ > 0.45 && b_ < 0.82 && a_ > 0.08 && a_ < 0.92 ? glass : red);
           for (const s2 of [1, -1]) {
-            yield* panel(out, f.P(-Lc / 2, 0, s2 * Wc / 2), f.V(1, 0, 0), f.V(0, 1, 0), Lc, Hc, gs, (a_, b_) => faceTone(side(a_, b_), s2 * f.fx, s2 * f.fz), KIND.OTHER, gr, 0.2, B);
-            yield* panel(out, f.P(s2 * Lc / 2, 0, Wc / 2), f.V(0, 0, -1), f.V(0, 1, 0), Wc, Hc, gs, (a_, b_) => faceTone(side(a_, b_), s2 * f.ex, s2 * f.ez), KIND.OTHER, gr, 0.2, B);
+            yield* panel(out, f.P(-Lc / 2, 0, s2 * Wc / 2), f.V(1, 0, 0), f.V(0, 1, 0), Lc, Hc, gs, (a_, b_) => faceTone(side(a_, b_), s2 * f.fx, s2 * f.fz), KIND.OTHER, gr, 0.2, STL);
+            yield* panel(out, f.P(s2 * Lc / 2, 0, Wc / 2), f.V(0, 0, -1), f.V(0, 1, 0), Wc, Hc, gs, (a_, b_) => faceTone(side(a_, b_), s2 * f.ex, s2 * f.ez), KIND.OTHER, gr, 0.2, STL);
           }
-          yield* panel(out, f.P(-Lc / 2, Hc, -Wc / 2), f.V(1, 0, 0), f.V(0, 0, 1), Lc, Wc, gs, () => [0.72, 0.72, 0.7], KIND.OTHER, gr, 0.2, B);
+          yield* panel(out, f.P(-Lc / 2, Hc, -Wc / 2), f.V(1, 0, 0), f.V(0, 0, 1), Lc, Wc, gs, () => [0.72, 0.72, 0.7], KIND.OTHER, gr, 0.2, STL);
           void q;
         }
         along -= span;
@@ -3158,7 +3158,7 @@ export const alpsBiome = {
   shares: { trackside: 0.1, near: 0.43, mid: 0.27, far: 0.2 },
   // a daylight country: flowers and snow want sun
   slots: { dawn: 0.22, day: 0.56, dusk: 0.22, night: 0 },
-  // Buildings and lights answer the beat; vehicles and cabins tag their own splats with MOVE.BEAT,
+  // Buildings and lights answer the beat; vehicles and cabins tag their own splats with MOVE.STILL,
   // animals and people with MOVE.FLASH, flower heads with a chorus group per colour.
   beatKinds: [KIND.BUILDING, KIND.LIGHT],
   sky: { stars: 1.2, deep: 0.6, milkyWay: 0.6, clear: 0.5 },

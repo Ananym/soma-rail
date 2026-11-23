@@ -22,7 +22,8 @@
 // the skyline is a light floating in the sky; so is a station the brow of its own hill hides.
 //
 // The beat: buildings and lights (beatKinds, so the decorated tree's bulbs too); the sleigh, its
-// bells and the sledges tag their own splats with MOVE.BEAT and swell. People and animals (skaters,
+// bells and the sledges are rigid and tag their own splats with MOVE.STILL (nothing on the beat); the
+// sleigh's lantern is a light and keeps the beat. People and animals (skaters,
 // skiers, sledgers, riders on the lift, deer, reindeer, horses) are MOVE.FLASH: they brighten on the
 // beat and keep their size. Roof snow is not BUILDING (it would clip to white on every beat). Smoke
 // billows (MOVE.VAPOUR), scarves and pennants flutter (MOVE.FLAG), and the snow falls (MOVE.FALL).
@@ -1687,7 +1688,7 @@ function* beast(ctx, out0, wx, y, d, o) {
     E(-S.bl * 0.05, S.bh - S.br * 0.1, 0, 0.09, S.br * 1.0, S.br * 0.92, hc);
     for (const v of [-1, 1]) for (const u of [-0.2, 0.2]) {
       PP(u, S.bh - S.br * 0.6, v * S.br * 0.9);
-      out0(pv[0], pv[1], pv[2], 0.06 * k, 0.06 * k, 0.06 * k, 0.8, 0.62, 0.18, 1, 0, 0, 0, 1, kind, MOVE.BEAT);   // bells: things, so they swell
+      out0(pv[0], pv[1], pv[2], 0.06 * k, 0.06 * k, 0.06 * k, 0.8, 0.62, 0.18, 1, 0, 0, 0, 1, kind, MOVE.STILL);   // bells: rigid things, nothing on the beat
     }
   }
   if (out0.due()) yield;
@@ -1697,7 +1698,7 @@ const ANIMAL_COL = { horse: [[0.26, 0.15, 0.09], [0.18, 0.12, 0.09], [0.62, 0.6,
 // A sleigh drawn by a pair of horses or a team of reindeer, on the lane. A red body curling up at
 // the front, gilt runners, a driver and passengers under a rug, reins, bells, a lantern.
 function* sleigh(ctx, out0, W, wx, d, r, o = {}) {
-  const out = moveOut(out0, MOVE.BEAT);
+  const out = moveOut(out0, MOVE.STILL);
   const dir = r() < 0.5 ? 1 : -1, yaw = dir > 0 ? 0 : Math.PI;
   const y = W.H(wx, d) + 0.03;
   const k = FIG;
@@ -1707,7 +1708,7 @@ function* sleigh(ctx, out0, W, wx, d, r, o = {}) {
   let pv;
   const PP = (u, h, v) => { pv = P(u, h, v); return pv; };
   const E = (u, h, v, rx, ry, rz, c, qq = q) => { PP(u, h, v); out(pv[0], pv[1], pv[2], rx * k, ry * k, rz * k, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], KIND.OTHER); };
-  const seg = (a, b, rr, c, n = 2) => { const A = [...PP(a[0], a[1], a[2])], B = PP(b[0], b[1], b[2]); bar(out, A[0], A[1], A[2], B[0], B[1], B[2], rr, c, n, KIND.OTHER, MOVE.BEAT); };
+  const seg = (a, b, rr, c, n = 2) => { const A = [...PP(a[0], a[1], a[2])], B = PP(b[0], b[1], b[2]); bar(out, A[0], A[1], A[2], B[0], B[1], B[2], rr, c, n, KIND.OTHER, MOVE.STILL); };
   const rr = Math.max(0.04 * k, thin(d));
   // runners curling up at the front
   for (const v of [0.5, -0.5]) {
@@ -1842,7 +1843,7 @@ function* sledProps(ctx, out, W, s, dLo, dHi) {
   }
 }
 function* sledge(ctx, out0, W, wx, d, yaw, ci) {
-  const out = moveOut(out0, MOVE.BEAT);
+  const out = moveOut(out0, MOVE.STILL);
   const y = W.H(wx, d);
   const P = frameOf(ctx, wx, y, d, yaw, FIG);
   const q = quatYaw(yaw);
@@ -1851,8 +1852,8 @@ function* sledge(ctx, out0, W, wx, d, yaw, ci) {
   out(pv[0], pv[1], pv[2], 0.5 * FIG, 0.04 * FIG, 0.2 * FIG, wc[0], wc[1], wc[2], 1, q[0], q[1], q[2], q[3], KIND.OTHER);
   for (const v of [0.18, -0.18]) {
     const a = [...P(-0.5, 0.04, v)], b = [...P(0.45, 0.04, v)], c = P(0.6, 0.25, v);
-    bar(out, a[0], a[1], a[2], b[0], b[1], b[2], thin(d, 0.9), [0.2, 0.18, 0.16], 2, KIND.OTHER, MOVE.BEAT);
-    bar(out, b[0], b[1], b[2], c[0], c[1], c[2], thin(d, 0.9), [0.2, 0.18, 0.16], 1, KIND.OTHER, MOVE.BEAT);
+    bar(out, a[0], a[1], a[2], b[0], b[1], b[2], thin(d, 0.9), [0.2, 0.18, 0.16], 2, KIND.OTHER, MOVE.STILL);
+    bar(out, b[0], b[1], b[2], c[0], c[1], c[2], thin(d, 0.9), [0.2, 0.18, 0.16], 1, KIND.OTHER, MOVE.STILL);
   }
   if (out0.due()) yield;
 }

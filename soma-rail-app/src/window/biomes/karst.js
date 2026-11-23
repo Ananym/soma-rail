@@ -13,7 +13,8 @@
 // so a tower cut by a chunk border is generated identically by both chunks and the halves meet.
 //
 // The beat: the towers and hills stay still (beatKinds below); houses, pagodas, temples, trees,
-// boats, carts and village lanterns swell with it; people and animals brighten (MOVE.FLASH). Mist
+// lotus flowers and the lanterns' glow swell with it; boats, carts, bicycles, stalls and what people carry
+// are rigid (MOVE.STILL); people and animals brighten (MOVE.FLASH). Mist
 // and kitchen smoke billow (MOVE.VAPOUR), washing and boat pennants flutter (MOVE.FLAG).
 //
 // The country is worked and lived in (see "People and working animals"): buffalo ploughing,
@@ -1321,12 +1322,12 @@ export function* archBridge(ctx, out, x, d, opts = {}) {
 // splats each, whatever the budget; limbs, poles, cords and horns are struts sized from distance.
 // The people and animals are tagged MOVE.FLASH (they brighten on the beat; a swelling body looks
 // uncanny); what they carry, pull or ride in (poles, baskets, ploughs, carts, bicycles, ladders,
-// stalls) is MOVE.BEAT and swells. ell() and lim() take the class from MV, which living() sets to
-// FLASH while a person or an animal is drawn. Each figure is built in its own frame: u along its
+// stalls) is MOVE.STILL: rigid, nothing on the beat. ell() and lim() take the class from MV, which living() sets to
+// FLASH while a person or an animal is drawn (the default is STILL). Each figure is built in its own frame: u along its
 // heading, h up, v to its left, in life-size metres times the frame's scale.
 // ---------------------------------------------------------------------------------------------
-const BEAT = MOVE.BEAT, FLASH = MOVE.FLASH, KO = KIND.OTHER;
-let MV = BEAT;
+const BEAT = MOVE.BEAT, STILL = MOVE.STILL, FLASH = MOVE.FLASH, KO = KIND.OTHER;
+let MV = STILL;
 // Draws a person or an animal: every ell() and lim() inside it is tagged FLASH.
 function living(fn, args) { const m = MV; MV = FLASH; try { return fn(...args); } finally { MV = m; } }
 const PK = 1.5, BK = 1.6;
@@ -1489,7 +1490,7 @@ function* cyclist(ctx, out, f, r, load, night) {
   wheel(out, f, -0.52, 0.34, 0, 0.34, fc); wheel(out, f, 0.52, 0.34, 0, 0.34, fc);
   for (const [a, b] of [[[-0.52, 0.34], [-0.18, 0.9]], [[-0.18, 0.9], [0.36, 0.86]], [[0.36, 0.86], [0.52, 0.34]], [[-0.18, 0.9], [0.02, 0.32]], [[0.02, 0.32], [0.36, 0.86]], [[-0.52, 0.34], [0.02, 0.32]], [[0.36, 0.86], [0.34, 1.06]]]) lim(out, f, f.P(a[0], a[1], 0), f.P(b[0], b[1], 0), 0.02, fc, 1);
   const shirt = pick(CLOTH, r), trous = [0.14, 0.14, 0.18], skin = pick(SKIN, r);
-  const m0 = MV; MV = FLASH;        // the rider (the bicycle and the load stay BEAT)
+  const m0 = MV; MV = FLASH;        // the rider (the bicycle and the load stay STILL)
   lim(out, f, f.P(-0.18, 0.98, 0.09), f.P(0.14, 0.7, 0.1), 0.065, trous); lim(out, f, f.P(0.14, 0.7, 0.1), f.P(0.04, 0.22, 0.1), 0.06, trous);
   lim(out, f, f.P(-0.18, 0.98, -0.09), f.P(0.1, 0.78, -0.1), 0.065, mul3(trous, 0.8)); lim(out, f, f.P(0.1, 0.78, -0.1), f.P(-0.02, 0.44, -0.1), 0.06, mul3(trous, 0.8));
   ell(out, f, -0.1, 1.28, 0, 0.3, 0.17, 0.19, shirt, 1.25);
@@ -1733,8 +1734,8 @@ function* bankScene(ctx, out, s, r, night) {
       person(out, f, r, { pose: sit ? 'sit' : 'stand', seat: 0.32, arms: 'fwd' });
       const hy = sit ? 0.5 : 1.05, tip = f.P(3.5, hy + 1.5, 0);
       lim(out, f, f.P(0.42, hy, 0), tip, 0.014, [0.5, 0.45, 0.28], 4);
-      strutM(out, tip[0], tip[1], tip[2], tip[0], wy + 0.1, tip[2] - 0.5, f.thin * 0.7, [0.7, 0.7, 0.68], 2, KO, BEAT);
-      out(tip[0], wy + 0.14, tip[2] - 0.5, 0.09 * kk, 0.09 * kk, 0.09 * kk, 0.78, 0.16, 0.1, 1, 0, 0, 0, 1, KO, BEAT);
+      strutM(out, tip[0], tip[1], tip[2], tip[0], wy + 0.1, tip[2] - 0.5, f.thin * 0.7, [0.7, 0.7, 0.68], 2, KO, STILL);
+      out(tip[0], wy + 0.14, tip[2] - 0.5, 0.09 * kk, 0.09 * kk, 0.09 * kk, 0.78, 0.16, 0.1, 1, 0, 0, 0, 1, KO, STILL);
       ell(out, f, -0.2, 0.2, -0.5, 0.2, 0.18, 0.2, WICKER);
       if (night) { const p = f.P(0.3, 0.45, 0.5); yield* lamp(ctx, out, p[0], p[1], -p[2], [1, 0.66, 0.32], { size: 0.12, halo: 1 }); }
     }
@@ -1773,11 +1774,11 @@ function* villageScene(ctx, out, s, r) {
       const sx = x + (i - (n - 1) / 2) * sp, ks = pk / 1.3;
       const [ca, cb] = pick([[[0.7, 0.2, 0.15], [0.76, 0.75, 0.7]], [[0.2, 0.36, 0.62], [0.76, 0.75, 0.7]], [[0.76, 0.6, 0.18], [0.76, 0.6, 0.18]], [[0.22, 0.45, 0.4], [0.22, 0.45, 0.4]], [[0.7, 0.2, 0.15], [0.7, 0.2, 0.15]]], r);
       const pr = Math.max(0.05, 0.0006 * s.d);
-      for (const [px, pz, ph] of [[-1.6, -1.1, 2.2], [1.6, -1.1, 2.2], [-1.6, 1.1, 3.0], [1.6, 1.1, 3.0]]) strutM(out, sx + px * ks, s.y, -(s.d + pz * ks), sx + px * ks, s.y + ph * ks, -(s.d + pz * ks), pr, [0.4, 0.34, 0.24], 2, KO, BEAT);
+      for (const [px, pz, ph] of [[-1.6, -1.1, 2.2], [1.6, -1.1, 2.2], [-1.6, 1.1, 3.0], [1.6, 1.1, 3.0]]) strutM(out, sx + px * ks, s.y, -(s.d + pz * ks), sx + px * ks, s.y + ph * ks, -(s.d + pz * ks), pr, [0.4, 0.34, 0.24], 2, KO, STILL);
       const q = quatPitch(0.34);
-      for (let j = 0; j < 4; j++) { const c = j % 2 ? cb : ca; out(sx + (j - 1.5) * 0.92 * ks, s.y + 2.62 * ks, -s.d, 0.52 * ks, 0.05, 1.0 * ks, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KO, BEAT); }
-      out(sx, s.y + 0.85 * ks, -(s.d + 0.2 * ks), 1.3 * ks, 0.07 * ks, 0.45 * ks, 0.4, 0.32, 0.22, 1, 0, 0, 0, 1, KO, BEAT);     // the table
-      for (let j = 0; j < 4; j++) { const c = pick(LOADS, r); out(sx + (j - 1.5) * 0.62 * ks, s.y + 1.06 * ks, -(s.d + 0.1 * ks), 0.26 * ks, 0.17 * ks, 0.26 * ks, c[0], c[1], c[2], 1, 0, 0, 0, 1, KO, BEAT); }
+      for (let j = 0; j < 4; j++) { const c = j % 2 ? cb : ca; out(sx + (j - 1.5) * 0.92 * ks, s.y + 2.62 * ks, -s.d, 0.52 * ks, 0.05, 1.0 * ks, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KO, STILL); }
+      out(sx, s.y + 0.85 * ks, -(s.d + 0.2 * ks), 1.3 * ks, 0.07 * ks, 0.45 * ks, 0.4, 0.32, 0.22, 1, 0, 0, 0, 1, KO, STILL);     // the table
+      for (let j = 0; j < 4; j++) { const c = pick(LOADS, r); out(sx + (j - 1.5) * 0.62 * ks, s.y + 1.06 * ks, -(s.d + 0.1 * ks), 0.26 * ks, 0.17 * ks, 0.26 * ks, c[0], c[1], c[2], 1, 0, 0, 0, 1, KO, STILL); }
       person(out, frame(sx + (r() - 0.5) * ks, s.y, s.d + 1.0 * ks, -Math.PI / 2 + (r() - 0.5), pk), r, { hat: r() < 0.4 });       // the seller
       const nb = Math.floor(r() * 2.6);
       for (let j = 0; j < nb; j++) {
@@ -1800,13 +1801,13 @@ function* villageScene(ctx, out, s, r) {
     // children running after a ball, a dog after the children
     const n = 3 + Math.floor(r() * 2), yaw = r() < 0.5 ? 0 : Math.PI;
     for (let i = 0; i < n; i++) person(out, frame(x + (i - n / 2) * 1.9 * pk + r(), s.y, s.d + (r() - 0.5) * 2.5, yaw + (r() - 0.5) * 0.8, pk * (0.58 + 0.12 * r())), r, { child: true, pose: 'walk', arms: r() < 0.5 ? 'up' : 'swing' });
-    out(x + Math.cos(yaw) * (n * 1.1 + 1.5) * pk, s.y + (0.5 + r()) * pk, -s.d, 0.17 * pk, 0.17 * pk, 0.17 * pk, 0.74, 0.16, 0.1, 1, 0, 0, 0, 1, KO, BEAT);
+    out(x + Math.cos(yaw) * (n * 1.1 + 1.5) * pk, s.y + (0.5 + r()) * pk, -s.d, 0.17 * pk, 0.17 * pk, 0.17 * pk, 0.74, 0.16, 0.1, 1, 0, 0, 0, 1, KO, STILL);
     dog(out, frame(x - Math.cos(yaw) * (n * 1.0 + 1.2) * pk, s.y, s.d + 0.6, yaw, pk), r);
   } else if (s.what === 'elders') {
     // the old men at a low table, on stools
     const n = 2 + Math.floor(r() * 2);
-    out(x, s.y + 0.5 * pk, -s.d, 0.42 * pk, 0.05 * pk, 0.42 * pk, 0.42, 0.32, 0.2, 1, 0, 0, 0, 1, KO, BEAT);
-    strutM(out, x, s.y, -s.d, x, s.y + 0.5 * pk, -s.d, Math.max(0.05, 0.0006 * s.d), WOOD, 1, KO, BEAT);
+    out(x, s.y + 0.5 * pk, -s.d, 0.42 * pk, 0.05 * pk, 0.42 * pk, 0.42, 0.32, 0.2, 1, 0, 0, 0, 1, KO, STILL);
+    strutM(out, x, s.y, -s.d, x, s.y + 0.5 * pk, -s.d, Math.max(0.05, 0.0006 * s.d), WOOD, 1, KO, STILL);
     for (let i = 0; i < n; i++) {
       const a = [Math.PI, 0, -Math.PI / 2][i] + (r() - 0.5) * 0.5, f = frame(x - Math.cos(a) * 1.05 * pk, s.y, s.d - Math.sin(a) * 0.9 * pk, a, pk);
       person(out, f, r, { pose: 'sit', seat: 0.42, arms: 'fwd', hat: r() < 0.3, shirt: pick([[0.3, 0.42, 0.62], [0.74, 0.73, 0.68], [0.72, 0.72, 0.68], [0.6, 0.56, 0.44]], r) });
@@ -1861,10 +1862,10 @@ function villageSpots(W, v) {
   return spots;
 }
 
-// A rick of rice straw built round a pole.
+// A rick of rice straw built round a pole (a rigid, loose thing: MOVE.STILL).
 function hayrick(out, x, y, d, k) {
-  for (const [h, rr, sh] of [[0.8, 1.45, 0.74], [1.8, 1.4, 0.88], [2.8, 1.05, 1.0], [3.55, 0.6, 1.06]]) out(x, y + h * k, -d, rr * k * 0.62, 0.62 * k, rr * k * 0.62, 0.72 * sh, 0.6 * sh, 0.3 * sh, 1, 0, 0, 0, 1, KIND.BUILDING);
-  strutM(out, x, y + 3.6 * k, -d, x, y + 4.7 * k, -d, Math.max(0.06, 0.0006 * d), [0.3, 0.25, 0.18], 1, KIND.BUILDING, 0);
+  for (const [h, rr, sh] of [[0.8, 1.45, 0.74], [1.8, 1.4, 0.88], [2.8, 1.05, 1.0], [3.55, 0.6, 1.06]]) out(x, y + h * k, -d, rr * k * 0.62, 0.62 * k, rr * k * 0.62, 0.72 * sh, 0.6 * sh, 0.3 * sh, 1, 0, 0, 0, 1, KIND.BUILDING, MOVE.STILL);
+  strutM(out, x, y + 3.6 * k, -d, x, y + 4.7 * k, -d, Math.max(0.06, 0.0006 * d), [0.3, 0.25, 0.18], 1, KIND.BUILDING, MOVE.STILL);
 }
 // An orchard tree: a short trunk, a round glossy crown lit from the left, fruit showing near to.
 function fruitTree(out, x, y, d, h) {
@@ -1958,11 +1959,11 @@ function* zoneProps(ctx, out, W, dLo, dHi, sites) {
         if (r() > 0.22 || bd < dLo || bd > 140 || bd >= dHi || xr - xl < 12 || d1 - d0 < 9 || !inPanel(wx, bd + 5, 2)) continue;
         const x = wx - ctx.x0, y = SURF.y, pr = Math.max(0.05, 0.0006 * bd), cane = [0.52, 0.47, 0.28];
         const hx = x + 0.6, hy = y + 6.2, hz = -(bd + 5);
-        strutM(out, x - 0.4, y + 0.3, -bd, hx, hy, hz, pr * 1.3, cane, 5, KO, BEAT);
+        strutM(out, x - 0.4, y + 0.3, -bd, hx, hy, hz, pr * 1.3, cane, 5, KO, STILL);
         const cs = [[-2.7, -2.4], [2.7, -2.4], [2.7, 2.4], [-2.7, 2.4]].map(([a, b]) => [hx + a, y + 1.3, hz - b]);
-        for (const c of cs) { strutM(out, hx, hy, hz, (hx + c[0]) / 2 + (c[0] - hx) * 0.25, hy - 1.3, (hz + c[2]) / 2, pr, cane, 2, KO, BEAT); strutM(out, (hx + c[0]) / 2 + (c[0] - hx) * 0.25, hy - 1.3, (hz + c[2]) / 2, c[0], c[1], c[2], pr, cane, 2, KO, BEAT); }
-        for (let i = 0; i < 4; i++) { const a = cs[i], b = cs[(i + 1) % 4]; strutM(out, a[0], a[1], a[2], (a[0] + b[0]) / 2, a[1] - 0.5, (a[2] + b[2]) / 2, pr * 0.8, [0.62, 0.62, 0.56], 2, KO, BEAT); strutM(out, (a[0] + b[0]) / 2, a[1] - 0.5, (a[2] + b[2]) / 2, b[0], b[1], b[2], pr * 0.8, [0.62, 0.62, 0.56], 2, KO, BEAT); }
-        for (const [i, m] of [[0, 2], [1, 3]]) strutM(out, cs[i][0], cs[i][1], cs[i][2], cs[m][0], cs[m][1] - 0.2, cs[m][2], pr * 0.7, [0.62, 0.62, 0.56], 3, KO, BEAT);
+        for (const c of cs) { strutM(out, hx, hy, hz, (hx + c[0]) / 2 + (c[0] - hx) * 0.25, hy - 1.3, (hz + c[2]) / 2, pr, cane, 2, KO, STILL); strutM(out, (hx + c[0]) / 2 + (c[0] - hx) * 0.25, hy - 1.3, (hz + c[2]) / 2, c[0], c[1], c[2], pr, cane, 2, KO, STILL); }
+        for (let i = 0; i < 4; i++) { const a = cs[i], b = cs[(i + 1) % 4]; strutM(out, a[0], a[1], a[2], (a[0] + b[0]) / 2, a[1] - 0.5, (a[2] + b[2]) / 2, pr * 0.8, [0.62, 0.62, 0.56], 2, KO, STILL); strutM(out, (a[0] + b[0]) / 2, a[1] - 0.5, (a[2] + b[2]) / 2, b[0], b[1], b[2], pr * 0.8, [0.62, 0.62, 0.56], 2, KO, STILL); }
+        for (const [i, m] of [[0, 2], [1, 3]]) strutM(out, cs[i][0], cs[i][1], cs[i][2], cs[m][0], cs[m][1] - 0.2, cs[m][2], pr * 0.7, [0.62, 0.62, 0.56], 3, KO, STILL);
         person(out, frame(x - 1.3, y + 0.3, bd - 0.2, 0.4, PK * farK(bd)), r, { arms: 'fwd' });
         note(ctx, 'liftnet', wx, bd);
       }
@@ -2349,11 +2350,11 @@ function strutM(out, ax, ay, az, bx, by, bz, r, c, n, kind, move) {
   }
 }
 
-// A boat on the river, a handful of splats so the beat can pick it out (MOVE.BEAT): a bamboo raft
+// A boat on the river, a handful of splats, rigid (MOVE.STILL): a bamboo raft
 // poled by a fisherman in a conical straw hat with his cormorants, or a long-tail boat under an
 // arched cane canopy flying a pennant (MOVE.FLAG). x is chunk-local, y the water level.
 function* boat(ctx, out, x, y, d, r, night) {
-  const B = MOVE.BEAT, K = KIND.OTHER, dir = r() < 0.5 ? -1 : 1;
+  const B = MOVE.STILL, K = KIND.OTHER, dir = r() < 0.5 ? -1 : 1;
   const len = 7 + 3 * r();
   // the wake and ripple, left still
   out(x, y + 0.03, -(d - 0.6), len * 0.75, 0.03, 0.5, 0.68, 0.71, 0.72, 0.55, 0, 0, 0, 1, KIND.GROUND);
@@ -2430,8 +2431,8 @@ function* frontLine(ctx, out, W, hs, d, night) {
     } else {
       const c = night ? [1, 0.3, 0.14] : [0.78, 0.13, 0.08];
       const kd = night ? KIND.LIGHT : KIND.OTHER;
-      out(lx, ly - 0.42, -d, 0.21, 0.27, 0.21, c[0], c[1], c[2], 1, 0, 0, 0, 1, kd, MOVE.BEAT);
-      out(lx, ly - 0.75, -d, 0.03, 0.09, 0.03, 0.72, 0.55, 0.2, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);   // tassel
+      out(lx, ly - 0.42, -d, 0.21, 0.27, 0.21, c[0], c[1], c[2], 1, 0, 0, 0, 1, kd, night ? MOVE.BEAT : MOVE.STILL);   // (lit at night: the glowing paper keeps the beat)
+      out(lx, ly - 0.75, -d, 0.03, 0.09, 0.03, 0.72, 0.55, 0.2, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);   // tassel
       if (night) out(lx, ly - 0.42, -(d + 0.05), 0.7, 0.7, 0.3, c[0], c[1], c[2], 0.14, 0, 0, 0, 1, KIND.LIGHT, MOVE.BEAT);
     }
   }
@@ -3476,8 +3477,9 @@ export const karstBiome = {
   shares: { trackside: 0.15, near: 0.39, mid: 0.27, far: 0.19 },
   // The towers and hills are the scenery, so they stay still on the beat. What answers it: houses,
   // pagodas and pavilions (BUILDING), trees and bamboo clumps (TREE; hill crowns, groves and mounds
-  // are HEDGE), and, tagged MOVE.BEAT by hand, the boats and rafts, carts and bicycles, what people
-  // carry, market awnings, lotus flowers and the lanterns strung in the villages. The people and
+  // are HEDGE), and, tagged MOVE.BEAT by hand, the lotus flowers and (by night) the lanterns strung
+  // in the villages. The boats and rafts, carts and bicycles, what people carry, market stalls and
+  // the lanterns' bodies by day are rigid (MOVE.STILL). The people and
   // animals (in the fields, on the bunds, the lane, the river bank and the rafts, in the villages)
   // are MOVE.FLASH: they brighten on the beat without swelling. Lights always answer it.
   beatKinds: [KIND.BUILDING, KIND.TREE],

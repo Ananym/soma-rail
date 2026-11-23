@@ -864,7 +864,7 @@ function* sidingProps(ctx, out, W, sd) {
     for (const rd of [6.6, 8.0]) out(x, y + 0.2, -rd, step * 0.7, 0.04, 0.035, 0.38, 0.3, 0.24, 1, 0, 0, 0, 1, KIND.OTHER);
     if (out.due()) yield;
   }
-  // log piles: several stacks with gaps, ends facing the camera
+  // log piles: several stacks with gaps, ends facing the camera (loose, rigid things: MOVE.STILL)
   const r2 = makeRng(sd.seed);
   let wx = sd.x0 + 10;
   while (wx < sd.x1 - 10) {
@@ -884,13 +884,13 @@ function* sidingProps(ctx, out, W, sd) {
         const end = birchy ? [0.7, 0.62, 0.46] : [0.66, 0.52, 0.33];
         const c = jitter(mul3(end, 0.8 + 0.2 * (y / hgt)), rng, 0.12);
         const jx = (rng() - 0.5) * 0.05, jy = (rng() - 0.5) * 0.05;
-        if (out.density < 0.5) { out(x + jx, y0 + y + jy, -dd, rr * 0.9, rr * 0.9, 0.04, c[0] * 0.85, c[1] * 0.85, c[2] * 0.85, 1, 0, 0, 0, 1, KIND.OTHER); continue; }
+        if (out.density < 0.5) { out(x + jx, y0 + y + jy, -dd, rr * 0.9, rr * 0.9, 0.04, c[0] * 0.85, c[1] * 0.85, c[2] * 0.85, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL); continue; }
         // the log itself running back from its cut end (it was a flat dark disc, so from the side the
         // pile had no depth): bark, a little lighter up the pile, its front just behind the pale end
         const bk = 0.8 + 0.35 * (y / hgt);
-        out(x + jx, y0 + y + jy, -(dd + 1.05), rr * 1.05, rr * 1.05, 0.5, 0.27 * bk, 0.18 * bk, 0.11 * bk, 1, 0, 0, 0, 1, KIND.OTHER);
-        out(x + jx, y0 + y + jy, -dd, rr * 0.62, rr * 0.62, 0.03, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
-        if (row % 2 === 0) out(x + 0.16, y0 + y + 0.13, -(dd + 0.3), 0.17, 0.15, 0.05, 0.08, 0.065, 0.05, 1, 0, 0, 0, 1, KIND.OTHER);
+        out(x + jx, y0 + y + jy, -(dd + 1.05), rr * 1.05, rr * 1.05, 0.5, 0.27 * bk, 0.18 * bk, 0.11 * bk, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);
+        out(x + jx, y0 + y + jy, -dd, rr * 0.62, rr * 0.62, 0.03, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);
+        if (row % 2 === 0) out(x + 0.16, y0 + y + 0.13, -(dd + 0.3), 0.17, 0.15, 0.05, 0.08, 0.065, 0.05, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);
       }
       if (out.due()) yield;
     }
@@ -1834,13 +1834,14 @@ function* settlements(ctx, out, W) {
     if (!s || s.dc < ctx.zNear || s.dc >= ctx.zFar) continue;
     const rng = makeRng(s.seed);
     if (s.mill) {
+      const stillOut = withMoveStill(out);
       // long sheds, a chimney and stacks of timber
       yield* house(ctx, out, s.cx - ctx.x0, s.dc, { w: 60, depth: 18, h: 9, roofH: 3, wall: [0.36, 0.35, 0.33], roof: [0.3, 0.3, 0.31], windows: false, chimney: false, rng, y: W.H(s.cx, s.dc) - 0.5 });
       yield* house(ctx, out, s.cx - ctx.x0 + 50, s.dc + 25, { w: 35, depth: 14, h: 7, roofH: 2.5, wall: [0.45, 0.14, 0.09], roof: [0.22, 0.22, 0.22], windows: false, chimney: false, rng, y: W.H(s.cx + 50, s.dc + 25) - 0.5 });
       yield* stick(ctx, out, s.cx - ctx.x0 - 20, W.H(s.cx - 20, s.dc + 10), s.dc + 10, 28, 1.2, { color: [0.4, 0.38, 0.36], kind: KIND.BUILDING });
       for (let k = 0; k < 6; k++) {
         const bx = s.cx - 60 + 120 * rng(), bd = s.dc - 30 - 20 * rng();
-        yield* blob(ctx, out, bx - ctx.x0, W.H(bx, bd) + 1.5, bd, 9, 1.6, 4, { n: 20, color: [0.52, 0.42, 0.28], rng, kind: KIND.OTHER, inner: 0.2 });
+        yield* blob(ctx, stillOut, bx - ctx.x0, W.H(bx, bd) + 1.5, bd, 9, 1.6, 4, { n: 20, color: [0.52, 0.42, 0.28], rng, kind: KIND.OTHER, inner: 0.2 });   // (timber stacks: rigid, MOVE.STILL)
       }
     } else {
       yield* church(ctx, out, s.cx - ctx.x0, s.dc + 10, { rng, color: [0.74, 0.73, 0.69], roof: [0.2, 0.2, 0.22], spire: 14, h: 15, y: W.H(s.cx, s.dc + 10) });
@@ -1851,6 +1852,16 @@ function* settlements(ctx, out, W) {
       }
     }
   }
+}
+
+// An out that tags every splat MOVE.STILL (kit blob() and strut() have no slot for a motion class).
+function withMoveStill(out) {
+  const m = (x, y, z, sx, sy, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = KIND.OTHER) => out(x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind, MOVE.STILL);
+  m.q = (x, y, z, sx, sy, sz, c, o, q, k) => out(x, y, z, sx, sy, sz, c[0], c[1], c[2], o, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, k, MOVE.STILL);
+  m.due = out.due; m.left = out.left; m.density = out.density; m.detailK = out.detailK; m.ctx = out.ctx;
+  Object.defineProperty(m, 'n', { get: () => out.n });
+  Object.defineProperty(m, 'limit', { get: () => out.limit, set: (v) => { out.limit = v; } });
+  return m;
 }
 
 // Far: the mountains. Dark forest up to a tree line, then grey rock, then snow on the summits.

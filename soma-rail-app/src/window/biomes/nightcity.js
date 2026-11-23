@@ -31,7 +31,7 @@
 //             three in line, each copy a little more wrong
 import { hashInts, makeRng, noise1, noise2 } from '../rng.js';
 import {
-  KIND, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, detail, shade, jitter,
+  KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, detail, shade, jitter,
   mul3, mix3, smooth, clamp, lerp, broadleaf, blob, stick, overheadLine, quatPitch, quatXTo, strut,
 } from './kit.js';
 
@@ -361,8 +361,8 @@ export function* streetLamp(ctx, out, x, d, o = {}) {
 export function* car(ctx, out, x, d, color, dir = 1, lights = 0) {
   const y = groundY(ctx, x, d);
   const c = shade(color, 0, 0.5, 1, 0.6, 0.45);
-  out(x, y + 0.6, -d, 2.0, 0.42, 0.85, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER);
-  out(x - dir * 0.25, y + 1.18, -d, 1.15, 0.3, 0.72, 0.1, 0.11, 0.13, 1, 0, 0, 0, 1, KIND.OTHER);
+  out(x, y + 0.6, -d, 2.0, 0.42, 0.85, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);
+  out(x - dir * 0.25, y + 1.18, -d, 1.15, 0.3, 0.72, 0.1, 0.11, 0.13, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.STILL);
   if (lights) {
     glowPoint(out, x + dir * 2.05, y + 0.72, d - 0.6, [1.0, 0.95, 0.82], 0.13, 0.3, 5);
     glowPoint(out, x - dir * 2.05, y + 0.78, d - 0.6, RED, 0.11, 0.25, 4);
@@ -1176,6 +1176,13 @@ function* skyOver(ctx, out, dz) {
   if (globalThis.__nightcitySky) globalThis.__nightcitySky(ctx, out.n);    // for scripts: how many splats the sky took
 }
 
+// An emitter that tags every splat MOVE.STILL (for the craft's bodies: rigid, nothing on the beat);
+// the lamps and lit windows go through the plain out and keep the beat as lights do.
+function stillOut(out) {
+  const m = (x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind) => out(x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind, MOVE.STILL);
+  m.due = out.due; m.left = out.left; m.density = out.density; m.detailK = out.detailK; m.ctx = out.ctx; m.L = out.L;
+  return m;
+}
 // A craft's lamp at p ([x, y, z]). By day it is still lit, but small and without its halo.
 function glowAt(out, p, c, r, halo, hk) {
   const day = out.L && out.L.night < 0.3;
@@ -1203,7 +1210,8 @@ function airliner(ctx, out, c) {
   const hl = Math.hypot(hx, hz) || 1, rx = -hz / hl, rz = hx / hl;   // the starboard side
   // a point f metres ahead of the middle, s to starboard, u up
   const P = (f, s, u) => [x + hx * f + rx * s, y + hy * f + u, z + hz * f + rz * s];
-  const S = (p, q, r, col, n, kind) => strut(out, p[0], p[1], p[2], q[0], q[1], q[2], r, col, n, 1, kind);
+  const body_ = stillOut(out);
+  const S = (p, q, r, col, n, kind) => strut(body_, p[0], p[1], p[2], q[0], q[1], q[2], r, col, n, 1, kind);
   const kind = c.surreal ? KIND.SURREAL : KIND.OTHER;
   const body = [0.62, 0.64, 0.68], under = [0.42, 0.44, 0.48];
   const rf = Math.max(L * 0.03, 0.0005 * d), rw = Math.max(L * 0.011, 0.0004 * d);
@@ -1252,11 +1260,12 @@ function helicopter(ctx, out, c) {
   if (x < -len * 8 || x > ctx.length + len * 8) return;
   const fx = c.dir * Math.cos(c.yaw), fz = Math.sin(c.yaw), rx = -fz, rz = fx;
   const P = (f, s, v) => [x + (fx * f + rx * s) * u, y + v * u, z + (fz * f + rz * s) * u];
-  const S = (p, q, r, col, n) => strut(out, p[0], p[1], p[2], q[0], q[1], q[2], r, col, n, 1, KIND.OTHER);
+  const body_ = stillOut(out);
+  const S = (p, q, r, col, n) => strut(body_, p[0], p[1], p[2], q[0], q[1], q[2], r, col, n, 1, KIND.OTHER);
   const thin = (k) => Math.max(k * u, 0.0004 * d);
   const hull = [0.74, 0.74, 0.7], dark = [0.16, 0.17, 0.2];     // a pale hull: the night tint leaves it just lighter than the sky
   const q = quatXTo(fx, 0, fz);
-  const E = (p, sx, sy, sz, col) => out(p[0], p[1], p[2], sx * u, sy * u, sz * u, col[0], col[1], col[2], 1, q[0], q[1], q[2], q[3], KIND.OTHER);
+  const E = (p, sx, sy, sz, col) => body_(p[0], p[1], p[2], sx * u, sy * u, sz * u, col[0], col[1], col[2], 1, q[0], q[1], q[2], q[3], KIND.OTHER);
   E(P(1.4, 0, 0), 1.9, 1.0, 1.0, hull);                            // cabin
   E(P(3.0, 0, -0.25), 0.9, 0.7, 0.8, dark);                        // the glazed nose
   E(P(0.6, 0, 1.05), 1.5, 0.5, 0.7, hull);                         // engine cowling
@@ -1303,24 +1312,24 @@ function blimp(ctx, out, c) {
   const night = (out.L || lightState(ctx, out)).night > 0.3;
   const kind = c.surreal ? KIND.SURREAL : KIND.OTHER;
   const P = (f, s, v) => [x + dir * f * Lb, y + up * v * R, z + s * R];      // f along (nose +0.5), s towards the line, v up, in radii
-  const silver = [0.62, 0.64, 0.69], shadow = [0.36, 0.38, 0.43];
+  const silver = [0.62, 0.64, 0.69], shadow = [0.36, 0.38, 0.43], body_ = stillOut(out);
   const n = 8, prof = (t) => Math.sin(Math.PI * Math.pow(t, 0.8));            // fullest two fifths back from the nose
   const sign = NEON[(Math.floor(r() * NEON.length) + wrong * 2) % NEON.length], sign2 = r() < 0.5 ? [1.0, 0.95, 0.85] : NEON[(Math.floor(r() * NEON.length) + wrong) % NEON.length];
   const pale = mix3(sign, [1, 1, 1], 0.72), pm = Math.max(pale[0], pale[1], pale[2]), wash = [pale[0] / pm, pale[1] / pm, pale[2] / pm];   // brightest channel at 1: a light
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n, rr = R * prof(t), f = 0.5 - t;
-    out(x + dir * f * Lb, y, z, Lb / n * 0.78, rr * 0.78, rr * 0.78, silver[0], silver[1], silver[2], 1, 0, 0, 0, 1, kind);
+    body_(x + dir * f * Lb, y, z, Lb / n * 0.78, rr * 0.78, rr * 0.78, silver[0], silver[1], silver[2], 1, 0, 0, 0, 1, kind);
     // lit from inside by night, as a show airship is: brightest amidships
     if (night) light(out, x + dir * f * Lb, y - up * rr * 0.05, d - rr * 0.4, Lb / n * 0.74, rr * 0.64, rr * 0.3, wash, i >= 1 && i <= 5 ? 0.3 : 0.18);
   }
   // fins: top, bottom and one each side
   for (const [s, v] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
     const a = P(-0.36, s * 0.25, v * 0.25), b = P(-0.49, s * 1.2, v * 1.2);
-    strut(out, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(R * 0.14, 0.0005 * d), shadow, 2, 1, kind);
+    strut(body_, a[0], a[1], a[2], b[0], b[1], b[2], Math.max(R * 0.14, 0.0005 * d), shadow, 2, 1, kind);
   }
   // gondola and its windows
   const g = P(0.06, 0, -1.1);
-  out(g[0], g[1], g[2], Lb * 0.075, R * 0.17, R * 0.2, 0.2, 0.2, 0.23, 1, 0, 0, 0, 1, kind);
+  body_(g[0], g[1], g[2], Lb * 0.075, R * 0.17, R * 0.2, 0.2, 0.2, 0.23, 1, 0, 0, 0, 1, kind);
   const wa = P(0.0, 0.22, -1.08), wb = P(0.125, 0.22, -1.08);
   strut(out, wa[0], wa[1], wa[2], wb[0], wb[1], wb[2], Math.max(R * 0.05, 0.0007 * d), CABIN, 4, 0.9, KIND.LIGHT);
   // the sign: two lines of lit letters lying on the curve of the flank

@@ -1217,9 +1217,10 @@ function* saltworks(ctx, out, p, r) {
   const lx = x + ((n - 1) / 2) * gap * (r() < 0.5 ? 1 : 0.2) + 4, ld = d - R0 - 4, dir = r() < 0.5 ? 1 : -1;
   yield* loader(ctx, out, lx, ld, dir, r, s);
 }
-function* loader(ctx, out, x, d, dir, r, s) {
+function* loader(ctx, out0, x, d, dir, r, s) {
+  const out = withMove(out0, MOVE.STILL);   // a machine: rigid, nothing on the beat
   const y0 = groundY(ctx, x, d), yel = [0.78, 0.6, 0.12], kind = KIND.BUILDING;
-  shadowDisc(ctx, out, x + 0.6, d + 0.6, 3.2, 1.8, r);
+  shadowDisc(ctx, out0, x + 0.6, d + 0.6, 3.2, 1.8, r);
   yield* box(out, x - dir * 0.5, y0 + 0.75, d, 1, 0, 4.0, 2.1, 1.25, yel, s * 0.7, kind, r);
   yield* box(out, x - dir * 0.7, y0 + 2.0, d, 1, 0, 1.6, 1.6, 1.5, yel, s * 0.6, kind, r, {
     colorAt: (f, u, v, c) => (f < 4 && v > 0.45 && v < 1.35 && Math.min(u, (f > 1 ? 1.6 : 1.6) - u) > 0.12 ? GLASS : c),
@@ -1443,8 +1444,8 @@ function* station(ctx, out, p, r, on) {
   });
   // lights under the canopy at dusk
   if (on) for (let k = 0; k < 4; k++) out(x - L / 2 + 1.5 + k * (L - 3) / 3, y0 + ch - 0.05, -d, 0.5, 0.05, 0.5, 1, 0.95, 0.85, 1, 0, 0, 0, 1, KIND.LIGHT);
-  for (const a of [-2.2, 2.2]) {
-    yield* box(out, x + a, y0, d, 1, 0, 0.7, 0.5, 1.7, brand, s * 0.5, kind, r, { top: [0.78, 0.78, 0.76], colorAt: (f, u, v, c) => (v > 1.1 && v < 1.45 ? [0.75, 0.75, 0.72] : c) });
+  for (const a of [-2.2, 2.2]) {   // the fuel pumps: rigid machines, MOVE.STILL
+    yield* box(withMove(out, MOVE.STILL), x + a, y0, d, 1, 0, 0.7, 0.5, 1.7, brand, s * 0.5, kind, r, { top: [0.78, 0.78, 0.76], colorAt: (f, u, v, c) => (v > 1.1 && v < 1.45 ? [0.75, 0.75, 0.72] : c) });
   }
   if (out.due()) yield;
   const kx = x + (r() < 0.5 ? -1 : 1) * (L / 2 + 6);
@@ -1707,6 +1708,7 @@ function* relayMast(ctx, out, p, r, on) {
 // Nodding pump jacks: a skid, the samson post, the walking beam with its horse head, the pitman
 // arms and crank weights, and a storage tank.
 function* pumpjacks(ctx, out, p, r) {
+  const pj = withMove(out, MOVE.STILL);    // the pumps are rigid machines: nothing on the beat
   const x = p.x - ctx.x0, d = p.d, s = sOf(out, d, 0.8), kind = KIND.BUILDING;
   const col = [[0.22, 0.28, 0.4], [0.7, 0.56, 0.12], [0.52, 0.2, 0.15], [0.3, 0.32, 0.3]][Math.floor(r() * 4)];
   const n = 2 + Math.floor(r() * 3), gap = 26 + 14 * r(), dir = r() < 0.5 ? 1 : -1;
@@ -1714,29 +1716,29 @@ function* pumpjacks(ctx, out, p, r) {
     const px = x + (k - (n - 1) / 2) * gap + (r() - 0.5) * 6, pd = d + (r() - 0.5) * 30, y0 = groundY(ctx, px, pd);
     const rr = limb(0.12, pd), z = -pd, ph = (r() - 0.5) * 0.5;
     shadowDisc(ctx, out, px + 1, pd + 0.5, 4.5, 1.5, r, 0.64);
-    yield* box(out, px, y0, pd, 1, 0, 8, 1.6, 0.45, [0.3, 0.3, 0.3], s, kind, r);
+    yield* box(pj, px, y0, pd, 1, 0, 8, 1.6, 0.45, [0.3, 0.3, 0.3], s, kind, r);
     const pv = [px, y0 + 4.6, z];
     for (const dz of [-0.7, 0.7]) {
-      strut(out, px - 1.2, y0 + 0.4, z + dz, ...pv, rr, mul3(col, 0.9), 3, 1, kind);
-      strut(out, px + 1.0, y0 + 0.4, z + dz, ...pv, rr, mul3(col, 0.8), 3, 1, kind);
+      strut(pj, px - 1.2, y0 + 0.4, z + dz, ...pv, rr, mul3(col, 0.9), 3, 1, kind);
+      strut(pj, px + 1.0, y0 + 0.4, z + dz, ...pv, rr, mul3(col, 0.8), 3, 1, kind);
     }
     const ca = Math.cos(ph), sa = Math.sin(ph);
     const front = [px + dir * 3.4 * ca, pv[1] - 3.4 * sa * dir * 0 - 3.4 * sa, z], back = [px - dir * 3.0 * ca, pv[1] + 3.0 * sa, z];
-    strut(out, ...back, ...front, limb(0.22, pd), col, 4, 1, kind);
+    strut(pj, ...back, ...front, limb(0.22, pd), col, 4, 1, kind);
     // the horse head: a curved plate at the front end
     for (let k2 = 0; k2 < 4; k2++) {
       const a0 = -0.9 + k2 * 0.45, a1 = a0 + 0.45;
-      strut(out, front[0] + dir * 0.6 * Math.cos(a0), front[1] + 1.1 * Math.sin(a0), z, front[0] + dir * 0.6 * Math.cos(a1), front[1] + 1.1 * Math.sin(a1), z, limb(0.2, pd), col, 1, 1, kind);
+      strut(pj, front[0] + dir * 0.6 * Math.cos(a0), front[1] + 1.1 * Math.sin(a0), z, front[0] + dir * 0.6 * Math.cos(a1), front[1] + 1.1 * Math.sin(a1), z, limb(0.2, pd), col, 1, 1, kind);
     }
-    strut(out, front[0] + dir * 0.6, front[1] - 1.0, z, px + dir * 3.9, y0 + 0.5, z, limb(0.04, pd), [0.6, 0.6, 0.6], 2, 1, kind);   // the polished rod
-    yield* box(out, px + dir * 3.9, y0, pd, 1, 0, 0.6, 0.6, 0.6, [0.3, 0.3, 0.3], s * 0.5, kind, r);   // wellhead
+    strut(pj, front[0] + dir * 0.6, front[1] - 1.0, z, px + dir * 3.9, y0 + 0.5, z, limb(0.04, pd), [0.6, 0.6, 0.6], 2, 1, kind);   // the polished rod
+    yield* box(pj, px + dir * 3.9, y0, pd, 1, 0, 0.6, 0.6, 0.6, [0.3, 0.3, 0.3], s * 0.5, kind, r);   // wellhead
     // pitman arms down to the cranks, the counterweights and the gearbox
     const ck = [px - dir * 2.6, y0 + 1.4, z];
     for (const dz of [-0.6, 0.6]) {
-      strut(out, back[0], back[1], z + dz, ck[0] + dir * 0.4, ck[1] + 0.3, z + dz, limb(0.07, pd), mul3(col, 0.9), 2, 1, kind);
-      ell(out, ck[0], ck[1], z + dz, 0.9, 0.6, 0.18, 1, 0.4 * dir, 0, [0.2, 0.2, 0.2], kind);
+      strut(pj, back[0], back[1], z + dz, ck[0] + dir * 0.4, ck[1] + 0.3, z + dz, limb(0.07, pd), mul3(col, 0.9), 2, 1, kind);
+      ell(pj, ck[0], ck[1], z + dz, 0.9, 0.6, 0.18, 1, 0.4 * dir, 0, [0.2, 0.2, 0.2], kind);
     }
-    yield* box(out, ck[0], y0 + 0.4, pd, 1, 0, 1.4, 1.0, 0.9, mul3(col, 0.8), s * 0.5, kind, r);
+    yield* box(pj, ck[0], y0 + 0.4, pd, 1, 0, 1.4, 1.0, 0.9, mul3(col, 0.8), s * 0.5, kind, r);
     if (out.due()) yield;
   }
   // a storage tank and a flow line
@@ -2589,9 +2591,10 @@ export const saltflatBiome = {
   // buttes, dunes, poles) and the range; the terrain's own relief starts far away.
   terrain: { cutting: 0.8, roll: 1.2, rollScale: 900, rise: 0.004, hills: 30, hillScale: 4000, mountains: 1400, mountainScale: 9000, mountainStart: 5000 },
   hazeDist: 10500,
-  // On the beat the things on the flat answer, not the land: buildings, towers, masts, wagons and
+  // On the beat the things on the flat answer, not the land: buildings, towers, masts and
   // works (BUILDING) and the cacti and dead trees (TREE), plus, tagged MOVE.FLASH by hand, the
-  // people and animals (they brighten on the beat without swelling). The mesas, buttes and ranges
+  // people and animals (they brighten on the beat without swelling). Vehicles and pumps (the loader,
+  // the pumpjacks, the station's fuel pumps) are MOVE.STILL. The mesas, buttes and ranges
   // (ROCK) and the pole line stay still; the floating mesas, the needle, the monolith and the
   // mesa of impossible height are MOVE.SOLID (spared the dreamlike scatter, see mesa()).
   beatKinds: [KIND.BUILDING, KIND.TREE],
