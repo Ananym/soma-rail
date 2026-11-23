@@ -91,8 +91,21 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             round splat is snow (1.3 m/s, with a sway), a splat at least 2.5 times taller than
 //             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
 //             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
+//   CHASE     a lamp's light (KIND.LIGHT, a channel >= 0.97) in a row of lamps that chase at the
+//             music's tempo: while the music has a tempo lock, each lamp flares (to full brightness
+//             and half as large again) once every two beats and rests at 55% between, each a little
+//             after the lamp behind it, so a wave of light runs along the line (209 m from one crest
+//             to the next). With no lock it is exactly an untagged light, beat swell included.
+//             lamp() below tags its light with it. A biome that draws its own lamps tags every
+//             light splat of the lamp (the bright core and its halo alike) by passing MOVE.CHASE as
+//             the 16th argument of out(), e.g.
+//               out(x, y, -d, s, s, s, 1, 0.85, 0.55, 1, 0, 0, 0, 1, KIND.LIGHT, MOVE.CHASE);
+//             and leaves the post and the lamp's dark housing untagged. Where the flare falls is a
+//             matter of the lamp's place along the line, so lamps strung along the line (street
+//             lamps, station and motorway lamps) read as a chase; a cluster at one x flares as one.
+//             Not for lit windows, signs or vehicles.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11, SWAY: 12, STILL: 13 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11, SWAY: 12, STILL: 13, CHASE: 14 };
 // A chorus tag for group g (0..7): pass chorus(g) as the motion class.
 export const chorus = (g) => MOVE.CHORUS | ((g & 7) << 4);
 
@@ -796,13 +809,14 @@ export function* fence(ctx, out, d, opts = {}) {
   }
 }
 
-// A lamp: a bright core (ignores the time-of-day tint) and a soft halo.
-//   color should have a channel >= 0.97 to count as a light. opts: { size, halo (0..1) }
+// A lamp: a bright core (ignores the time-of-day tint) and a soft halo, both tagged MOVE.CHASE so
+// that rows of lamps chase at the music's tempo (pass opts.chase = false for a lamp that should not).
+//   color should have a channel >= 0.97 to count as a light. opts: { size, halo (0..1), chase }
 export function* lamp(ctx, out, x, y, d, color = [1, 0.85, 0.55], opts = {}) {
   out = asOut(ctx, out);
-  const s = opts.size || 0.08;
-  out(x, y, -d, s, s, s, color[0], color[1], color[2], 1, 0, 0, 0, 1, KIND.LIGHT);
-  if (opts.halo !== 0) out(x, y, -(d + 0.05), s * 5, s * 5, s * 2, color[0], color[1], color[2], 0.18 * (opts.halo || 1), 0, 0, 0, 1, KIND.LIGHT);
+  const s = opts.size || 0.08, mv = opts.chase === false ? MOVE.NONE : MOVE.CHASE;
+  out(x, y, -d, s, s, s, color[0], color[1], color[2], 1, 0, 0, 0, 1, KIND.LIGHT, mv);
+  if (opts.halo !== 0) out(x, y, -(d + 0.05), s * 5, s * 5, s * 2, color[0], color[1], color[2], 0.18 * (opts.halo || 1), 0, 0, 0, 1, KIND.LIGHT, mv);
   if (out.due()) yield;
 }
 

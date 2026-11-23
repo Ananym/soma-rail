@@ -507,7 +507,10 @@ uniforms.uFly.value = ((S.travelled % 49152) + 49152) % 49152;
         audio: !!audioProvider,
         // the slowest frame of the last few seconds, and what the frame before it spent its time on
         worst: { ms: Math.round(worst.ms), gen: Math.round(worst.gen), render: Math.round(worst.render), cpu: Math.round(worst.cpu), note: worst.note },
-        hitches: hitchTimes.length, idle: isIdle, moveT: +moveT.toFixed(2), fpsCap };
+        hitches: hitchTimes.length, idle: isIdle, moveT: +moveT.toFixed(2), fpsCap,
+        // the music signals as the shader last had them (after strengths and pins)
+        music: { big: +uniforms.uBeatBig.value.toFixed(2), small: +uniforms.uBeatSmall.value.toFixed(2), mid: +uniforms.uMid.value.toFixed(2),
+          weather: +uniforms.uWeather.value.toFixed(2), chase: +uniforms.uChase.value.toFixed(2), chaseOn: +uniforms.uChaseOn.value.toFixed(2) } };
     },
     dispose() {
       disposed = true;

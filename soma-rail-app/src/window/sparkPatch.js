@@ -81,6 +81,7 @@ uniform float uSway;`,
     int mv = mvBits.r | (mvBits.g << 1) | (mvBits.b << 2);
     int mvA = int(floor(rgba.a * 127.5 + 0.5));
     bool mvHi = (mvA & 1) == 1;                                   // classes 8 and up: see kit.js MOVE
+    float chaseLvl = 1.0, chaseSz = 1.0;                          // a chasing lamp's brightness and size (class 14)
     if (mvHi) {
         if (uMove > 0.0 && mv == 1) {
             // Riders (class 9: see kit.js rideCell). Like flight, without wings and much slower:
@@ -105,9 +106,22 @@ uniform float uSway;`,
             scales.z = scales.y;
             float ph = uSway + 0.07 * wx + 0.05 * center.z;
             float gust = 0.65 + 0.35 * sin(0.3 * uMoveT + 0.02 * wx + 0.013 * center.z);
-            float lean = min(uMove, 1.0) * h * (0.2 * gust * sin(ph) + 0.08 * uBeat);
+            // the mid band (vocals, melody) blows harder: up to 70% more swing at uMid = 1
+            float lean = min(uMove, 1.0) * h * (0.2 * gust * (1.0 + 0.7 * uMid) * sin(ph) + 0.08 * uBeatBig);
             center.x += lean;
             center.y -= 0.35 * lean * lean / max(h, 0.05);
+        } else if (mv == 6 && uChaseOn > 0.0) {
+            // Chase (class 14: see kit.js MOVE.CHASE): a lamp's light, in a row of lamps whose flares
+            // run along the line at the music's tempo. uChase counts beats; each lamp flares once
+            // every two beats, a little after the lamp behind it, so a wave of light runs down the
+            // row (one wavelength is 200 pi / 3 = 209.4 m of line). Between flares it rests at 55%.
+            // Wraps: uChase wraps at 1024, and 1024 * 0.5 = 512 whole cycles; uTravel wraps at 200 pi,
+            // and 200 pi * 0.00477465 = 3.000001 whole cycles (0.00477465 = 3 / (200 pi)): so the phase
+            // is the same either side of both wraps and no lamp jumps.
+            float cp = fract(uChase * 0.5 - (center.x + uTravel) * 0.00477465);
+            float flare = 1.0 - smoothstep(0.0, 0.16, min(cp, 1.0 - cp));   // peaks on its beat, gone a third of a beat (34 m) either side
+            chaseLvl = mix(1.0, 0.55 + 0.45 * flare, uChaseOn);
+            chaseSz = mix(1.0, 0.85 + 0.65 * flare, uChaseOn);
         }
     } else if (uMove > 0.0 && mv != 0) {
         // Things that move. Every phase is built from wrapped inputs whose wrap is a whole number of
@@ -120,7 +134,7 @@ uniform float uSway;`,
             float sz = max(scales.x, scales.y);
             float ph = 5.6 * uMoveT + 1.3 * wx + 0.9 * center.z + 2.0 * center.y;   // the y term runs the ripple down a hanging banner
             float gust = 0.55 + 0.45 * sin(0.6 * uMoveT + 0.05 * wx);
-            float amp = uMove * gust * sz;
+            float amp = uMove * gust * sz * (1.0 + 0.7 * uMid);         // the mid band blows harder: up to 70% further
             center.x += amp * 1.1 * sin(ph);
             center.y += amp * 0.3 * sin(1.7 * ph + 1.3);
             scales.x *= 1.0 + 0.35 * min(uMove, 1.0) * gust * sin(1.3 * ph + 2.0);
@@ -175,7 +189,11 @@ uniform float uSway;`,
             float u = (center.x + (sameWay ? uFlowWith[lane] : uFlowAgainst[lane])) / 48.0;
             float cell = mod(floor(u), 4096.0);
             vec3 hc = fract(sin(vec3(cell * 12.9898 + float(lane) * 37.7 + (sameWay ? 5.0 : 0.0), cell * 78.233 + float(lane) * 11.3, cell * 37.719 + float(lane) * 3.1)) * 43758.5453);
-            float present = step(0.42, hc.x);
+            // 58% of cells hold a vehicle at full weather; as the music quietens (uWeather falls to 0)
+            // the threshold climbs to 0.75 (25%), the same vehicles staying, each fading over 0.05 of
+            // the hash. At uWeather = 1 the smoothstep is 1 wherever the step is, so it is as before.
+            float wT = 0.75 - 0.33 * uWeather;
+            float present = step(0.42, hc.x) * smoothstep(wT - 0.05, wT, hc.x);
             float lorry = step(lane == 2 ? 0.45 : 0.92, hc.z);
             float halfL = mix(2.1, 6.5, lorry);
             float f = (fract(u) - (0.25 + 0.5 * hc.y)) * 48.0 * dirS;      // metres ahead of the vehicle's middle
@@ -221,7 +239,12 @@ uniform float uSway;`,
             center.y = mix(center.y, yy, min(uMove, 1.0));
             center.x += (1.0 - rain) * uMove * 0.35 * sin(0.9 * uMoveT + 6.2832 * hp);
             mvBlur = 1.0 - 0.7 * rain;   // a raindrop keeps its shape: smeared the full width of the train's motion, rain turns into grey sheets
-            rgba.a *= smoothstep(-6.0, -4.8, yy) * (1.0 - smoothstep(8.8, 10.0, yy));
+            // Weather: the music's loudness thins the fall. Each drop or flake is kept while its hash
+            // (of its distance, so steady as the world scrolls) is below a level that runs from 1.05
+            // at uWeather = 1 (every one kept: as before) to 0.375 at 0 (about 35% kept), fading
+            // over 0.05 of the hash so none pops.
+            float wKeep = 0.375 + 0.675 * uWeather;
+            rgba.a *= smoothstep(-6.0, -4.8, yy) * (1.0 - smoothstep(8.8, 10.0, yy)) * (1.0 - smoothstep(wKeep - 0.05, wKeep, hp));
         }
     }
     if (uDissolve > 0.0 && !(mvHi && mv == 2)) {
@@ -244,9 +267,25 @@ uniform float uSway;`,
     // and not into the ground. They brighten only a little: a flash reads as a light, not as life.
     // People and animals are the other way round (classes 8 and 9): a body that swells looks wrong,
     // so they keep their size and brighten for the length of the beat instead.
-    // (Classes 8 and up answer the beat in their own way or not at all: the raised rule leaves them be.)
-    float raised = (mvHi ? 0.0 : uBeatRaised) * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
+    // (Classes 8 and up answer the beat in their own way or not at all: the raised rule leaves them be,
+    // all but class 14, a chasing lamp, which is otherwise an ordinary light.)
+    // The beat is split by band: big things (the raised rule, picked things, the sway's nudge) take
+    // uBeatBig, the kick; small things (lights, a chorus) take uBeatSmall, the hats and snares; people
+    // and animals keep the whole beat. Unsplit, all three are uBeat.
+    // The mid band (uMid: vocals, melody) warms the lights: each grows by up to 15% and its colour
+    // leans warmer and fuller (less blue, a little less green), rescaled so that its brightest
+    // channel stays where it was and it stays a light.
+    float raised = ((mvHi && mv != 6) ? 0.0 : uBeatRaised) * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
+    {
+        // (the rescale comes after the warming, so a light keeps its brightest channel at every uMid;
+        // sign(wm) leaves the colour untouched, to the bit, where wm is 0)
+        float wm = uMid * isLight;
+        float m0 = max(rgba.r, max(rgba.g, rgba.b));
+        vec3 warm = rgba.rgb * mix(vec3(1.0), vec3(1.0, 0.92, 0.74), wm);
+        rgba.rgb = mix(rgba.rgb, warm * (m0 / max(max(warm.r, max(warm.g, warm.b)), 0.0001)), sign(wm));
+        scales *= 1.0 + 0.15 * wm;
+    }
     float picked = (!mvHi && mv == 6) ? 1.0 : 0.0;
     float flashed = (mvHi && mv <= 1) ? 1.0 - isLight : 0.0;
     // A chorus (class 11: see kit.js chorus()): the splat belongs to one of eight groups, carried in
@@ -258,9 +297,9 @@ uniform float uSway;`,
         chorus = step(fract(float((mvA >> 1) & 7) * 0.125 + uBeatSeq * 0.382), 0.4);
         rgba.a = 1.0;                                              // the group bits are not opacity
     }
-    scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.42 * picked * (1.0 - isLight) + 0.55 * chorus);
-    center.y += 0.3 * scales.y * uBeat * (picked * (1.0 - isLight) + chorus);
-    float shimmer = 1.0 + uBeat * (0.1 * picked * (1.0 - isLight) + 0.42 * flashed + 0.22 * chorus);
+    scales *= (1.0 + uBreath + uBeatBig * (0.1 * raised + 0.42 * picked * (1.0 - isLight)) + uBeatSmall * (0.32 * isLight + 0.55 * chorus)) * chaseSz;
+    center.y += 0.3 * scales.y * (uBeatBig * picked * (1.0 - isLight) + uBeatSmall * chorus);
+    float shimmer = (1.0 + uBeatBig * 0.1 * picked * (1.0 - isLight) + uBeat * 0.42 * flashed + uBeatSmall * 0.22 * chorus) * chaseLvl;
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
         shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, max(picked, max(flashed, chorus))) + 0.6 * isLight);
@@ -279,7 +318,7 @@ uniform float uSway;`,
         vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
         vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow) * shimmer, hazeCol, hz * (1.0 - 0.5 * glow));
         if (uMoveDebug > 0.5) {
-            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : mv == 2 ? vec3(0.55, 0.4, 1.0) : mv == 4 ? vec3(0.6, 1.0, 0.3) : mv == 5 ? vec3(0.45, 0.45, 0.5) : 0.25 + 0.75 * vec3(float((mvA >> 1) & 1), float((mvA >> 2) & 1), float((mvA >> 3) & 1)))
+            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : mv == 2 ? vec3(0.55, 0.4, 1.0) : mv == 4 ? vec3(0.6, 1.0, 0.3) : mv == 5 ? vec3(0.45, 0.45, 0.5) : mv == 6 ? vec3(0.0, 0.62, 0.58) : 0.25 + 0.75 * vec3(float((mvA >> 1) & 1), float((mvA >> 2) & 1), float((mvA >> 3) & 1)))
                 : mv == 0 ? vRgba.rgb * 0.35 : vec3(float(mv & 1), float((mv >> 1) & 1), float((mv >> 2) & 1)) * 0.8 + 0.2;
         }
     }`,
