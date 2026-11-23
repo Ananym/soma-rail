@@ -317,7 +317,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   document.addEventListener('visibilitychange', onVisible);
 
   let frames = 0, acc = 0, fps = 60, slowFor = 0, fastFor = 0;
-  let beatSeq = 0, lastBeatSeen = 0;
+  let beatSeq = 0, lastBeatSeen = 0, swayPhase = 0;
   // motion clock (seconds) and its wraps: 200 pi for phases, 4096 cells of 48 m for traffic
   let moveT = 0;
   const MOVE_WRAP = 200 * Math.PI, FLOW_WRAP = 48 * 4096, LANE_SPEED = [33, 29.5, 25];   // m/s, fast lane first
@@ -426,6 +426,11 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     else if (running && !(S.speed === 0 && S.rate === 0)) moveT += dt;
     uniforms.uMove.value = reducedMotion ? 0 : params.move;
     uniforms.uMoveT.value = moveT % MOVE_WRAP;
+    // Crops sway once for every two beats of the last tempo the analysis trusted (0.45 Hz with none),
+    // on the motion clock, so they stand still when the train does.
+    if (params.moveT >= 0) swayPhase = (params.moveT * 2 * Math.PI * 0.45) % (2 * Math.PI);
+    else if (running && !(S.speed === 0 && S.rate === 0)) swayPhase = (swayPhase + dt * 2 * Math.PI * (S.bpm > 40 ? Math.min(1.4, Math.max(0.3, S.bpm / 120)) : 0.45)) % (2 * Math.PI);
+    uniforms.uSway.value = swayPhase;
     uniforms.uTravel.value = S.travelled % MOVE_WRAP;
 uniforms.uFly.value = ((S.travelled % 49152) + 49152) % 49152;
         uniforms.uFall.value.set((1.3 * moveT) % 16, (9 * moveT) % 16);   // snow and rain: metres fallen

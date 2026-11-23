@@ -25,6 +25,7 @@ export const PATCH_UNIFORMS = () => ({
   uFlowWith: { value: null },       // THREE.Vector3: per-lane pattern offsets (m) for traffic going the train's way
   uFlowAgainst: { value: null },    // ... and for traffic coming the other way
   uFall: { value: null },           // THREE.Vector2: metres fallen by snow (x) and rain (y), wrapped at 16
+  uSway: { value: 0 },              // radians, wrapped at 2 pi: one sway for every two beats of the music (see engine.js)
   uFly: { value: 0 },               // metres travelled, wrapped at 2048 flight cells of 24 m
   uMoveDebug: { value: 0 },         // 1 paints each motion class a flat colour, to check the tagging
 });
@@ -53,7 +54,8 @@ uniform float uMoveDebug;
 uniform vec3 uFlowWith;
 uniform vec3 uFlowAgainst;
 uniform vec2 uFall;
-uniform float uFly;`,
+uniform float uFly;
+uniform float uSway;`,
   },
   {
     // scatter and breathe, before the splat is moved into view space
@@ -79,6 +81,21 @@ uniform float uFly;`,
             float kr = (mod(cellI, 2.0) < 0.5 ? 1.0 : -1.0) * (0.13 + 0.07 * hf) * min(uMove, 1.0);
             center.x -= kr * home;
             mvBlur = 1.0 - kr;
+        } else if (uMove > 0.0 && mv == 4) {
+            // Sway (class 12: see kit.js swayBlob and swayStrut): standing crops and grasses. A piece
+            // carries its height above its root in its thin axis (a fiftieth of it), and leans along
+            // the line by a share of that height, so a stalk bends from the ground and its ear
+            // travels furthest. The lean swings once for every two beats of the music (the CPU keeps
+            // the phase, at a walking pace when no tempo is known), as a wave that runs across the
+            // field, stronger in gusts; each beat adds a nudge the same way.
+            float wx = center.x + uTravel;
+            float h = scales.z * 50.0;
+            scales.z = scales.y;
+            float ph = uSway + 0.07 * wx + 0.05 * center.z;
+            float gust = 0.65 + 0.35 * sin(0.3 * uMoveT + 0.02 * wx + 0.013 * center.z);
+            float lean = min(uMove, 1.0) * h * (0.2 * gust * sin(ph) + 0.08 * uBeat);
+            center.x += lean;
+            center.y -= 0.35 * lean * lean / max(h, 0.05);
         }
     } else if (uMove > 0.0 && mv != 0) {
         // Things that move. Every phase is built from wrapped inputs whose wrap is a whole number of
@@ -248,7 +265,7 @@ uniform float uFly;`,
         vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
         vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow) * shimmer, hazeCol, hz * (1.0 - 0.5 * glow));
         if (uMoveDebug > 0.5) {
-            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : mv == 2 ? vec3(0.55, 0.4, 1.0) : 0.25 + 0.75 * vec3(float((mvA >> 1) & 1), float((mvA >> 2) & 1), float((mvA >> 3) & 1)))
+            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : mv == 2 ? vec3(0.55, 0.4, 1.0) : mv == 4 ? vec3(0.6, 1.0, 0.3) : 0.25 + 0.75 * vec3(float((mvA >> 1) & 1), float((mvA >> 2) & 1), float((mvA >> 3) & 1)))
                 : mv == 0 ? vRgba.rgb * 0.35 : vec3(float(mv & 1), float((mv >> 1) & 1), float((mv >> 2) & 1)) * 0.8 + 0.2;
         }
     }`,

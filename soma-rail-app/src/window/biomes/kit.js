@@ -77,6 +77,10 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             (pass chorus(g), below, not MOVE.CHORUS itself) and on every beat a different three
 //             or so of the eight swell, rise and brighten, every member of a group together. For
 //             a meadow's flowers, one group per colour. A chorus splat is always drawn opaque.
+//   SWAY      standing crops and grasses: each piece leans along the line in proportion to its height
+//             above its root, swinging once for every two beats of the music as a wave that runs
+//             across the field, with a nudge on each beat. Only through swayBlob() and swayStrut()
+//             below (the thin axis carries the height above the root).
 //   RIDE      a rider on the ground (a cyclist): carried along the line at about a sixth of the
 //             train's speed, and brightens on the beat like FLASH. Only through rideCell() below.
 //   FALL      falls, and comes round again at the top of a 16 m column about the eye's height: a
@@ -84,7 +88,7 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
 //             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11, SWAY: 12 };
 // A chorus tag for group g (0..7): pass chorus(g) as the motion class.
 export const chorus = (g) => MOVE.CHORUS | ((g & 7) << 4);
 
@@ -188,6 +192,21 @@ export function flyWing(out, ax, ay, az, bx, by, bz, r, c, n, rootY, kind = KIND
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n, y = ay + dy * t;
     out(ax + dx * t, y, az + dz * t, sl, r, Math.max(0.02, y - rootY) / 50, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.FLY);
+  }
+}
+// Things that sway (MOVE.SWAY): standing corn, tall grass, reeds. rootY is the height of the ground
+// the plant stands in; a piece leans by up to a fifth of its height above that. Keep colours natural.
+// swayBlob: an ear, a flower head or a tuft, sx wide and sy high (it has no depth of its own: the
+// shader gives it sy). swayStrut: a stalk or a leaf from a to b, r thick, in n pieces.
+export function swayBlob(out, x, y, z, sx, sy, c, rootY, kind = KIND.OTHER, alpha = 1) {
+  out(x, y, z, sx, sy, Math.max(0.02, y - rootY) / 50, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), alpha, 0, 0, 0, 1, kind, MOVE.SWAY);
+}
+export function swayStrut(out, ax, ay, az, bx, by, bz, r, c, n, rootY, kind = KIND.OTHER) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 1e-6;
+  const q = quatXTo(dx / len, dy / len, dz / len), sl = (len / n) * 0.5;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, y = ay + dy * t;
+    out(ax + dx * t, y, az + dz * t, sl, r, Math.max(0.02, y - rootY) / 50, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.SWAY);
   }
 }
 export function rotY(x, z, a) { const c = Math.cos(a), s = Math.sin(a); return [c * x + s * z, -s * x + c * z]; }
