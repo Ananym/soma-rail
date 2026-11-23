@@ -669,15 +669,24 @@ function* siding(ctx, out, x, d, len, rng) {
 // two ends (seen as the train passes). With float:true it hangs in the air with its scree tapering
 // to a point beneath (level 1).
 //   x, d  chunk-local centre of the front face base; opts: { w, h, dep, rng, seed, pitch (splat
-//   spacing), maxN, tint, tintAmt, float, lift, skirt (scree fraction of h), kind }
+//   spacing), maxN, tint, tintAmt, float, lift, skirt (scree fraction of h), kind, move }
+// A floating mesa is tagged MOVE.SOLID (unless o.move says otherwise): hanging alone against the
+// sky it has nothing behind it, and the dreamlike level's scatter would leave a cloud of specks.
+// Its underside is a closed tapering mass (rows of rounded-rectangle rings, each narrower and
+// shallower than the one above, down to a point), so it reads as hanging rock from every angle
+// of a pass and from below; the cliff ends start where the underside does.
 export function* mesa(ctx, out, x, d, o = {}) {
   const rng = o.rng || ctx.rng;
   const w = o.w || 200, h = o.h || 80, dep = o.dep || w * 0.5;
   const sd = o.seed != null ? o.seed : Math.floor(rng() * 1e6);
   const flo = !!o.float;
+  const mv = o.move != null ? o.move : (flo ? MOVE.SOLID : 0);
+  if (mv) out = withMove(out, mv);
   const hs = h * (o.skirt != null ? o.skirt : (flo ? 0.5 : 0.3));
   let p = o.pitch || Math.max(detail(out, d, 2.3), 0.3);
-  const area = (w + hs * 1.7) * h + dep * h * 0.7;
+  const area = flo
+    ? (w + dep * 0.7) * (h - hs) + 0.95 * (w + dep) * Math.hypot(hs, w * 0.25)
+    : (w + hs * 1.7) * h + dep * h * 0.7;
   if (flo) p *= 0.75;
   p = Math.max(p, Math.sqrt(area / (o.maxN || 6000 * out.density)));
   const y0 = groundY(ctx, x, d) + (flo ? (o.lift || 100) : -0.3 * Math.min(1, h / 40));
@@ -730,9 +739,10 @@ export function* mesa(ctx, out, x, d, o = {}) {
   const ny = Math.max(3, Math.ceil(h / p));
   const rowH = h / ny;
   const zs = (y) => (y < hs && !flo ? -(hs - y) * 0.9 : 0);          // scree comes toward the camera
-  // front face
+  // front face (for a floating mesa only the cliff: its underside is drawn whole below)
   for (let j = 0; j < ny; j++) {
     const y = (j + 0.5) * rowH;
+    if (flo && y < hs) continue;
     const hw = halfW(y);
     const nu = Math.max(1, Math.round(2 * hw / p));
     for (let i = 0; i < nu; i++) {
@@ -760,6 +770,7 @@ export function* mesa(ctx, out, x, d, o = {}) {
   for (const side of [-1, 1]) {
     for (let j = 0; j < ny; j++) {
       const y = (j + 0.5) * rowH;
+      if (flo && y < hs) continue;
       const hw = halfW(y);
       if (y > top(side * hw)) continue;
       for (let t = 0; t < nt; t++) {
@@ -768,6 +779,74 @@ export function* mesa(ctx, out, x, d, o = {}) {
       }
       if (out.due()) yield;
     }
+  }
+  if (flo) yield* underside(out, x, y0, d, w, dep, hs, h, p, halfW, colorAt, rng, sd, kind);
+}
+
+// The hanging underside of a floating mesa: rings of splats round a rounded rectangle (a
+// superellipse) that fills the cliff block's footprint at the top (y = hs) and shrinks with halfW
+// down to a point, each splat lying in the surface (along the ring and down the slope) and sized
+// to overlap its neighbours both ways. The outline is roughened so it reads as scree, not a cone.
+const RING_K = 48;
+const RING_C = new Float64Array(RING_K + 1), RING_S = new Float64Array(RING_K + 1);
+for (let k = 0; k <= RING_K; k++) {
+  const t = (k / RING_K) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
+  RING_C[k] = Math.sign(c) * Math.pow(Math.abs(c), 0.6); RING_S[k] = Math.sign(s) * Math.pow(Math.abs(s), 0.6);
+}
+function* underside(out, x, y0, d, w, dep, hs, h, p, halfW, colorAt, rng, sd, kind) {
+  const cz = d + dep / 2;
+  const nr = Math.max(4, Math.ceil(hs / (p * 0.9)));
+  const dy = hs / nr;
+  const cum = new Float64Array(RING_K + 1);
+  for (let j = 0; j < nr; j++) {
+    const y = hs - (j + 0.5) * dy;                       // from the top of the underside down
+    const f = halfW(y) / (w / 2);
+    if (f < 0.02) break;
+    const a = (w / 2) * f, b = (dep / 2) * f;
+    // how much the ring shrinks from one row to the next (df of the width fraction per row)
+    const fn = halfW(Math.max(0, y - dy)) / (w / 2), fu = halfW(Math.min(hs, y + dy)) / (w / 2);
+    const df = (fu - fn) * 0.5;
+    cum[0] = 0;
+    for (let k = 1; k <= RING_K; k++) cum[k] = cum[k - 1] + Math.hypot((RING_C[k] - RING_C[k - 1]) * a, (RING_S[k] - RING_S[k - 1]) * b);
+    const per = cum[RING_K];
+    const n = Math.max(6, Math.round(per / p));
+    const step = per / n;
+    let k = 1;
+    const off = rng();
+    for (let i = 0; i < n; i++) {
+      const L = (i + off) * step;
+      while (k < RING_K && cum[k] < L) k++;
+      const t = (L - cum[k - 1]) / Math.max(1e-6, cum[k] - cum[k - 1]);
+      const ux = RING_C[k - 1] + (RING_C[k] - RING_C[k - 1]) * t, us = RING_S[k - 1] + (RING_S[k] - RING_S[k - 1]) * t;
+      // tangent along the ring and the outward normal, in (x, distance)
+      const tx = (RING_C[k] - RING_C[k - 1]) * a, td = (RING_S[k] - RING_S[k - 1]) * b;
+      const tl = Math.hypot(tx, td) || 1;
+      const ex = tx / tl, ed = td / tl;
+      let nx = ed, nd = -ex;
+      if (nx * ux * a + nd * us * b < 0) { nx = -nx; nd = -nd; }
+      // jagged: ribs and hollows that run down the slope (noise of the ring position, drifting a
+      // little row by row), deeper toward the point
+      const ang = L / per;
+      const rib = noise1(ang * 22 + j * 0.12, sd + 7), rib2 = noise1(ang * 61 + j * 0.3, sd + 8);
+      const rough = 1 + (0.16 * (rib - 0.5) * 2 + 0.07 * (rib2 - 0.5) * 2) * (0.5 + 0.8 * (1 - f));
+      const px = x + ux * a * rough, pd = cz - us * b * rough;
+      // the slope: one row down and in (splat space: z = -distance), and its length, which a
+      // splat must reach along to overlap the next ring
+      const sx = -ux * (w / 2) * df, sz = -us * (dep / 2) * df;
+      const slant = Math.hypot(dy, sx, sz);
+      let c = colorAt(y, ux * a, 0);
+      const lightK = 0.88 + 0.12 * Math.max(0, -nd) - 0.1 * Math.max(0, nx);  // front lit, east end in shade
+      c = mul3(c, lightK * (0.78 + 0.34 * rib));          // ribs catch light, hollows are dark
+      const q = quatBasis(ex, 0, -ed, sx, -dy, sz);
+      out(px, y0 + y + (rng() - 0.5) * dy * 0.3, -pd, step * 0.78, slant * 0.8, p * 0.25, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind);
+    }
+    if (out.due()) yield;
+  }
+  // the point: a few rough lumps where the rings close
+  for (let k = 0; k < 3; k++) {
+    const c = colorAt(dy * k, 0, 0);
+    const r0 = Math.max(p * 0.5, halfW(dy * (k + 1)) * 0.6);
+    out(x + (rng() - 0.5) * p * 0.4, y0 + dy * (k + 0.2), -(cz + (rng() - 0.5) * p * 0.4), r0, dy * 0.8, Math.max(r0 * dep / w, p * 0.5), c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
   }
 }
 
@@ -906,7 +985,8 @@ function* roadFences(ctx, out, dLo, dHi) {
 
 // ---------------------------------------------------------------------------------------------
 // People and animals: a handful of shaped splats each, legs as struts, drawn about 1.3 times life
-// size so they read at 50 to 100 m. Every one is tagged MOVE.BEAT by the caller (withMove).
+// size so they read at 50 to 100 m. Every one is tagged MOVE.FLASH by the caller (withMove): it
+// brightens on the beat but does not swell (a swelling body looks wrong).
 // ---------------------------------------------------------------------------------------------
 const LIFE = 1.3;
 // A local frame on the ground: forward (fx, fd) in (x, distance) and across it, pz > 0 being the
@@ -2136,7 +2216,7 @@ function windFarm(ws) { const h = hashInts(ws, 1501) / 4294967296; return { d: 3
 const turbineAt = (ws, k) => noise1((k * TURB) / 21000, ws + 1502) > 0.7 && hashInts(ws, 1503, k) % 5 !== 0;
 
 function* drawPlace(ctx, out, p) {
-  const r = makeRng(p.seed), beat = withMove(out, MOVE.BEAT), on = lit(ctx), x = p.x - ctx.x0;
+  const r = makeRng(p.seed), beat = withMove(out, MOVE.FLASH), on = lit(ctx), x = p.x - ctx.x0;
   switch (p.kind) {
     case 'saltworks': yield* saltworks(ctx, out, p, r); break;
     case 'ponds': yield* ponds(ctx, out, p, r); break;
@@ -2363,7 +2443,7 @@ function* mid(ctx, emit) {
     const w = (120 + 260 * r()) * (0.5 + scaleK), h = (45 + 95 * r() * r()+ 30 * r()) * (0.7 + 0.7 * scaleK);
     if (dz.topology > 0 && r() < dz.topology * 0.6) {
       // floating mesa: lifted well above the flat, scree hanging below
-      yield* mesa(ctx, out, wx - ctx.x0, d, { w: w * 0.7, h: h * 1.1, rng: r, seed: gseed, float: true, lift: 110 + 260 * r() * dz.topology, kind: KIND.SURREAL, tint: SKY_LOW, tintAmt: 0.1 * smooth(300, 3000, d) });
+      yield* mesa(ctx, out, wx - ctx.x0, d, { w: w * 0.7, h: h * 1.1, rng: r, seed: gseed, float: true, lift: 110 + 260 * r() * dz.topology, kind: KIND.SURREAL, tint: [0.62, 0.56, 0.62], tintAmt: 0.25 * smooth(500, 3000, d) });
     } else {
       yield* mesa(ctx, out, wx - ctx.x0, d, { w, h, rng: r, seed: gseed, tint: [0.62, 0.56, 0.62], tintAmt: 0.25 * smooth(500, 3000, d) });
     }
@@ -2380,7 +2460,7 @@ function* mid(ctx, emit) {
     for (const { i, wx0 } of cellsAround(ctx, 6000, 200)) {
       const r = worldRng(ctx, 97, i);
       if (r() > 0.55 * dz.scale) continue;
-      yield* mesa(ctx, out, wx0 + r() * 6000 - ctx.x0, 1100 + 1200 * r(), { w: 90 + 60 * r(), h: 600 + 900 * dz.scale * r(), rng: r, seed: Math.floor(r() * 1e6), kind: KIND.SURREAL, maxN: 1400 * out.density, skirt: 0.2, tint: [0.62, 0.56, 0.62], tintAmt: 0.2 });
+      yield* mesa(ctx, out, wx0 + r() * 6000 - ctx.x0, 1100 + 1200 * r(), { w: 90 + 60 * r(), h: 600 + 900 * dz.scale * r(), rng: r, seed: Math.floor(r() * 1e6), kind: KIND.SURREAL, maxN: 1400 * out.density, skirt: 0.2, tint: [0.62, 0.56, 0.62], tintAmt: 0.2, move: MOVE.SOLID });
     }
   }
   // places out on the flat, and the power line striding along it
@@ -2434,7 +2514,7 @@ function* slab(ctx, out, x, d, o) {
   const rng = o.rng, w = o.w, h = o.h, t = w * 0.22, col = o.color;
   const s = Math.max(Math.sqrt((w * h) / (o.n || 300)) * 0.8, 0.5);
   const base = groundY(ctx, x, d) - h * 0.05;
-  yield* box(out, x, base, d + t / 2, 1, 0, w, t, h * 1.05, col, s, KIND.SURREAL, rng, { top: false, colorAt: (f, u, v, c) => mul3(c, 0.92 + 0.2 * (v / h)) });
+  yield* box(withMove(out, MOVE.SOLID), x, base, d + t / 2, 1, 0, w, t, h * 1.05, col, s, KIND.SURREAL, rng, { top: false, colorAt: (f, u, v, c) => mul3(c, 0.92 + 0.2 * (v / h)) });
 }
 
 function* far(ctx, emit) {
@@ -2464,7 +2544,7 @@ function* far(ctx, emit) {
     const w = 900 + 2400 * r(), h = 240 + 460 * r();
     const tintAmt = 0.4;
     if (dz.topology > 0 && r() < dz.topology * 0.5) {
-      yield* mesa(ctx, out, wx - ctx.x0, d, { w: w * 0.6, h: h * 0.8, rng: r, seed: Math.floor(r() * 1e6), float: true, lift: 500 + 900 * r() * dz.topology, kind: KIND.SURREAL, maxN: 900 * out.density, tint: [0.5, 0.48, 0.64], tintAmt });
+      yield* mesa(ctx, out, wx - ctx.x0, d, { w: w * 0.6, h: h * 0.8, rng: r, seed: Math.floor(r() * 1e6), float: true, lift: 500 + 900 * r() * dz.topology, kind: KIND.SURREAL, maxN: 1100 * out.density, tint: [0.46, 0.42, 0.6], tintAmt: tintAmt * 0.65 });
     } else {
       yield* mesa(ctx, out, wx - ctx.x0, d, { w, h, rng: r, seed: Math.floor(r() * 1e6), maxN: 1100 * out.density, tint: [0.46, 0.42, 0.6], tintAmt });
     }
@@ -2483,7 +2563,7 @@ function* far(ctx, emit) {
     for (const { i, wx0 } of cellsAround(ctx, 16000, 2500)) {
       const r = worldRng(ctx, 123, i);
       if (r() > 0.5 * dz.scale) continue;
-      yield* mesa(ctx, out, wx0 + 2000 + r() * 12000 - ctx.x0, 6000 + 4000 * r(), { w: 1400 + 900 * r(), h: 1700 + 1800 * dz.scale * r(), rng: r, seed: Math.floor(r() * 1e6), kind: KIND.SURREAL, maxN: 1300 * out.density, skirt: 0.2, tint: [0.46, 0.42, 0.6], tintAmt: 0.4 });
+      yield* mesa(ctx, out, wx0 + 2000 + r() * 12000 - ctx.x0, 6000 + 4000 * r(), { w: 1400 + 900 * r(), h: 1700 + 1800 * dz.scale * r(), rng: r, seed: Math.floor(r() * 1e6), kind: KIND.SURREAL, maxN: 1300 * out.density, skirt: 0.2, tint: [0.46, 0.42, 0.6], tintAmt: 0.4, move: MOVE.SOLID });
     }
   }
   // the ground out here: the pale flat and, past 5 km, the foothills the terrain raises
@@ -2510,8 +2590,10 @@ export const saltflatBiome = {
   terrain: { cutting: 0.8, roll: 1.2, rollScale: 900, rise: 0.004, hills: 30, hillScale: 4000, mountains: 1400, mountainScale: 9000, mountainStart: 5000 },
   hazeDist: 10500,
   // On the beat the things on the flat answer, not the land: buildings, towers, masts, wagons and
-  // works (BUILDING) and the cacti and dead trees (TREE), plus, tagged MOVE.BEAT by hand, the
-  // people and animals. The mesas, buttes and ranges (ROCK) and the pole line stay still.
+  // works (BUILDING) and the cacti and dead trees (TREE), plus, tagged MOVE.FLASH by hand, the
+  // people and animals (they brighten on the beat without swelling). The mesas, buttes and ranges
+  // (ROCK) and the pole line stay still; the floating mesas, the needle, the monolith and the
+  // mesa of impossible height are MOVE.SOLID (spared the dreamlike scatter, see mesa()).
   beatKinds: [KIND.BUILDING, KIND.TREE],
   generators: { trackside, near, mid, far },
 };
