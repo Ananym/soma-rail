@@ -64,16 +64,20 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             along the line relative to the land and flaps. Only through flightCell(), flyBody()
 //             and flyWing() below.
 //   VAPOUR    billows slowly (plumes, mist, cloud streamers, smoke)
-//   BEAT      does not move, but swells and brightens on each beat of the music. By default
-//             everything above eye level answers the beat; a biome that sets beatKinds (a list
-//             of KINDs, e.g. [KIND.TREE, KIND.BUILDING]) switches that off and has those kinds,
+//   BEAT      does not move, but swells on each beat of the music: for plants and things. By
+//             default everything above eye level answers the beat; a biome that sets beatKinds (a
+//             list of KINDs, e.g. [KIND.TREE, KIND.BUILDING]) switches that off and has those kinds,
 //             plus anything tagged BEAT by hand, answer it instead. Lights always do.
+//   FLASH     does not move or swell, but brightens on each beat: for people and animals, on
+//             whom a swell looks uncanny.
+//   RIDE      a rider on the ground (a cyclist): carried along the line at about a sixth of the
+//             train's speed, and brightens on the beat like FLASH. Only through rideCell() below.
 //   FALL      falls, and comes round again at the top of a 16 m column about the eye's height: a
 //             round splat is snow (1.3 m/s, with a sway), a splat at least 2.5 times taller than
 //             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
 //             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9 };
 
 // Direction toward the sun for baked shading: high, to the left (-x) and on the camera's side
 // (+z), so the faces the window sees are lit and tops are brightest.
@@ -155,6 +159,13 @@ export function flightCell(wx) {
   const c = Math.round(wx / FLY_CELL);
   return { wx: c * FLY_CELL, dir: (((c % 2) + 2) % 2) === 0 ? 1 : -1 };
 }
+// Things that ride along the ground (MOVE.RIDE): the same cells as flight. rideCell(wx) gives the
+// cell's middle and `dir`, the way everything standing in that cell travels and so must face. The
+// shader carries every RIDE splat in the cell along the line by up to a fifth of the distance
+// between the cell and the eye (about 60 m either way at the edges of the view), so what it rides
+// on must run straight and level along the line for that far, and the rider keeps within 8 m of
+// the cell's middle. Tag every splat of the rider and the machine with MOVE.RIDE.
+export const rideCell = flightCell;
 // A piece of a flying thing's body: an ellipsoid sx long (along x) and sy high. Keep colours natural.
 export function flyBody(out, x, y, z, sx, sy, c, q = Q_ID, kind = KIND.OTHER) {
   out(x, y, z, sx, sy, 0.0004, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.FLY);

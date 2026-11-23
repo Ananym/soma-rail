@@ -57,11 +57,27 @@ uniform float uFly;`,
     // scatter and breathe, before the splat is moved into view space
     anchor: 'rgba.rgb = max(rgba.rgb, vec3(0.0));',
     insert: `
-    // Motion class: three bits carried in the lowest bit of each colour channel (see tagLast below).
+    // Motion class: three bits carried in the lowest bit of each colour channel, and a fourth in the
+    // opacity (see tagLast below). The renderer keeps opacity at half scale, so by here rgba.a is
+    // twice a byte's worth and the byte's lowest bit is the second-lowest of the one that was packed.
     float mvBlur = 1.0;   // how much of the world's motion blur this splat takes
     ivec3 mvBits = ivec3(floor(rgba.rgb * 255.0 + 0.5)) & 1;
     int mv = mvBits.r | (mvBits.g << 1) | (mvBits.b << 2);
-    if (uMove > 0.0 && mv != 0) {
+    bool mvHi = (int(floor(rgba.a * 127.5 + 0.5)) & 1) == 1;      // classes 8 and up: see kit.js MOVE
+    if (mvHi) {
+        if (uMove > 0.0 && mv == 1) {
+            // Riders (class 9: see kit.js rideCell). Like flight, without wings and much slower:
+            // whatever stands in one 24 m cell of the line is carried along it at 0.13 to 0.2 of the
+            // train's speed, with the train in even cells and against it in odd ones. Its place is a
+            // matter of where the train is, so it never jumps and it stops when the train does.
+            float cellI = floor((center.x + uFly) / 24.0 + 0.5);
+            float home = cellI * 24.0 - uFly;
+            float hf = fract(sin(mod(cellI, 2048.0) * 12.9898) * 43758.5453);
+            float kr = (mod(cellI, 2.0) < 0.5 ? 1.0 : -1.0) * (0.13 + 0.07 * hf) * min(uMove, 1.0);
+            center.x -= kr * home;
+            mvBlur = 1.0 - kr;
+        }
+    } else if (uMove > 0.0 && mv != 0) {
         // Things that move. Every phase is built from wrapped inputs whose wrap is a whole number of
         // cycles (uMoveT and uTravel wrap at 200 pi; every multiplier on them is a multiple of 0.01),
         // so nothing jumps when they wrap. center.z never changes as the world scrolls and center.y
@@ -191,15 +207,18 @@ uniform float uFly;`,
     // beatKinds). The chosen things swell by a good deal, since a small swell hardly shows on a mass
     // of overlapping splats, and rise by a part of their own height so that the growth goes upward
     // and not into the ground. They brighten only a little: a flash reads as a light, not as life.
+    // People and animals are the other way round (classes 8 and 9): a body that swells looks wrong,
+    // so they keep their size and brighten for the length of the beat instead.
     float raised = uBeatRaised * smoothstep(0.0, 0.07, center.y / max(length(center), 1.0));
     float isLight = smoothstep(0.86, 0.98, max(rgba.r, max(rgba.g, rgba.b)));
-    float picked = mv == 6 ? 1.0 : 0.0;
+    float picked = (!mvHi && mv == 6) ? 1.0 : 0.0;
+    float flashed = (mvHi && mv <= 1) ? 1.0 - isLight : 0.0;
     scales *= 1.0 + uBreath + uBeat * (0.1 * raised + 0.32 * isLight + 0.42 * picked * (1.0 - isLight));
     center.y += 0.3 * scales.y * uBeat * picked * (1.0 - isLight);
-    float shimmer = 1.0 + 0.1 * uBeat * picked * (1.0 - isLight);
+    float shimmer = 1.0 + uBeat * (0.1 * picked * (1.0 - isLight) + 0.42 * flashed);
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
-        shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, picked) + 0.6 * isLight);
+        shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, max(picked, flashed)) + 0.6 * isLight);
     }`,
   },
   {
@@ -215,7 +234,8 @@ uniform float uFly;`,
         vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
         vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow) * shimmer, hazeCol, hz * (1.0 - 0.5 * glow));
         if (uMoveDebug > 0.5) {
-            vRgba.rgb = mv == 0 ? vRgba.rgb * 0.35 : vec3(float(mv & 1), float((mv >> 1) & 1), float((mv >> 2) & 1)) * 0.8 + 0.2;
+            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : vec3(1.0, 0.55, 0.1))
+                : mv == 0 ? vRgba.rgb * 0.35 : vec3(float(mv & 1), float((mv >> 1) & 1), float((mv >> 2) & 1)) * 0.8 + 0.2;
         }
     }`,
   },
@@ -249,17 +269,23 @@ export function buildVertexShader(defaultShader) {
 }
 
 // ---- motion tags ----
-// A splat's motion class (kit.js MOVE, 0..7) rides in the lowest bit of its red, green and blue
-// bytes: a change of at most 1/255 in colour, read back in the vertex shader above. Every splat that
-// reaches the renderer must therefore have those bits set on purpose: tagLast() after each push,
-// clearTags() for splats loaded from a file.
+// A splat's motion class (kit.js MOVE, 0..15) rides in the lowest bit of its red, green and blue
+// bytes (a change of at most 1/255 in colour) and, for its fourth bit, in the second-lowest bit of
+// its opacity byte. The renderer halves opacity on its way to the shader, so the opacity byte is
+// kept even, which makes the halving exact, and capped at 254: a change of at most 3/255 in
+// opacity. Every splat that reaches the renderer must therefore have those bits set on purpose:
+// tagLast() after each push, clearTags() for splats loaded from a file.
+const tagWord = (w, cls) => {
+  const a8 = (Math.min(w >>> 24, 254) & 0xfc) | (((cls >> 3) & 1) << 1);
+  return (((w & 0x00fefefe) | (cls & 1) | (((cls >> 1) & 1) << 8) | (((cls >> 2) & 1) << 16)) | (a8 << 24)) >>> 0;
+};
 export function tagLast(packed, cls = 0) {
   const a = packed.packedArray, i4 = (packed.numSplats - 1) * 4;
-  a[i4] = ((a[i4] & 0xfffefefe) | (cls & 1) | (((cls >> 1) & 1) << 8) | (((cls >> 2) & 1) << 16)) >>> 0;
+  a[i4] = tagWord(a[i4], cls);
 }
 export function clearTags(packed) {
   const a = packed.packedArray;
   if (!a) return;
-  for (let i = 0, n = packed.numSplats * 4; i < n; i += 4) a[i] = (a[i] & 0xfffefefe) >>> 0;
+  for (let i = 0, n = packed.numSplats * 4; i < n; i += 4) a[i] = tagWord(a[i], 0);
   packed.needsUpdate = true;
 }

@@ -314,7 +314,7 @@ function* fieldContents(ctx, out, L, dLo, dHi, margin, opts = {}) {
           const x = wx - ctx.x0, y = groundY(ctx, x, d);
           // An animal: body, head (down to graze, or up), four legs where they can be seen. Drawn
           // a third over life size so a flock reads from the train, and it answers the beat.
-          const sheep = f.flock === 1, B = MOVE.BEAT, S = 1.35;
+          const sheep = f.flock === 1, B = MOVE.FLASH, S = 1.35;
           const c = sheep ? [0.74, 0.72, 0.64] : rng() < 0.5 ? [0.12, 0.1, 0.09] : [0.38, 0.24, 0.15];
           const bl = (sheep ? 0.55 : 1.0) * S, bh = (sheep ? 0.36 : 0.58) * S, leg = (sheep ? 0.36 : 0.68) * S;
           const dir = rng() < 0.5 ? -1 : 1, grazing = rng() < 0.6;
