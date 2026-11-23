@@ -25,3 +25,5 @@ dist-ssr
 
 # screenshots written by scripts/app-check.cjs
 app-*.png
+# the sheet scripts/check-sky.mjs writes
+sky-check.png
