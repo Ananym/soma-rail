@@ -134,8 +134,11 @@ const outDir = process.argv[2] || '.';
       T.hiddenAtFirst = !(await shown());
       const playing = () => page.evaluate(() => document.querySelector('audio').src);
       const srcBefore = await playing();
+      // how long the page takes to get round to a timer: on a starved software renderer this can be
+      // seconds, and then the fixed waits below prove nothing (the number is printed to say so)
+      T.lagMs = await page.evaluate(async () => { let worst = 0; for (let i = 0; i < 5; i++) { const t = performance.now(); await new Promise((r) => setTimeout(r, 0)); worst = Math.max(worst, performance.now() - t); } return Math.round(worst); });
       await page.touchscreen.tap(195, 420);
-      T.shownAfterTap = await until(shown, 4000);
+      T.shownAfterTap = await until(shown, 12000);
       await page.waitForTimeout(1500);
       T.tapPressedNothing = (await playing()) === srcBefore;     // the tap that reveals the channels must not choose one
       // Done inside the page in one go: step by step from here, this renderer is slow enough for the
@@ -144,12 +147,12 @@ const outDir = process.argv[2] || '.';
         const c = document.querySelector('canvas'), np = document.querySelector('.now-playing');
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         const up = () => !np.classList.contains('fade-out');
-        if (!up()) { c.click(); await wait(400); }
+        // each tap is given until the panel has answered it (at most 5 s), not a fixed moment
+        const tapUntil = async (want) => { c.click(); for (let i = 0; i < 50 && up() !== want; i++) await wait(100); return up(); };
+        if (!up()) await tapUntil(true);
         const before = up();
-        c.click(); await wait(400);
-        const after = up();
-        c.click(); await wait(400);
-        return { before, after, again: up() };
+        const after = await tapUntil(false);
+        return { before, after, again: await tapUntil(true) };
       });
       T.shownBeforeSecondTap = glass.before; T.hiddenAfterSecondTap = glass.before && !glass.after; T.shownByThirdTap = glass.again;
       // the controls a phone gets

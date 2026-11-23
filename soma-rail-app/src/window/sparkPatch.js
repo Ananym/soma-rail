@@ -191,7 +191,9 @@ uniform float uFly;`,
             rgba.a *= smoothstep(-6.0, -4.8, yy) * (1.0 - smoothstep(8.8, 10.0, yy));
         }
     }
-    if (uDissolve > 0.0) {
+    if (uDissolve > 0.0 && !(mvHi && mv == 2)) {
+        // (Class 10, SOLID, is spared: a thing hanging alone in the sky has nothing behind it to
+        // fill the gaps, and scattered it reads as a cloud of specks.)
         // Keyed to the splat's distance from the track, which never changes as the world scrolls:
         // the scatter is steady, and things at one distance (a facade, a wire) drift together.
         // (Keying it to the splat's index would re-roll everything each time a chunk came or went.)
@@ -234,7 +236,7 @@ uniform float uFly;`,
         vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
         vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow) * shimmer, hazeCol, hz * (1.0 - 0.5 * glow));
         if (uMoveDebug > 0.5) {
-            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : vec3(1.0, 0.55, 0.1))
+            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : vec3(0.55, 0.4, 1.0))
                 : mv == 0 ? vRgba.rgb * 0.35 : vec3(float(mv & 1), float((mv >> 1) & 1), float((mv >> 2) & 1)) * 0.8 + 0.2;
         }
     }`,

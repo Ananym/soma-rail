@@ -70,6 +70,9 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             plus anything tagged BEAT by hand, answer it instead. Lights always do.
 //   FLASH     does not move or swell, but brightens on each beat: for people and animals, on
 //             whom a swell looks uncanny.
+//   SOLID     does not move, and is not scattered by the dreamlike level's "matter" dial (which
+//             throws every other splat about, further the further away it is, when the music is
+//             loud). For things that hang alone against the sky, where a scatter leaves specks.
 //   RIDE      a rider on the ground (a cyclist): carried along the line at about a sixth of the
 //             train's speed, and brightens on the beat like FLASH. Only through rideCell() below.
 //   FALL      falls, and comes round again at the top of a 16 m column about the eye's height: a
@@ -77,7 +80,7 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             wide is rain (9 m/s, straight). Scatter them evenly through a slab of air 16 m tall
 //             (from 3.4 m below rail level to 12.6 m above), each at its own distance.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10 };
 
 // Direction toward the sun for baked shading: high, to the left (-x) and on the camera's side
 // (+z), so the faces the window sees are lit and tops are brightest.
