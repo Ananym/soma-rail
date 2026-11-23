@@ -69,6 +69,11 @@ What the music changes:
 | Bass | A slow breath: every splat swells by up to 3.5% |
 | Loudness | At the dreamlike level, layers of the scene drift apart (the dissolve); clouds and aurora brighten |
 | Tempo, when the lock is firm | Mast or pole spacing of the next stretch, one per bar |
+| Kicks against hats and snares (onsets in the low band, 40 to 160 Hz, and in the high band, 2.5 to 11 kHz) | Two pulses beside the full one: big things (the raised rule, tagged plants and buildings, the crops' nudge) take the kick pulse, lights and the Alps' flower groups the hat pulse; people and animals keep the full beat. Neither falls under 0.45 of the full pulse, so music with no kick still moves the big things (`split=0`: one pulse for all) |
+| The voice band (250 Hz to 2.5 kHz) lifting over its own recent average | Lights grow by up to 15% and warm; flags and crops swing up to 70% further (`mid=0`: off) |
+| Slow loudness against a loud reference (12 s) | Weather: 1 on full music, falling toward 0 in a quiet passage. Rain, snow and petals thin to about a third and the motorway's traffic to a quarter of its cells, by a hash per splat, fading in and out. It never thickens anything beyond what was authored (`weather=0`: always full) |
+| A drop or a breakdown (loudness falling away for a second or two, or coming back hard after a quiet passage) | An event, raised behind guards (not within 20 s of a change of track or scenery, in a tunnel, stopped, or within 45 s of the last of its kind; a drop may follow its breakdown). See Events (`events=0`: none) |
+| The beat clock (one unit per beat, phase-locked to the kicks) | Lamps tagged `CHASE` flare in turn along the line, once every two beats, a 209 m wave; with no firm lock they rest as ordinary lights (`chase=0`: off) |
 
 The beat pulse follows detected onsets, not a predicted beat, so it lands on what is heard and needs no tempo lock. On the live stream it fired six times in 30 seconds in a headless browser running at 3 frames a second, which shows it is wired but says nothing about how it feels. Tempo is exact on synthetic test tracks but unverified on real music: three runs on one Groove Salad track gave 156, 105 and 88 BPM.
 

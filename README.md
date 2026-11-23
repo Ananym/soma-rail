@@ -91,6 +91,11 @@ Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
 | `gold` | `1` | Strength of the warm light at dawn and dusk; `0` turns it off |
 | `beat` | `1` | Strength of the swell on each beat; `0` turns it off |
 | `sparkle` | `1` | Strength of the treble shimmer and twinkle; `0` turns it off |
+| `split` | `1` | Kicks move the big things (trees, buildings) and hats and snares the small ones (lights, flowers); `0` has one pulse move everything |
+| `mid` | `1` | Vocals and melody warm and enlarge the lights a little and strengthen the gusts in flags and crops; `0` turns it off |
+| `weather` | `1` | Quiet passages thin the rain, the snow and the motorway's traffic; `0` keeps them always full |
+| `events` | `1` | A drop or a breakdown in the music sets off an event (a train passing on the other track, a flock lifting off, fireworks, a meteor shower); `0` turns them off. `fire=train`, `flock`, `fireworks` or `meteors` starts one by hand |
+| `chase` | `1` | Lamps in a row flare in turn at the music's tempo while it has a firm lock; `0` rests them |
 | `move` | `1` | Strength of the things that move on their own (prayer flags, motorway traffic, mist and plumes); `0` keeps everything still |
 | `seed` | random | A tuning aid: the same seed starts in the same scenery (track changes still alter it) |
 | `kit` | `1` | `0` leaves out the photo pieces |
