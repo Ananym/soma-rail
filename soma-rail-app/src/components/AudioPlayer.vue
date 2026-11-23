@@ -132,6 +132,10 @@ onMounted(() => {
     audioElement.value.src = props.streamUrl;
     audioElement.value.load();
   }
+  // The volume watcher above first runs before there is an element to set, and then only when the
+  // volume changes: without this a fresh (or remounted) element plays at full volume whatever the
+  // slider says.
+  if (audioElement.value) audioElement.value.volume = Math.max(0, Math.min(1, props.volume));
   emit('audio-ready', audioElement.value);
 });
 

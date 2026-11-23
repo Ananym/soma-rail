@@ -25,9 +25,12 @@ const outDir = process.argv[2] || '.';
     // The plain address, as a visitor arrives: the train window, with music analysis live.
     // (At the full default splat budget a software renderer draws too slowly for the analysis to
     // settle, so this case only requires that the radio is attached and its audio context running.)
-    { name: 'default', query: '', wait: 20000, expect: 'window', tap: 'attached', budgetControl: true },
+    // (volume: a first visit starts at half, not at full)
+    { name: 'default', query: '', wait: 20000, expect: 'window', tap: 'attached', budgetControl: true, volume: 0.5 },
     // the listener clicks Start before the stream is known: one click must still start the radio
-    { name: 'early-click', query: '?budget=120000&seed=check', wait: 25000, expect: 'window', early: true },
+    // (it also arrives with a volume saved on an earlier visit, which the radio must start at)
+    { name: 'early-click', query: '?budget=120000&seed=check', wait: 25000, expect: 'window', early: true, volume: 0.3,
+      init: () => { try { localStorage.setItem('volume', '0.3'); } catch { /* no storage */ } } },
     { name: 'tuned', query: Q, wait: 20000, expect: 'window', tap: true, distraction: true },
     // No WebGL2: a notice instead of the view, and the radio plays on.
     { name: 'no-webgl2', query: Q, wait: 8000, expect: 'notice',
@@ -82,7 +85,7 @@ const outDir = process.argv[2] || '.';
     const state = await page.evaluate(() => {
       const a = document.querySelector('audio');
       return {
-        audio: a ? { paused: a.paused, time: +a.currentTime.toFixed(1), crossOrigin: a.crossOrigin, error: a.error && a.error.code } : null,
+        audio: a ? { paused: a.paused, time: +a.currentTime.toFixed(1), volume: +a.volume.toFixed(2), slider: document.querySelector('#volume-slider') ? +document.querySelector('#volume-slider').value : null, crossOrigin: a.crossOrigin, error: a.error && a.error.code } : null,
         startGone: !document.querySelector('.start-overlay'),
         goneAtOnce: false,
         hasCanvas: !!document.querySelector('.window-container canvas'),
@@ -379,8 +382,9 @@ const outDir = process.argv[2] || '.';
     const tapOk = c.tap === undefined ? true
       : c.tap ? !!(state.tap && (c.tap === 'attached' || state.tap.active) && state.tap.context === 'running' && state.audio.crossOrigin === 'anonymous')
         : !state.tap && state.audio.crossOrigin === null;
-    const ok = state.startGone && state.goneAtOnce && audioOk && viewOk && tapOk && warnOk && (!slow || slow.ok) && !ours.length && (!brake || brake.ok);
-    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, at once ${state.goneAtOnce}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk}, start warning ${warnOk}, slow notice ${!slow || slow.ok})`); if (!ok) failed = true;
+    const volumeOk = c.volume == null || (state.audio && Math.abs(state.audio.volume - c.volume) < 0.03 && Math.abs(state.audio.slider - c.volume) < 0.03);
+    const ok = state.startGone && state.goneAtOnce && audioOk && volumeOk && viewOk && tapOk && warnOk && (!slow || slow.ok) && !ours.length && (!brake || brake.ok);
+    console.log(ok ? 'PASS' : `FAIL (start ${state.startGone}, at once ${state.goneAtOnce}, audio ${!!audioOk}, view ${!!viewOk}, analysis ${tapOk}, volume ${volumeOk}, start warning ${warnOk}, slow notice ${!slow || slow.ok})`); if (!ok) failed = true;
     await ctx.close();
   }
   await browser.close(); server.httpServer.close();

@@ -60,7 +60,7 @@ const overlayMoveTime = computed(() => (isFocused.value ? lastMouseMoveTime.valu
 
 // LocalStorage persistence
 const savedChannelId = useLocalStorage('selectedChannel', null);
-const savedVolume = useLocalStorage('volume', 0.7);
+const savedVolume = useLocalStorage('volume', 0.5);   // the slider's place is kept between visits; half volume to begin with
 // Overlay settings: ignore distraction (the overlay still follows the mouse, but the train keeps
 // its speed and the music its volume), and the frame-rate cap.
 const cheat = useLocalStorage('ignoreDistraction', false);
@@ -89,8 +89,9 @@ const {
   setAudioElement
 } = usePlaybackControl(distractionScore, computed(() => cheat.value && !touch.value));   // nothing to ignore on a touch screen
 
-// Set saved volume
-baseVolume.value = savedVolume.value;
+// Set saved volume. A touch screen has no slider (the phone's own buttons set the volume), so
+// there the radio plays at full and nothing is saved.
+baseVolume.value = touch.value ? 1 : savedVolume.value;
 
 // Refs
 const windowRef = ref(null);
@@ -250,7 +251,7 @@ function handleStarted() {
 
 // Watch volume changes and save to localStorage
 watch(baseVolume, (newVolume) => {
-  savedVolume.value = newVolume;
+  if (!touch.value) savedVolume.value = newVolume;
 });
 
 // Cleanup on unmount

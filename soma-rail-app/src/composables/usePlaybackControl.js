@@ -5,7 +5,7 @@ import { CONFIG } from '../config';
 // music. The overlay still comes and goes with the mouse; that is decided elsewhere.
 export function usePlaybackControl(distractionScore, cheat = null) {
   const audioElement = ref(null);
-  const baseVolume = ref(0.7); // User-controlled volume
+  const baseVolume = ref(0.5); // User-controlled volume (App.vue sets it from what was saved)
 
   /**
    * Train speed as a fraction of cruising speed, from the distraction score
