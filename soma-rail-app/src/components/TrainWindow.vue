@@ -250,7 +250,8 @@ function nextBiome() {
 // What the overlay shows: where we are and what is coming.
 let lastPublished = '';
 // Is the view struggling? Twenty seconds on end at under 14 frames a second while the train is
-// moving in the open and the page is in front. Timed by the clock, not by counting calls: on a
+// moving and the page is in front (in a tunnel too: on a slow machine the rebuild behind a tunnel
+// wall takes minutes, and a healthy one draws a tunnel at full rate). Timed by the clock, not by counting calls: on a
 // machine this slow the timers that call this are starved too. (The engine lowers its resolution
 // by itself when frames are slow, which takes it about twelve seconds; twenty gives that a chance
 // to be the cure. Whether chunks are still being generated is not asked: on a slow machine they
@@ -259,7 +260,7 @@ let slowSince = 0, struggling = false;
 function watchSpeed(s) {
   if (struggling) return;
   const st = engine.stats(), now = Date.now();
-  const fair = typeof document !== 'undefined' && document.visibilityState === 'visible' && !st.idle && st.kmh > 5 && !s.tunnel;
+  const fair = typeof document !== 'undefined' && document.visibilityState === 'visible' && !st.idle && st.kmh > 5;
   if (fair && st.fps < 14) { if (!slowSince) slowSince = now; } else slowSince = 0;
   if (slowSince && now - slowSince > 20000) struggling = true;
 }
