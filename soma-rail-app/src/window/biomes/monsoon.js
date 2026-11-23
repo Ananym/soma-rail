@@ -2303,9 +2303,10 @@ function* rain(ctx, out, W, dLo, dHi, per, pw = 1.6) {
     const amt = xAt(W, wx).rain;
     const u = rng(), d = dLo + (dHi - dLo) * Math.pow(rng(), pw);
     if (u > amt) continue;
-    const w = Math.max(0.008, 0.0009 * d - 0.0004 * Math.max(0, d - 25)), h = Math.max(w * 3.2, 0.3 + 0.011 * d);   // (finer beyond 25 m)
+    // short, fine drops (finer still beyond 25 m): long streaks, smeared by the train's speed, hid the land
+    const w = Math.max(0.01, 0.0009 * d - 0.0004 * Math.max(0, d - 25)), h = Math.max(w * 3.2, 0.14 + 0.006 * d);
     const k = 0.92 + 0.16 * rng();
-    out(x, -3.4 + 16 * rng(), -d, w, h, w, C.rain[0] * k, C.rain[1] * k, C.rain[2] * k, (0.26 + 0.16 * amt) * (1 - 0.78 * smooth(18, 100, d)), 0, 0, 0, 1, KO, MOVE.FALL);
+    out(x, -3.4 + 16 * rng(), -d, w, h, w, C.rain[0] * k, C.rain[1] * k, C.rain[2] * k, (0.34 + 0.18 * amt) * (1 - 0.78 * smooth(18, 100, d)), 0, 0, 0, 1, KO, MOVE.FALL);
     if (out.due()) yield;
   }
 }
@@ -2418,7 +2419,7 @@ function* trackside(ctx0, emit) {
   const [ctx, W] = local(ctx0);
   const out = makeOut(ctx, emit, { zMargin: 1, detailK: 1.2 });
   // the rain first, so that no budget ever squeezes it out
-  yield* rain(ctx, out, W, 6.5, ctx.zFar + 1, 0.16, 1.2);
+  yield* rain(ctx, out, W, 6.5, ctx.zFar + 1, 0.08, 1.2);
   const night = lightsOn(ctx), dz = ctx.dials || {};
   if ((dz.matter || 0) > 0) yield* petals(ctx, out, W, 6.5, ctx.zFar, Math.round(ctx.count * 0.012 * dz.matter));
   out.limit = out.n + ctx.count * 0.4;
@@ -2438,7 +2439,7 @@ function* trackside(ctx0, emit) {
 function* near(ctx0, emit) {
   const [ctx, W] = local(ctx0);
   const out = makeOut(ctx, emit, { detailK: 1.1 });
-  yield* rain(ctx, out, W, SPLIT_TN, 115, 0.05, 1.9);
+  yield* rain(ctx, out, W, SPLIT_TN, 115, 0.028, 1.9);
   yield* rainRings(ctx, out, W, SPLIT_TN, 90, Math.round(ctx.count * 0.015));
   const night = lightsOn(ctx), lo = SPLIT_TN, hi = SPLIT_NM, dz = ctx.dials || {};
   // level 1 first, so the band's prop budget never squeezes it out

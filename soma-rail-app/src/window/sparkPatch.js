@@ -208,6 +208,7 @@ uniform float uSway;`,
             float yy = mod(center.y - mix(uFall.x, uFall.y, rain) + 6.0, 16.0) - 6.0;
             center.y = mix(center.y, yy, min(uMove, 1.0));
             center.x += (1.0 - rain) * uMove * 0.35 * sin(0.9 * uMoveT + 6.2832 * hp);
+            mvBlur = 1.0 - 0.7 * rain;   // a raindrop keeps its shape: smeared the full width of the train's motion, rain turns into grey sheets
             rgba.a *= smoothstep(-6.0, -4.8, yy) * (1.0 - smoothstep(8.8, 10.0, yy));
         }
     }
