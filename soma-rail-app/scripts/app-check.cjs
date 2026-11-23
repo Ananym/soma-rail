@@ -267,11 +267,14 @@ const outDir = process.argv[2] || '.';
         await page.waitForTimeout(600);
       };
       const D = () => page.evaluate(() => { const d = window.__trainWindow.director.state; const p = d.queued || (d.tunnel && d.tunnel.phase === 'approach' ? d.tunnel.next : d); return { biome: d.biome, level: d.level, wantBiome: p.biome, wantLevel: p.level, rate: d.rate, fpsCap: window.__trainWindow.stats().fpsCap }; });
+      // (no real change of track may re-aim the tunnel between two presses: see the re-aim scenario below)
+      await page.evaluate(() => { const d = window.__trainWindow.director; d.__onTrack = d.onTrack; d.onTrack = () => {}; });
       const c0 = await D();
       await press('.view-controls .row:nth-child(1) button', 'Next');
       const c1 = await D();
       await press('.view-controls .row:nth-child(2) button');
       const c2 = await D();
+      await page.evaluate(() => { const d = window.__trainWindow.director; d.onTrack = d.__onTrack; delete d.__onTrack; });
       await press('.view-controls .group button', '30');
       const c3 = await D();
       await press('.view-controls .row:nth-child(3) button');

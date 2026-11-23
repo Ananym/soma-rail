@@ -127,6 +127,8 @@ export function createDirector({ params, reducedMotion = false }) {
   }
 
   // Ask for a change of scenery. It happens out of sight, inside a tunnel.
+  // The surreal level the journey is heading for: that of a change still on its way, else the current one.
+  const pendingLevel = () => (state.queued ? state.queued.level : state.tunnel && state.tunnel.phase === 'approach' && state.tunnel.next ? state.tunnel.next.level : state.level);
   function queueTransition(next) {
     // A tunnel that has not yet swapped the world takes the newer destination. One that has, but
     // whose far portal is still out of sight, swaps again: the world behind the wall is built
@@ -168,7 +170,7 @@ export function createDirector({ params, reducedMotion = false }) {
     setProfile(profile, { immediate = false } = {}) {
       state.profile = profile || null;
       const seed = hashInts(baseSeed, hashString(JSON.stringify(profile || {})));
-      const next = { seed, biome: chooseBiome(seed, !immediate), level: params.levelFixed ? state.level : (profile && profile.level != null ? profile.level : state.level) };
+      const next = { seed, biome: chooseBiome(seed, !immediate), level: params.levelFixed ? pendingLevel() : (profile && profile.level != null ? profile.level : state.level) };
       if (immediate) { state.seed = next.seed; state.biome = next.biome; state.level = next.level; state.dials = { ...LEVELS[next.level] }; placeHour(); recent.length = 0; seen(state.biome); } else queueTransition(next);
     },
 
@@ -177,7 +179,9 @@ export function createDirector({ params, reducedMotion = false }) {
     onTrack(song) {
       if (!song || (!song.title && !song.artist)) return;
       const seed = hashInts(baseSeed & 0xffff, hashString(`${song.artist}|${song.title}`));
-      queueTransition({ seed, biome: chooseBiome(seed, true), level: state.level });
+      // (the level that is on its way, if the listener has just asked for one: a new track must
+      // not undo a press of Dreamlike that has not yet reached its tunnel)
+      queueTransition({ seed, biome: chooseBiome(seed, true), level: pendingLevel() });
     },
 
     // Per-frame audio features, or null when there is no signal. See audio.js.
