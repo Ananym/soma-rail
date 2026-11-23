@@ -1782,7 +1782,7 @@ function* caravan(ctx, out, W, wx, d, r, n, opts = {}) {
       if (h1 > h0 && h1 >= h2) { px += F.ca * 2; pd += F.sa * 2; } else if (h2 > h0) { px -= F.ca * 2; pd -= F.sa * 2; } else break;
     }
     const y = heightAt(W, px, pd) - 0.15;
-    yield* camel(ctx, magOut(out, px - ctx.x0, y, -pd, k, MOVE.BEAT), px - ctx.x0, y, pd, dir * (opts.flipOne === c ? -1 : 1), r, opts.color, opts.kind, { load: c % 2 ? LOADS[c % LOADS.length] : null, rider: c === 1 ? ROBES[1] : null, stride: (c * 0.37) % 1 });
+    yield* camel(ctx, magOut(out, px - ctx.x0, y, -pd, k, MOVE.FLASH), px - ctx.x0, y, pd, dir * (opts.flipOne === c ? -1 : 1), r, opts.color, opts.kind, { load: c % 2 ? LOADS[c % LOADS.length] : null, rider: c === 1 ? ROBES[1] : null, stride: (c * 0.37) % 1 });
   }
 }
 
@@ -1912,17 +1912,18 @@ function trackX(p, dd) { return p.x + p.tan * dd + (25 + 0.04 * dd) * (2 * noise
 function* places(ctx, out, W) {
   const sc = sandCtx(ctx, W);
   const night = isNight(ctx);
-  const beat = withMove(out, MOVE.BEAT);
+  const beat = withMove(out, MOVE.BEAT);                   // the lorry
+  const flash = withMove(out, MOVE.FLASH);                 // people and animals
   for (const { i } of cellsAround(ctx, PC, 1500)) {
     for (const p of placesIn(W, i)) {
       if (p.kind === 'track') { yield* trackPlace(ctx, out, W, p, beat); continue; }
       if (p.d < ctx.zNear || p.d >= ctx.zFar) continue;
       if (p.x < ctx.x0 - 240 || p.x > ctx.x0 + ctx.length + 240) continue;
       const r = makeRng(p.seed);
-      if (p.kind === 'caravan') yield* caravanPlace(sc, out, W, p, r, beat);
-      else if (p.kind === 'camp') yield* campPlace(sc, out, W, p, r, beat, night);
-      else if (p.kind === 'herd') yield* herdPlace(sc, out, W, p, r, beat);
-      else if (p.kind === 'acacias') yield* acaciaPlace(sc, out, W, p, r, beat);
+      if (p.kind === 'caravan') yield* caravanPlace(sc, out, W, p, r, flash);
+      else if (p.kind === 'camp') yield* campPlace(sc, out, W, p, r, flash, night);
+      else if (p.kind === 'herd') yield* herdPlace(sc, out, W, p, r, flash);
+      else if (p.kind === 'acacias') yield* acaciaPlace(sc, out, W, p, r, flash);
       else if (p.kind === 'rocks') yield* rockPlace(sc, out, W, p, r);
       else if (p.kind === 'fort') yield* fortPlace(sc, out, W, p, r, night);
       else if (p.kind === 'town') yield* townPlace(sc, out, W, p, r, night);
@@ -1932,12 +1933,12 @@ function* places(ctx, out, W) {
 
 // A caravan in single file along the foot of a dune, side on to the line: a man leading, laden
 // camels, a rider or two, and now and then a calf at the end.
-function* caravanPlace(ctx, out, W, p, r, beat) {
+function* caravanPlace(ctx, out, W, p, r, flash) {
   const n = 5 + Math.floor(r() * 8), dir = r() < 0.5 ? 1 : -1;
   const drift = (r() - 0.5) * 0.25;                          // the file runs a little across the view
   const kind = KIND.OTHER, k = BIG.camel;
   const lead = p.x + dir * 2.6 * k, ly = heightAt(W, lead, p.d) - 0.05;
-  person(magOut(beat, lead - ctx.x0, ly, -(p.d - 0.3), BIG.person), lead - ctx.x0, ly, p.d - 0.3, ROBES[1 + Math.floor(r() * 2)], HEADS[Math.floor(r() * 3)], kind, { staff: true });
+  person(magOut(flash, lead - ctx.x0, ly, -(p.d - 0.3), BIG.person), lead - ctx.x0, ly, p.d - 0.3, ROBES[1 + Math.floor(r() * 2)], HEADS[Math.floor(r() * 3)], kind, { staff: true });
   for (let c = 0; c < n; c++) {
     const wx = p.x - dir * c * (3.3 + 0.4 * r()) * k, d = p.d + (c * 3.3 * drift + (r() - 0.5) * 0.6) * k;
     const y = heightAt(W, wx, d) - 0.08;
@@ -1946,14 +1947,14 @@ function* caravanPlace(ctx, out, W, p, r, beat) {
     const col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.35);
     const calf = c === n - 1 && r() < 0.4;
     const stride = (c * 0.37 + r() * 0.2) % 1, turban = HEADS[Math.floor(r() * HEADS.length)];
-    if (calf) { goat(beat, wx - ctx.x0, y, d, dir, col, kind, false, 2.2 * k, true); continue; }
-    yield* camel(ctx, magOut(beat, wx - ctx.x0, y, -d, k), wx - ctx.x0, y, d, dir, r, col, kind, { rider, load, stride, turban });
+    if (calf) { goat(flash, wx - ctx.x0, y, d, dir, col, kind, false, 2.2 * k, true); continue; }
+    yield* camel(ctx, magOut(flash, wx - ctx.x0, y, -d, k), wx - ctx.x0, y, d, dir, r, col, kind, { rider, load, stride, turban });
   }
 }
 
 // A bedouin camp in a hollow: two to four black tents, a fire with its smoke, a pennant on a pole,
 // couched camels and a few people.
-function* campPlace(ctx, out, W, p, r, beat, night) {
+function* campPlace(ctx, out, W, p, r, flash, night) {
   const nt = 2 + Math.floor(r() * 3);
   const tents = [];
   for (let t = 0; t < nt; t++) {
@@ -1998,19 +1999,19 @@ function* campPlace(ctx, out, W, p, r, beat, night) {
     const cx = p.x + (r() - 0.5) * 62, cd = p.d - 17 - r() * 10;
     const dir = r() < 0.5 ? 1 : -1, col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.3), couched = r() < 0.7, graze = r() < 0.3;
     const cy = heightAt(W, cx, cd) - 0.05;
-    yield* camel(ctx, magOut(beat, cx - ctx.x0, cy, -cd, BIG.camel), cx - ctx.x0, cy, cd, dir, r, col, KIND.OTHER, { couched, graze });
+    yield* camel(ctx, magOut(flash, cx - ctx.x0, cy, -cd, BIG.camel), cx - ctx.x0, cy, cd, dir, r, col, KIND.OTHER, { couched, graze });
   }
   const np = 1 + Math.floor(r() * 4);
   for (let k = 0; k < np; k++) {
     const hx = fx + (r() - 0.5) * 15, hd = fd + (r() - 0.5) * 4.5;
     const hy = heightAt(W, hx, hd) - 0.05;
-    person(magOut(beat, hx - ctx.x0, hy, -hd, BIG.person), hx - ctx.x0, hy, hd, ROBES[Math.floor(r() * ROBES.length)], HEADS[Math.floor(r() * HEADS.length)], KIND.OTHER, { h: 1.6 + 0.2 * r() });
+    person(magOut(flash, hx - ctx.x0, hy, -hd, BIG.person), hx - ctx.x0, hy, hd, ROBES[Math.floor(r() * ROBES.length)], HEADS[Math.floor(r() * HEADS.length)], KIND.OTHER, { h: 1.6 + 0.2 * r() });
   }
 }
 
 // A well with a herd of goats about it, their herder, perhaps a donkey.
 const GOATS = [[0.08, 0.07, 0.07], [0.1, 0.08, 0.07], [0.36, 0.23, 0.13], [0.74, 0.71, 0.64], [0.5, 0.36, 0.22]];
-function* herdPlace(ctx, out, W, p, r, beat) {
+function* herdPlace(ctx, out, W, p, r, flash) {
   yield* well(ctx, magOut(out, p.x - ctx.x0, gy(ctx, p.x - ctx.x0, p.d), -p.d, BIG.well), p.x - ctx.x0, p.d, makeRng(p.seed + 5));
   const ng = 9 + Math.floor(r() * 16);
   const cx = p.x + (r() < 0.5 ? -1 : 1) * (6 + 6 * r()) * 1.7, cd = p.d + 3 * r();
@@ -2019,16 +2020,16 @@ function* herdPlace(ctx, out, W, p, r, beat) {
     const gx = cx + Math.cos(a) * rr * 22, gd = cd + Math.sin(a) * rr * 8;
     const dir = r() < 0.5 ? 1 : -1, col = jitter(GOATS[Math.floor(r() * GOATS.length)], r, 0.1), graze = r() < 0.6;
     note('goat', gx, gd, (graze ? 0.75 : 1.05) * BIG.goat);
-    goat(beat, gx - ctx.x0, heightAt(W, gx, gd) - 0.03, gd, dir, col, KIND.OTHER, graze, BIG.goat);
+    goat(flash, gx - ctx.x0, heightAt(W, gx, gd) - 0.03, gd, dir, col, KIND.OTHER, graze, BIG.goat);
   }
   const hx = cx + 16 * (r() - 0.5), hd = cd - 8.5, hy = heightAt(W, hx, hd) - 0.05;
-  person(magOut(beat, hx - ctx.x0, hy, -hd, BIG.person), hx - ctx.x0, hy, hd, ROBES[Math.floor(r() * ROBES.length)], HEADS[Math.floor(r() * HEADS.length)], KIND.OTHER, { staff: true });
-  if (r() < 0.6) { const dx = p.x + 3.5 * BIG.well, dd = p.d - 2.5 * BIG.well; goat(beat, dx - ctx.x0, heightAt(W, dx, dd), dd, -1, [0.42, 0.4, 0.38], KIND.OTHER, false, 1.7 * BIG.camel, true); }
+  person(magOut(flash, hx - ctx.x0, hy, -hd, BIG.person), hx - ctx.x0, hy, hd, ROBES[Math.floor(r() * ROBES.length)], HEADS[Math.floor(r() * HEADS.length)], KIND.OTHER, { staff: true });
+  if (r() < 0.6) { const dx = p.x + 3.5 * BIG.well, dd = p.d - 2.5 * BIG.well; goat(flash, dx - ctx.x0, heightAt(W, dx, dd), dd, -1, [0.42, 0.4, 0.38], KIND.OTHER, false, 1.7 * BIG.camel, true); }
   if (out.due()) yield;
 }
 
 // A dry wadi: acacias and tamarisks strung along a line, thorn scrub, and camels browsing.
-function* acaciaPlace(ctx, out, W, p, r, beat) {
+function* acaciaPlace(ctx, out, W, p, r, flash) {
   const nt = 6 + Math.floor(r() * 9);
   const ang = (r() - 0.5) * 0.8;
   for (let t = 0; t < nt; t++) {
@@ -2050,7 +2051,7 @@ function* acaciaPlace(ctx, out, W, p, r, beat) {
       const wx = p.x + (r() - 0.5) * 120, d = p.d + (r() - 0.5) * 16;
       const dir = r() < 0.5 ? 1 : -1, col = mix3(C.camel, [0.55, 0.42, 0.28], r() * 0.35), graze = r() < 0.6;
       const y = heightAt(W, wx, d) - 0.05;
-      yield* camel(ctx, magOut(beat, wx - ctx.x0, y, -d, BIG.camel), wx - ctx.x0, y, d, dir, r, col, KIND.OTHER, { graze });
+      yield* camel(ctx, magOut(flash, wx - ctx.x0, y, -d, BIG.camel), wx - ctx.x0, y, d, dir, r, col, KIND.OTHER, { graze });
     }
   }
 }
@@ -2482,7 +2483,8 @@ function* cacti(ctx, out, W) {
 // Herds of white oryx, parties of ostriches, vultures hunched on a dead tree with others wheeling
 // above it, and a pair of big-eared desert foxes at a rock near the line. Each is drawn well over
 // life size (BIG) and stands in the open 33 to 115 m out, where it can be seen; all answer the
-// beat (MOVE.BEAT), except the birds on the wing, which fly (MOVE.FLY). One chance per WLC metres
+// beat (MOVE.FLASH: they brighten, they do not swell), except the birds on the wing, which fly
+// (MOVE.FLY). One chance per WLC metres
 // of line, a layer of its own (wildIn), clear of the camps, caravans, herds and tracks.
 const WLC = 560;
 const WILD_KINDS = ['oryx', 'ostrich', 'vultures', 'fox'];
@@ -2566,7 +2568,7 @@ function* oryxHerd(ctx, out, W, w, r) {
     const dir = r() < 0.8 ? hd : -hd, graze = r() < 0.45, calf = k > 1 && r() < 0.16, st = r() - 0.5;
     const y = heightAt(W, wx, d) - 0.04, X = wx - ctx.x0, kk = BIG.oryx * (calf ? 0.6 : 1);
     note(calf ? 'oryx calf' : 'oryx', wx, d, (graze ? 1.2 : 2.1) * kk);
-    oryx(magOut(out, X, y, -d, kk, MOVE.BEAT), X, y, d, dir, r, graze, graze ? 0 : st);
+    oryx(magOut(out, X, y, -d, kk, MOVE.FLASH), X, y, d, dir, r, graze, graze ? 0 : st);
   }
   if (out.due()) yield;
 }
@@ -2601,7 +2603,7 @@ function* ostrichParty(ctx, out, W, w, r) {
     const dir = r() < 0.75 ? hd : -hd, male = k === 0 || r() < 0.35, peck = r() < 0.3;
     const y = heightAt(W, wx, d) - 0.04, X = wx - ctx.x0;
     note('ostrich', wx, d, (peck ? 1.7 : 2.5) * BIG.ostrich);
-    ostrich(magOut(out, X, y, -d, BIG.ostrich, MOVE.BEAT), X, y, d, dir, r, male, peck);
+    ostrich(magOut(out, X, y, -d, BIG.ostrich, MOVE.FLASH), X, y, d, dir, r, male, peck);
   }
   if (out.due()) yield;
 }
@@ -2662,10 +2664,10 @@ function* vultureTree(ctx, out, W, w, r) {
   for (const [ex, ey, ez] of ends) {
     if (r() < 0.25) continue;
     const dir = r() < 0.5 ? 1 : -1, py = ey - 0.12;
-    vulture(magOut(out, ex, py, ez, k, MOVE.BEAT), ex, py, -ez, dir, r);
+    vulture(magOut(out, ex, py, ez, k, MOVE.FLASH), ex, py, -ez, dir, r);
   }
   // one on the sand below, now and then, and a few wheeling above
-  if (r() < 0.5) { const gx = w.x + (r() < 0.5 ? -1 : 1) * (4 + 3 * r()), gd = w.d - 2 * r(), gy0 = heightAt(W, gx, gd); vulture(magOut(out, gx - ctx.x0, gy0, -gd, k, MOVE.BEAT), gx - ctx.x0, gy0, gd, r() < 0.5 ? 1 : -1, r); }
+  if (r() < 0.5) { const gx = w.x + (r() < 0.5 ? -1 : 1) * (4 + 3 * r()), gd = w.d - 2 * r(), gy0 = heightAt(W, gx, gd); vulture(magOut(out, gx - ctx.x0, gy0, -gd, k, MOVE.FLASH), gx - ctx.x0, gy0, gd, r() < 0.5 ? 1 : -1, r); }
   const fc = flightCell(w.x), nf = 1 + Math.floor(r() * 3);
   for (let f = 0; f < nf; f++) {
     const fx = fc.wx + (r() - 0.5) * 13, fd = Math.max(34, w.d + (r() - 0.5) * 16), fy = y0 + 13 + 9 * r() + 0.08 * w.d;
@@ -2720,8 +2722,8 @@ function* foxRock(ctx, out, W, w, r) {
   }
   out(X - 2.1, y0 + 0.4, -(d + 0.8), 1.1, 0.34, 0.7, C.rockDark[0] * 1.25, C.rockDark[1] * 1.25, C.rockDark[2] * 1.25, 1, 0, 0, 0, 1, KIND.ROCK);   // the ledge
   const dir = r() < 0.5 ? 1 : -1;
-  fox(magOut(out, X - 2.1, y0 + 0.72, -(d + 0.5), k, MOVE.BEAT), X - 2.1, y0 + 0.72, d + 0.5, dir, r, true);
-  if (r() < 0.75) { const fx = X + 0.6 + 1.6 * r(), fd = d - 0.4 - r(), fy = heightAt(W, ctx.x0 + fx, fd); fox(magOut(out, fx, fy, -fd, k, MOVE.BEAT), fx, fy, fd, r() < 0.5 ? 1 : -1, r, r() < 0.4); }
+  fox(magOut(out, X - 2.1, y0 + 0.72, -(d + 0.5), k, MOVE.FLASH), X - 2.1, y0 + 0.72, d + 0.5, dir, r, true);
+  if (r() < 0.75) { const fx = X + 0.6 + 1.6 * r(), fd = d - 0.4 - r(), fy = heightAt(W, ctx.x0 + fx, fd); fox(magOut(out, fx, fy, -fd, k, MOVE.FLASH), fx, fy, fd, r() < 0.5 ? 1 : -1, r, r() < 0.4); }
   if (out.due()) yield;
 }
 
@@ -3023,7 +3025,8 @@ export const dunesBiome = {
   hazeDist: 9000,
   // On the beat, the things a viewer can pick out swell and brighten: palms, acacias, tamarisks and
   // cacti (TREE), houses, towers, forts, tents and wells (BUILDING), and, tagged MOVE.BEAT by hand,
-  // camels, goats, people, lorries, oryx, ostriches, perched vultures and foxes. The sand itself (the high ground here) stays still: a swell
+  // lorries. Camels, goats, people, oryx, ostriches, perched vultures and foxes are tagged MOVE.FLASH
+  // (they brighten without swelling). The sand itself (the high ground here) stays still: a swell
   // on a mass of overlapping sand splats could not be seen.
   beatKinds: [KIND.TREE, KIND.BUILDING],
   generators: { trackside, near, mid, far },

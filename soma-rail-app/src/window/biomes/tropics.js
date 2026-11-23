@@ -21,7 +21,7 @@
 // (xTable) on a world-x grid, so the fill reads them with one lookup and both chunks at a seam agree.
 //
 // The beat: palms (KIND.TREE) and buildings (KIND.BUILDING) swell on the beat; jungle crowns are
-// KIND.HEDGE and stay still; boats, people, animals and birds are tagged MOVE.BEAT by hand. Washing,
+// KIND.HEDGE and stay still; boats are tagged MOVE.BEAT by hand; people and animals MOVE.FLASH (they brighten, they do not swell). Washing,
 // pennants, hammocks and drying nets flutter (MOVE.FLAG); spray, smoke and the volcano's plume billow
 // (MOVE.VAPOUR); rain falls (MOVE.FALL).
 //
@@ -100,7 +100,8 @@ const LANTERNS = [[1.0, 0.32, 0.14], [1.0, 0.72, 0.2], [1.0, 0.5, 0.5], [0.4, 0.
 const SEA = -3.4;                                     // sea level: the line runs on a low embankment
 const TERRAIN = { cutting: 1.2, roll: 2, rollScale: 300, rise: 0, hills: 120, hillScale: 2000, mountains: 0, mountainScale: 9000, mountainStart: 9000 };
 const OFF = 0;    // a still splat
-const B = MOVE.BEAT;
+const B = MOVE.BEAT;      // things: boats, lights, nets
+const F = MOVE.FLASH;     // people and animals
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers
@@ -1229,7 +1230,7 @@ function* ferry(ctx, out, x, d, r, night) {
 
 // --- Boats ---------------------------------------------------------------------------------------
 // An outrigger canoe: a slim dark hull, a float on booms to one side, sometimes a crab-claw sail and
-// a paddler. A handful of shaped splats tagged MOVE.BEAT. y is the water (or sand) level.
+// a paddler. A handful of shaped splats tagged MOVE.BEAT (the paddler is MOVE.FLASH). y is the water (or sand) level.
 function* canoe(ctx, out, x, y, d, r, opts = {}) {
   const K = opts.kind != null ? opts.kind : KIND.OTHER, mv = opts.move != null ? opts.move : B;
   const dir = r() < 0.5 ? -1 : 1, L = 5.5 + 2.5 * r();
@@ -1240,7 +1241,7 @@ function* canoe(ctx, out, x, y, d, r, opts = {}) {
   ell(out, x - dir * L * 0.45, y + 0.34, -d, L * 0.07, 0.12, 0.16, -dir, 0.5, 0, hull, K, mv);
   ell(out, x, y + 0.16, -(d + side * 1.8), L * 0.33, 0.1, 0.12, 1, 0, 0, [0.5, 0.42, 0.3], K, mv);         // the float
   for (const u of [-0.2, 0.2]) strutM(out, x + u * L, y + 0.4, -d, x + u * L, y + 0.25, -(d + side * 1.8), limb(0.04, d), [0.45, 0.38, 0.26], 2, K, mv);
-  if (opts.paddler !== false && r() < 0.75) yield* person(out, x - dir * L * 0.15, y + 0.1, d, r, { sit: true, kind: K, move: mv });
+  if (opts.paddler !== false && r() < 0.75) yield* person(out, x - dir * L * 0.15, y + 0.1, d, r, { sit: true, kind: K });
   if (opts.sail || r() < 0.3) {
     // the crab-claw sail: two spars from the foot of the mast spreading up and back, the sail between
     const sc = [[0.78, 0.72, 0.6], [0.72, 0.3, 0.16], [0.75, 0.6, 0.2]][Math.floor(r() * 3)];
@@ -1289,7 +1290,7 @@ function* fishingBoat(ctx, out, x, y, d, r, night, opts = {}) {
     out(mx, y + mh * 0.7, -d, 0.12, 0.12, 0.12, 1, 0.9, 0.62, 1, 0, 0, 0, 1, KIND.LIGHT, B);
     out(mx, y + mh * 0.7, -(d - 0.1), 0.5, 0.5, 0.3, 1, 0.9, 0.62, 0.16, 0, 0, 0, 1, KIND.LIGHT, B);
   }
-  if (r() < 0.7) yield* person(out, x + dir * L * 0.25, y + 0.9, d, r, { kind: K, move: mv });
+  if (r() < 0.7) yield* person(out, x + dir * L * 0.25, y + 0.9, d, r, { kind: K });
   if (out.due()) yield;
 }
 
@@ -1299,7 +1300,7 @@ const SKIN = [[0.42, 0.28, 0.18], [0.32, 0.2, 0.13], [0.5, 0.35, 0.24]];
 // A person standing (or sitting): legs, a torso, arms and a head; opts: { h, arms ('up', 'cast',
 // 'carry'), sit, hat, kind, move, cloth }. Legs and arms are struts, the rest shaped splats.
 function* person(out, x, y0, d, r, opts = {}) {
-  const K = opts.kind != null ? opts.kind : KIND.OTHER, mv = opts.move != null ? opts.move : B;
+  const K = opts.kind != null ? opts.kind : KIND.OTHER, mv = opts.move != null ? opts.move : F;
   const hgt = (opts.h || 1.65 + 0.15 * r()) * 1.3, z = -d;
   const cl = opts.cloth || CLOTH[Math.floor(r() * CLOTH.length)], sk = SKIN[Math.floor(r() * SKIN.length)];
   const lr = limb(0.07 * hgt / 1.7, d);
@@ -1421,30 +1422,30 @@ function* buffalo(out, x, y0, d, r, wet) {
   const X = (u) => x + dir * u * S;
   for (const [lx, side] of [[0.75, -1], [-0.7, -1], [0.75, 1], [-0.7, 1]]) {
     if (wet) break;
-    strutM(out, X(lx), y0 + 0.85 * S, z + side * 0.25, X(lx + 0.05), y0 + 0.02, z + side * 0.25, limb(0.09, d), side < 0 ? cs : c, 2, K, B);
+    strutM(out, X(lx), y0 + 0.85 * S, z + side * 0.25, X(lx + 0.05), y0 + 0.02, z + side * 0.25, limb(0.09, d), side < 0 ? cs : c, 2, K, F);
   }
-  ell(out, X(0), y0 + 1.05 * S, z, 1.15 * S, 0.5 * S, 0.5 * S, dir, 0.04, 0, c, K, B);
-  ell(out, X(0.4), y0 + 1.35 * S, z, 0.5 * S, 0.3 * S, 0.42 * S, 1, 0, 0, mul3(c, 1.1), K, B);    // the withers
-  ell(out, X(1.35), y0 + 0.85 * S, z, 0.32 * S, 0.2 * S, 0.22 * S, dir, -0.5, 0, c, K, B);
+  ell(out, X(0), y0 + 1.05 * S, z, 1.15 * S, 0.5 * S, 0.5 * S, dir, 0.04, 0, c, K, F);
+  ell(out, X(0.4), y0 + 1.35 * S, z, 0.5 * S, 0.3 * S, 0.42 * S, 1, 0, 0, mul3(c, 1.1), K, F);    // the withers
+  ell(out, X(1.35), y0 + 0.85 * S, z, 0.32 * S, 0.2 * S, 0.22 * S, dir, -0.5, 0, c, K, F);
   for (const sg of [-1, 1]) {
-    strutM(out, X(1.25), y0 + 1.05 * S, z + sg * 0.15, X(1.0), y0 + 1.2 * S, z + sg * 0.7 * S, limb(0.06, d), [0.5, 0.46, 0.38], 2, K, B);
-    strutM(out, X(1.0), y0 + 1.2 * S, z + sg * 0.7 * S, X(0.85), y0 + 1.45 * S, z + sg * 0.45 * S, limb(0.05, d), [0.5, 0.46, 0.38], 1, K, B);
+    strutM(out, X(1.25), y0 + 1.05 * S, z + sg * 0.15, X(1.0), y0 + 1.2 * S, z + sg * 0.7 * S, limb(0.06, d), [0.5, 0.46, 0.38], 2, K, F);
+    strutM(out, X(1.0), y0 + 1.2 * S, z + sg * 0.7 * S, X(0.85), y0 + 1.45 * S, z + sg * 0.45 * S, limb(0.05, d), [0.5, 0.46, 0.38], 1, K, F);
   }
-  strutM(out, X(-1.1), y0 + 1.2 * S, z, X(-1.25), y0 + 0.5 * S, z, limb(0.03, d), cs, 1, K, B);
+  strutM(out, X(-1.1), y0 + 1.2 * S, z, X(-1.25), y0 + 0.5 * S, z, limb(0.03, d), cs, 1, K, F);
   if (wet) out(x, y0 + 0.5, z, 1.8, 0.05, 0.8, 0.5, 0.42, 0.3, 0.8, 0, 0, 0, 1, KIND.GROUND);
-  if (r() < 0.3) ell(out, X(-0.2), y0 + 1.7 * S, z, 0.18, 0.13, 0.11, 1, 0.2, 0, [0.78, 0.78, 0.74], K, B);   // an egret on its back
+  if (r() < 0.3) ell(out, X(-0.2), y0 + 1.7 * S, z, 0.18, 0.13, 0.11, 1, 0.2, 0, [0.78, 0.78, 0.74], K, F);   // an egret on its back
   if (out.due()) yield;
 }
 // A macaque sitting, hunched, with a long curling tail.
 function monkey(out, x, y0, d, r) {
   const K = KIND.OTHER, S = 1.3, dir = r() < 0.5 ? -1 : 1, z = -d;
   const c = jitter([0.42, 0.34, 0.24], r, 0.1), f = [0.55, 0.42, 0.34];
-  ell(out, x, y0 + 0.28 * S, z, 0.24 * S, 0.17 * S, 0.15 * S, dir * 0.5, 1, 0, c, K, B);
-  ell(out, x + dir * 0.08 * S, y0 + 0.55 * S, z, 0.1 * S, 0.1 * S, 0.1 * S, 0, 1, 0, c, K, B);
-  ell(out, x + dir * 0.15 * S, y0 + 0.53 * S, z + 0.03, 0.05 * S, 0.06 * S, 0.04, 0, 1, 0, f, K, B);
-  strutM(out, x - dir * 0.15 * S, y0 + 0.12 * S, z, x - dir * 0.55 * S, y0 + 0.08 * S, z, limb(0.025, d), c, 2, K, B);
-  strutM(out, x - dir * 0.55 * S, y0 + 0.08 * S, z, x - dir * 0.7 * S, y0 + 0.4 * S, z, limb(0.025, d), c, 2, K, B);
-  strutM(out, x + dir * 0.1 * S, y0 + 0.35 * S, z, x + dir * 0.2 * S, y0 + 0.05, z, limb(0.03, d), c, 1, K, B);
+  ell(out, x, y0 + 0.28 * S, z, 0.24 * S, 0.17 * S, 0.15 * S, dir * 0.5, 1, 0, c, K, F);
+  ell(out, x + dir * 0.08 * S, y0 + 0.55 * S, z, 0.1 * S, 0.1 * S, 0.1 * S, 0, 1, 0, c, K, F);
+  ell(out, x + dir * 0.15 * S, y0 + 0.53 * S, z + 0.03, 0.05 * S, 0.06 * S, 0.04, 0, 1, 0, f, K, F);
+  strutM(out, x - dir * 0.15 * S, y0 + 0.12 * S, z, x - dir * 0.55 * S, y0 + 0.08 * S, z, limb(0.025, d), c, 2, K, F);
+  strutM(out, x - dir * 0.55 * S, y0 + 0.08 * S, z, x - dir * 0.7 * S, y0 + 0.4 * S, z, limb(0.025, d), c, 2, K, F);
+  strutM(out, x + dir * 0.1 * S, y0 + 0.35 * S, z, x + dir * 0.2 * S, y0 + 0.05, z, limb(0.03, d), c, 1, K, F);
 }
 // A parrot (macaw) in flight: bright body, long tail, wings up (the shader flaps them). MOVE.FLY.
 function parrot(out, x, y, d, r, dir) {
@@ -1855,7 +1856,7 @@ function* villages(ctx, out, W, dLo, dHi, night) {
   }
 }
 // A big cat walking along the forest edge: a tiger (orange, striped, white beneath) or, now and
-// then, a black panther. Long body, low head, a long tail curling up at the tip. Tagged MOVE.BEAT.
+// then, a black panther. Long body, low head, a long tail curling up at the tip. Tagged MOVE.FLASH.
 function bigCat(out, x, y0, d, r) {
   const K = KIND.OTHER, S = 1.75, dir = r() < 0.5 ? -1 : 1, z = -d, black = r() < 0.2;
   const c = black ? [0.07, 0.07, 0.08] : jitter([0.74, 0.4, 0.09], r, 0.08), dark = black ? [0.04, 0.04, 0.05] : [0.1, 0.07, 0.05];
@@ -1863,31 +1864,31 @@ function bigCat(out, x, y0, d, r) {
   const X = (u) => x + dir * u * S, lr = limb(0.055 * S, d);
   // legs, mid-stride: the far pair a little darker
   for (const [lx, fx, side] of [[0.62, 0.74, -1], [-0.6, -0.76, -1], [0.56, 0.4, 1], [-0.66, -0.5, 1]]) {
-    strutM(out, X(lx), y0 + 0.62 * S, z + side * 0.13 * S, X((lx + fx) / 2 + 0.03), y0 + 0.32 * S, z + side * 0.13 * S, lr * 1.25, side < 0 ? shade : c, 2, K, B);
-    strutM(out, X((lx + fx) / 2 + 0.03), y0 + 0.32 * S, z + side * 0.13 * S, X(fx), y0 + 0.03, z + side * 0.13 * S, lr, side < 0 ? shade : c, 2, K, B);
+    strutM(out, X(lx), y0 + 0.62 * S, z + side * 0.13 * S, X((lx + fx) / 2 + 0.03), y0 + 0.32 * S, z + side * 0.13 * S, lr * 1.25, side < 0 ? shade : c, 2, K, F);
+    strutM(out, X((lx + fx) / 2 + 0.03), y0 + 0.32 * S, z + side * 0.13 * S, X(fx), y0 + 0.03, z + side * 0.13 * S, lr, side < 0 ? shade : c, 2, K, F);
   }
   // belly first (pale), then the body over it, the shoulders and the haunch
-  if (!black) ell(out, X(0), y0 + 0.6 * S, z + 0.02, 0.48 * S, 0.1 * S, 0.14 * S, dir, 0, 0, pale, K, B);
-  ell(out, X(0), y0 + 0.74 * S, z, 0.5 * S, 0.17 * S, 0.17 * S, dir, 0.03, 0, c, K, B);
-  ell(out, X(0.5), y0 + 0.78 * S, z, 0.24 * S, 0.2 * S, 0.18 * S, dir, 0.1, 0, c, K, B);
-  ell(out, X(-0.52), y0 + 0.76 * S, z, 0.24 * S, 0.19 * S, 0.18 * S, dir, -0.1, 0, c, K, B);
+  if (!black) ell(out, X(0), y0 + 0.6 * S, z + 0.02, 0.48 * S, 0.1 * S, 0.14 * S, dir, 0, 0, pale, K, F);
+  ell(out, X(0), y0 + 0.74 * S, z, 0.5 * S, 0.17 * S, 0.17 * S, dir, 0.03, 0, c, K, F);
+  ell(out, X(0.5), y0 + 0.78 * S, z, 0.24 * S, 0.2 * S, 0.18 * S, dir, 0.1, 0, c, K, F);
+  ell(out, X(-0.52), y0 + 0.76 * S, z, 0.24 * S, 0.19 * S, 0.18 * S, dir, -0.1, 0, c, K, F);
   // stripes: thin dark bands round the body, closer on the haunch
   if (!black) for (const u of [0.62, 0.42, 0.24, 0.07, -0.1, -0.27, -0.42, -0.56, -0.68]) {
-    ell(out, X(u + (r() - 0.5) * 0.04), y0 + 0.78 * S, z + 0.03, 0.022 * S, 0.17 * S * (0.75 + 0.3 * r()), 0.17 * S, dir, (r() - 0.5) * 0.5, 0, dark, K, B);
+    ell(out, X(u + (r() - 0.5) * 0.04), y0 + 0.78 * S, z + 0.03, 0.022 * S, 0.17 * S * (0.75 + 0.3 * r()), 0.17 * S, dir, (r() - 0.5) * 0.5, 0, dark, K, F);
   }
   // neck and head, carried low and forward; white muzzle and cheeks, dark ears
-  ell(out, X(0.82), y0 + 0.78 * S, z, 0.2 * S, 0.13 * S, 0.13 * S, dir, -0.05, 0, c, K, B);
-  ell(out, X(1.06), y0 + 0.76 * S, z, 0.15 * S, 0.13 * S, 0.13 * S, dir, 0, 0, c, K, B);
-  ell(out, X(1.18), y0 + 0.71 * S, z + 0.02, 0.07 * S, 0.06 * S, 0.09 * S, dir, 0, 0, pale, K, B);
-  for (const sg of [-1, 1]) ell(out, X(1.0), y0 + 0.9 * S, z + sg * 0.09 * S, 0.035 * S, 0.045 * S, 0.035 * S, 0, 1, 0, dark, K, B);
-  if (!black) for (const u of [0.92, 1.02]) ell(out, X(u), y0 + 0.82 * S, z + 0.03, 0.016 * S, 0.08 * S, 0.12 * S, dir, 0.3, 0, dark, K, B);
+  ell(out, X(0.82), y0 + 0.78 * S, z, 0.2 * S, 0.13 * S, 0.13 * S, dir, -0.05, 0, c, K, F);
+  ell(out, X(1.06), y0 + 0.76 * S, z, 0.15 * S, 0.13 * S, 0.13 * S, dir, 0, 0, c, K, F);
+  ell(out, X(1.18), y0 + 0.71 * S, z + 0.02, 0.07 * S, 0.06 * S, 0.09 * S, dir, 0, 0, pale, K, F);
+  for (const sg of [-1, 1]) ell(out, X(1.0), y0 + 0.9 * S, z + sg * 0.09 * S, 0.035 * S, 0.045 * S, 0.035 * S, 0, 1, 0, dark, K, F);
+  if (!black) for (const u of [0.92, 1.02]) ell(out, X(u), y0 + 0.82 * S, z + 0.03, 0.016 * S, 0.08 * S, 0.12 * S, dir, 0.3, 0, dark, K, F);
   // the tail: down behind the hocks, then curling up, dark towards the tip
-  strutM(out, X(-0.74), y0 + 0.74 * S, z, X(-1.08), y0 + 0.36 * S, z, lr * 0.9, c, 3, K, B);
-  strutM(out, X(-1.08), y0 + 0.36 * S, z, X(-1.38), y0 + 0.3 * S, z, lr * 0.8, c, 2, K, B);
-  strutM(out, X(-1.38), y0 + 0.3 * S, z, X(-1.52), y0 + 0.5 * S, z, lr * 0.8, dark, 2, K, B);
+  strutM(out, X(-0.74), y0 + 0.74 * S, z, X(-1.08), y0 + 0.36 * S, z, lr * 0.9, c, 3, K, F);
+  strutM(out, X(-1.08), y0 + 0.36 * S, z, X(-1.38), y0 + 0.3 * S, z, lr * 0.8, c, 2, K, F);
+  strutM(out, X(-1.38), y0 + 0.3 * S, z, X(-1.52), y0 + 0.5 * S, z, lr * 0.8, dark, 2, K, F);
 }
 // A crocodile: basking on the bank (belly down, legs splayed, sometimes gaping) or lying in the
-// river with only its back, head and eyes above the water. Tagged MOVE.BEAT.
+// river with only its back, head and eyes above the water. Tagged MOVE.FLASH.
 function crocodile(out, x, y0, d, r, afloat) {
   const K = KIND.OTHER, S = 1.9, dir = r() < 0.5 ? -1 : 1, z = -d, bend = (r() - 0.5) * 0.5;
   const c = jitter([0.3, 0.37, 0.17], r, 0.1), dark = mul3(c, 0.68), pale = [0.66, 0.64, 0.42];
@@ -1896,23 +1897,23 @@ function crocodile(out, x, y0, d, r, afloat) {
   // surface are sorted with these splats and would otherwise lie over the body)
   const h = afloat ? 0.2 * S : 0.3 * S;
   if (!afloat) {
-    ell(out, X(0), y0 + 0.1 * S, Z(0), 0.62 * S, 0.06 * S, 0.2 * S, dir, 0, 0, pale, K, B);          // the pale flank low down
-    for (const [u, sg] of [[0.5, 1], [0.5, -1], [-0.55, 1], [-0.55, -1]]) strutM(out, X(u), y0 + 0.12 * S, Z(u), X(u + 0.12), y0 + 0.02, Z(u) + sg * 0.42 * S, lr, c, 2, K, B);
+    ell(out, X(0), y0 + 0.1 * S, Z(0), 0.62 * S, 0.06 * S, 0.2 * S, dir, 0, 0, pale, K, F);          // the pale flank low down
+    for (const [u, sg] of [[0.5, 1], [0.5, -1], [-0.55, 1], [-0.55, -1]]) strutM(out, X(u), y0 + 0.12 * S, Z(u), X(u + 0.12), y0 + 0.02, Z(u) + sg * 0.42 * S, lr, c, 2, K, F);
   }
-  ell(out, X(0), y0 + h, Z(0) + 0.3, 0.66 * S, afloat ? 0.14 * S : 0.18 * S, 0.24 * S, dir, 0, 0, c, K, B);
-  ell(out, X(0), y0 + h * 0.6, Z(0) + 0.16 * S, 0.6 * S, 0.05 * S, 0.06 * S, dir, 0, 0, pale, K, B);        // the pale edge of the flank towards us
+  ell(out, X(0), y0 + h, Z(0) + 0.3, 0.66 * S, afloat ? 0.14 * S : 0.18 * S, 0.24 * S, dir, 0, 0, c, K, F);
+  ell(out, X(0), y0 + h * 0.6, Z(0) + 0.16 * S, 0.6 * S, 0.05 * S, 0.06 * S, dir, 0, 0, pale, K, F);        // the pale edge of the flank towards us
   // the tail, tapering, a third of the animal; the ridge of scutes along the back
-  strutM(out, X(-0.9), y0 + h * 0.9, Z(-0.9) + 0.3, X(-1.75), y0 + h * 0.6, Z(-1.75) + 0.3, Math.max(0.12 * S, lr), c, 4, K, B);
-  strutM(out, X(-1.75), y0 + h * 0.6, Z(-1.75) + 0.3, X(-2.45), y0 + h * 0.35, Z(-2.45) + 0.3, Math.max(0.06 * S, lr), dark, 3, K, B);
-  for (let u = -0.55; u <= 0.6; u += 0.23) ell(out, X(u), y0 + h + (afloat ? 0.12 : 0.16) * S, Z(u) + 0.3, 0.07 * S, 0.035 * S, 0.06 * S, dir, 0, 0, dark, K, B);
+  strutM(out, X(-0.9), y0 + h * 0.9, Z(-0.9) + 0.3, X(-1.75), y0 + h * 0.6, Z(-1.75) + 0.3, Math.max(0.12 * S, lr), c, 4, K, F);
+  strutM(out, X(-1.75), y0 + h * 0.6, Z(-1.75) + 0.3, X(-2.45), y0 + h * 0.35, Z(-2.45) + 0.3, Math.max(0.06 * S, lr), dark, 3, K, F);
+  for (let u = -0.55; u <= 0.6; u += 0.23) ell(out, X(u), y0 + h + (afloat ? 0.12 : 0.16) * S, Z(u) + 0.3, 0.07 * S, 0.035 * S, 0.06 * S, dir, 0, 0, dark, K, F);
   // the head: broad at the back, a long snout, eyes and nostrils standing proud
   const gape = !afloat && r() < 0.4 ? 0.2 : 0;
-  ell(out, X(1.02), y0 + h * 0.95, Z(1.02) + 0.3, 0.26 * S, 0.12 * S, 0.19 * S, dir, 0, 0, c, K, B);
+  ell(out, X(1.02), y0 + h * 0.95, Z(1.02) + 0.3, 0.26 * S, 0.12 * S, 0.19 * S, dir, 0, 0, c, K, F);
   if (gape) {
-    ell(out, X(1.5), y0 + h * 0.55, Z(1.5), 0.3 * S, 0.035 * S, 0.1 * S, dir, 0, 0, pale, K, B);           // the lower jaw and the pale mouth
-    ell(out, X(1.46), y0 + h * 0.95 + gape * 0.5 * S, Z(1.46), 0.3 * S, 0.045 * S, 0.1 * S, dir, gape * 1.4, 0, c, K, B);
-  } else { ell(out, X(1.5), y0 + h * 0.85, Z(1.5) + 0.3, 0.32 * S, 0.08 * S, 0.12 * S, dir, 0, 0, c, K, B); ell(out, X(1.5), y0 + h * 0.55, Z(1.5) + 0.07 * S, 0.3 * S, 0.025 * S, 0.03 * S, dir, 0, 0, pale, K, B); }
-  for (const sg of [-1, 1]) ell(out, X(1.0), y0 + h + 0.1 * S, Z(1.0) + sg * 0.09 * S, 0.045 * S, 0.04 * S, 0.04 * S, 1, 0, 0, dark, K, B);
+    ell(out, X(1.5), y0 + h * 0.55, Z(1.5), 0.3 * S, 0.035 * S, 0.1 * S, dir, 0, 0, pale, K, F);           // the lower jaw and the pale mouth
+    ell(out, X(1.46), y0 + h * 0.95 + gape * 0.5 * S, Z(1.46), 0.3 * S, 0.045 * S, 0.1 * S, dir, gape * 1.4, 0, c, K, F);
+  } else { ell(out, X(1.5), y0 + h * 0.85, Z(1.5) + 0.3, 0.32 * S, 0.08 * S, 0.12 * S, dir, 0, 0, c, K, F); ell(out, X(1.5), y0 + h * 0.55, Z(1.5) + 0.07 * S, 0.3 * S, 0.025 * S, 0.03 * S, dir, 0, 0, pale, K, F); }
+  for (const sg of [-1, 1]) ell(out, X(1.0), y0 + h + 0.1 * S, Z(1.0) + sg * 0.09 * S, 0.045 * S, 0.04 * S, 0.04 * S, 1, 0, 0, dark, K, F);
   if (afloat) out(x, y0 + 0.01, z + 0.25, 2.6 * S, 0.02, 0.5 * S, 0.5, 0.46, 0.34, 0.5, 0, 0, 0, 1, KIND.GROUND);   // the water parting round it
 }
 // The rarer animals: a big cat at the forest edge now and then, crocodiles on and in the river.
@@ -2407,7 +2408,7 @@ export const tropicsBiome = {
   // the trackside is mostly beach or verge below the window; the sea and the forest need the rest
   shares: { trackside: 0.15, near: 0.43, mid: 0.26, far: 0.16 },
   // palms (KIND.TREE) and buildings answer the beat; the jungle (KIND.HEDGE) and the land stay
-  // still; boats, people, animals and birds are tagged MOVE.BEAT by hand. Lights always do.
+  // still; boats are tagged MOVE.BEAT by hand; people and animals MOVE.FLASH (they brighten, they do not swell). Lights always do.
   beatKinds: [KIND.TREE, KIND.BUILDING],
   sky: { stars: 1.15, deep: 0.4, milkyWay: 0.5 },
   generators: { trackside, near, mid, far },

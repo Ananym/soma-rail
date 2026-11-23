@@ -1573,17 +1573,20 @@ function* flagPole(ctx, out, W, p, kind = KIND.OTHER) {
 // lowered to graze or raised, pale horns, short legs, a bushy tail; some with red tassels at the
 // ears or a saddle blanket. Built from a handful of shaped splats so it reads at 40-150 m.
 //   o: { yaw (heading in the x-d plane), k (scale), col, graze, tassel, blanket, white, lod, kind }
-// Animals have no KIND of their own: they answer the beat through MOVE.BEAT on every splat.
-function beatOut(out) {
-  if (out.beatOut) return out.beatOut;
-  const b = (x, y, z, sx, sy, sz, r, g, bb, o, qx, qy, qz, qw, k) => out(x, y, z, sx, sy, sz, r, g, bb, o, qx, qy, qz, qw, k, MOVE.BEAT);
+// Animals have no KIND of their own: they answer the beat through MOVE.FLASH on every splat
+// (they brighten, they do not swell). Floating houses go through beatOut (MOVE.BEAT).
+function moveOut(out, key, move) {
+  if (out[key]) return out[key];
+  const b = (x, y, z, sx, sy, sz, r, g, bb, o, qx, qy, qz, qw, k) => out(x, y, z, sx, sy, sz, r, g, bb, o, qx, qy, qz, qw, k, move);
   b.due = out.due; b.density = out.density; b.detailK = out.detailK; b.ctx = out.ctx;
   b.q = (x, y, z, sx, sy, sz, c, o, q, kind) => b(x, y, z, sx, sy, sz, c[0], c[1], c[2], o, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, kind);
-  out.beatOut = b;
+  out[key] = b;
   return b;
 }
+function beatOut(out) { return moveOut(out, 'beatOut', MOVE.BEAT); }
+function flashOut(out) { return moveOut(out, 'flashOut', MOVE.FLASH); }
 function* yak(ctx, out, wx, y, d, o) {
-  out = beatOut(out);
+  out = flashOut(out);
   const k = o.k || 1, kind = o.kind != null ? o.kind : KIND.OTHER;
   const ca = Math.cos(o.yaw), sa = Math.sin(o.yaw);
   const x0 = wx - ctx.x0;
@@ -1657,7 +1660,7 @@ function* yak(ctx, out, wx, y, d, o) {
 // A blue sheep (bharal): slate grey-brown, white belly and leg fronts, black chest and flank
 // line, thick horns curving out and back.
 function* bharal(ctx, out, wx, y, d, o) {
-  out = beatOut(out);
+  out = flashOut(out);
   const k = o.k || 1, kind = KIND.OTHER;
   const ca = Math.cos(o.yaw), sa = Math.sin(o.yaw);
   const x0 = wx - ctx.x0;
@@ -2287,7 +2290,7 @@ function smoke(out, x, y, d, seed, n = 7, rise = 9, k = 1) {
 const SKIN = [0.42, 0.28, 0.2], HAIR = [0.06, 0.05, 0.05];
 const JACKETS = [[0.72, 0.16, 0.1], [0.12, 0.3, 0.62], [0.78, 0.48, 0.08], [0.1, 0.45, 0.32], [0.55, 0.12, 0.38], [0.2, 0.22, 0.26]];
 function* person(ctx, out, wx, y, d, o) {
-  out = beatOut(out);
+  out = flashOut(out);
   const role = o.role || 'herder';
   const k = (o.k || 1.6) * (role === 'child' ? 0.66 : 1);
   const ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
@@ -2353,7 +2356,7 @@ function* person(ctx, out, wx, y, d, o) {
 // side packs and a load on top; a horse may stand tethered with its head down to graze.
 const HORSES = [[0.3, 0.18, 0.1], [0.16, 0.11, 0.09], [0.48, 0.46, 0.42], [0.5, 0.38, 0.24], [0.24, 0.2, 0.17]];
 function* horse(ctx, out, wx, y, d, o) {
-  out = beatOut(out);
+  out = flashOut(out);
   const k = o.k || 1.6, ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
   const pt = [0, 0, 0];
   const P = (u, h, v) => { pt[0] = x0 + (u * ca - v * sa) * k; pt[1] = y + h * k; pt[2] = -(d + (u * sa + v * ca) * k); return pt; };
@@ -2935,7 +2938,7 @@ function makeBirds(W, i) {
   return { i, wx, d, y: cy, seed, birds };
 }
 function* bird(ctx, out, b) {
-  out = beatOut(out);
+  out = flashOut(out);
   const k = 1.3, x0 = b.wx - ctx.x0;
   const q = quatMul(quatYaw(b.yaw), quatAxis(1, 0, 0, b.bank));
   // local frame: x forward, y up, z the span
@@ -3949,7 +3952,7 @@ export const himalayaBiome = {
   // fill it: the budget goes where the picture is.
   shares: { trackside: 0.06, near: 0.32, mid: 0.42, far: 0.2 },
   // Only the things a viewer picks out answer the beat (houses, gompas, chortens, bridge towers,
-  // poplars and willows, lit windows; the yaks and blue sheep tag their own splats with MOVE.BEAT),
+  // poplars and willows, lit windows; the yaks, sheep, horses, people and birds tag their own splats with MOVE.FLASH),
   // never the mountains.
   beatKinds: [KIND.BUILDING, KIND.TREE, KIND.LIGHT],
   sky: { stars: 1.3, deep: 0.8, milkyWay: 0.8, clear: 0.4 },   // thin, clear air: a rich sky on the rare night here

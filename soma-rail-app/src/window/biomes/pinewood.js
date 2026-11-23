@@ -1108,7 +1108,7 @@ function* mist(ctx, out, W, dLo, dHi, cell, size) {
 // Wildlife: red deer, moose, wolves, brown bears, a fox by the line, an eagle on a dead tree.
 //
 // Every animal is a handful of shaped splats: ellipsoids for the body, struts for legs, ears,
-// tails and antlers, all tagged MOVE.BEAT. They are drawn larger than life, and more so the further
+// tails and antlers, all tagged MOVE.FLASH (they brighten on the beat, they do not swell). They are drawn larger than life, and more so the further
 // out they stand (wildK), because a life-size deer at 100 m is twelve pixels of brown.
 //
 // Where they stand is a pure function of the world (wildGroup, cached per world cell): each kind
@@ -1117,11 +1117,11 @@ function* mist(ctx, out, W, dLo, dHi, cell, size) {
 // water behind it, the far shore with the water in front, the shallows, open heath, bog or
 // clear-cut, the ground before a forest edge, or the strip between the line and the trees.
 // ---------------------------------------------------------------------------------------------
-const BEAT = MOVE.BEAT;
+const FLASH = MOVE.FLASH;
 const wildK = (d) => 1.3 + 0.8 * smooth(15, 95, d);
 const limbR = (r, d) => Math.max(r, 0.0007 * d);     // never much thinner than a pixel
-// A thin straight member that answers the beat (kit strut() carries no motion class). a, b: [x, y, z].
-function strutB(out, a, b, r, c, n, kind, move = BEAT) {
+// A thin straight member that answers the beat (as an animal's limb, with MOVE.FLASH) (kit strut() carries no motion class). a, b: [x, y, z].
+function strutB(out, a, b, r, c, n, kind, move = FLASH) {
   const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], len = Math.hypot(dx, dy, dz) || 1e-6;
   const q = quatXTo(dx / len, dy / len, dz / len), sl = Math.max((len / n) * 0.5, r);
   for (let i = 0; i < n; i++) {
@@ -1144,7 +1144,7 @@ function beastFrame(out, x, y, z, yaw, k, slope = 0, kind = KIND.OTHER) {
       if (pitch) q = quatMul(q, quatRoll(pitch));
       if (tilt) q = quatMul(q, quatAxis(1, 0, 0, tilt));
       const p = F.P(u, h, v);
-      out(p[0], p[1], p[2], ru * k, rh * k, rv * k, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind, BEAT);
+      out(p[0], p[1], p[2], ru * k, rh * k, rv * k, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind, FLASH);
     },
     S(a, b, r, c, n = 1) { strutB(out, F.P(a[0], a[1], a[2]), F.P(b[0], b[1], b[2]), limbR(r * k, d), c, n, kind); },
     sub(u, h, v, turn) { const p = F.P(u, h, v); return beastFrame(out, p[0], p[1], p[2], yaw + turn, k, 0, kind); },
