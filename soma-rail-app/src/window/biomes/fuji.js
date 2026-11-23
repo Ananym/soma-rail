@@ -30,7 +30,15 @@
 // the stretches between, where they and the cloud hide it.
 //
 // The beat: the mountain stays still. Houses, the pagoda, the torii, lanterns and the viaduct
-// (BUILDING) and lights answer it; people and birds tag their own splats MOVE.BEAT.
+// (BUILDING) and lights answer it; people and birds tag their own splats MOVE.FLASH (they brighten
+// without swelling), carts, the portable shrine and the picnic boxes MOVE.BEAT.
+//
+// Cyclists ride (MOVE.RIDE, see kit.js rideCell): each stands within a few metres of its 24 m ride
+// cell's middle, faces the cell's way and keeps to that way's side of its track (with the train on
+// the near side, against it on the far side), so the shader can carry it along the line past the
+// country. Only where the way runs straight and level for 72 m each side with nothing on it to
+// ride through (rideable(), laneRiders(), roadSlot()); elsewhere a cyclist stands still, and the one
+// waiting at the level crossing always does.
 //
 // People (see "People and animals" and the ...Life functions): the country is lived in. Planting
 // teams bent double in rows across the flooded paddies, farmers hoeing the vegetable plots; two farm
@@ -55,7 +63,7 @@ import { hashInts, hashString, makeRng, noise1, noise2 } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, cellsAround, detail, shade, jitter, mul3, mix3, smooth, clamp, lerp,
-  norm3, quatYaw, quatUpTo, quatMul, quatXTo, quatAxis, overheadLine, blob, strut, conifer, treeSplats, SUN,
+  norm3, quatYaw, quatUpTo, quatMul, quatXTo, quatAxis, overheadLine, blob, strut, conifer, treeSplats, SUN, rideCell,
 } from './kit.js';
 import { bamboo } from './karst.js';
 
@@ -172,13 +180,16 @@ function faceTone(c, nx, nz) {
   const k = 0.6 + 0.26 * Math.max(0, nz) + 0.42 * Math.max(0, -nx) - 0.06 * Math.max(0, nx) + 0.1 * Math.max(0, -nz);
   return [c[0] * k, c[1] * k, c[2] * k];
 }
-// An emitter that tags every splat MOVE.BEAT (people, animals): they answer the music by hand.
-function beatOut(out) {
-  if (out.beatOut) return out.beatOut;
-  const b = (x, y, z, sx, sy, sz, r, g, bb, o, qx, qy, qz, qw, k) => out(x, y, z, sx, sy, sz, r, g, bb, o, qx, qy, qz, qw, k, MOVE.BEAT);
+// An emitter that tags every splat with one motion class: MOVE.FLASH for people and animals (they
+// brighten on the beat), MOVE.RIDE for a cyclist and the bicycle under them (carried along the line:
+// see rideCell), MOVE.BEAT for the carts and the portable shrine drawn with the figures' helpers.
+function moveOut(out, move) {
+  const cache = out.moveOuts || (out.moveOuts = {});
+  if (cache[move]) return cache[move];
+  const b = (x, y, z, sx, sy, sz, r, g, bb, o, qx, qy, qz, qw, k) => out(x, y, z, sx, sy, sz, r, g, bb, o, qx, qy, qz, qw, k, move);
   b.due = out.due; b.density = out.density; b.detailK = out.detailK; b.ctx = out.ctx; b.left = out.left;
   b.q = (x, y, z, sx, sy, sz, c, o, q, kind) => b(x, y, z, sx, sy, sz, c[0], c[1], c[2], o, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, kind);
-  out.beatOut = b;
+  cache[move] = b;
   return b;
 }
 // A thin straight member with a motion class (kit.js strut() has none).
@@ -1471,7 +1482,8 @@ function* vending(ctx, out, x, y0, d, seed) {
 // and load, overlapping beams for limbs (never thinner than the GPU can draw at that distance). They
 // are drawn well over life size, the more so the further out they stand (figK: 1.7x at 40 m, 2.2x at
 // 100 m, 2.5x from 145 m), because a life-size person 80 m from the window is twenty pixels tall and
-// reads as a speck. All of them answer the beat by hand (MOVE.BEAT, through beatOut).
+// reads as a speck. All of them answer the beat by hand (MOVE.FLASH, through moveOut); a riding
+// cyclist is MOVE.RIDE.
 //   A figure's own frame: u along its heading, h up, v across. yaw 0 faces along the line (+x),
 //   pi/2 faces away from it, -pi/2 faces the train.
 // ---------------------------------------------------------------------------------------------
@@ -1483,10 +1495,10 @@ const KIMONO = [[0.7, 0.36, 0.5], [0.42, 0.3, 0.6], [0.2, 0.45, 0.5], [0.72, 0.5
 const LANTERN = [1, 0.74, 0.4];
 function figK(d) { return clamp(1.4 + d / 130, 1.7, 2.5); }
 // For scripts that look for the figures: globalThis.__fujiLog(what, worldX, distance), if set.
-function logFig(ctx, what, wx, d) { const f = globalThis.__fujiLog; if (f && wx >= ctx.x0 && wx < ctx.x0 + ctx.length) f(what, wx, d); }
+function logFig(ctx, what, wx, d, extra) { const f = globalThis.__fujiLog; if (f && wx >= ctx.x0 && wx < ctx.x0 + ctx.length) f(what, wx, d, extra); }
 
-function fig(ctx, out, wx, y, d, yaw, k) {
-  const B = beatOut(out), ca = Math.cos(yaw), sa = Math.sin(yaw), x0 = wx - ctx.x0, kind = KIND.OTHER;
+function fig(ctx, out, wx, y, d, yaw, k, move = MOVE.FLASH) {
+  const B = moveOut(out, move), ca = Math.cos(yaw), sa = Math.sin(yaw), x0 = wx - ctx.x0, kind = KIND.OTHER;
   const rmin = 0.00065 * d, qy = quatYaw(yaw);
   const P = (u, h, v) => [x0 + (u * ca - v * sa) * k, y + h * k, -(d + (u * sa + v * ca) * k)];
   const V = (u, h, v) => [u * ca - v * sa, h, -(u * sa + v * ca)];
@@ -1511,8 +1523,9 @@ function fig(ctx, out, wx, y, d, yaw, k) {
 function* person(ctx, out, wx, y, d, o = {}) {
   if (!inX(ctx, wx, 6)) return;
   const k = (o.k || figK(d)) * (o.size || 1);
-  const { P, E, T, L } = fig(ctx, out, wx, y, d, o.yaw || 0, k);
-  logFig(ctx, o.what || 'person', wx, d);
+  const move = o.move || MOVE.FLASH;
+  const { P, E, T, L } = fig(ctx, out, wx, y, d, o.yaw || 0, k, move);
+  logFig(ctx, o.what || 'person', wx, d, o.log);
   const top = o.top || SHIRTS[0], leg = o.legs || TROUS, pose = o.pose || 'stand';
   let hu = 0, hh = 0.9, su = 0.02, sh = 1.47, eu = 0.03, eh = 1.67;      // hip, shoulders, head: along the heading, up
   if (pose === 'sit') { hh = 0.2; su = 0.03; sh = 0.72; eu = 0.05; eh = 0.93; E(P(0.24, 0.15, 0), 0.34, 0.15, 0.28, o.robe || leg); }
@@ -1585,9 +1598,10 @@ function* person(ctx, out, wx, y, d, o = {}) {
     L(tip, P(su + 2.9, 0.1, 0.6), 0.008, [0.7, 0.7, 0.7], 3, 0.7);
   }
   if (o.lamp) {
-    const p = P(su + 0.36, sh - 0.62, 0.24), s = 0.13 * k;
-    out(p[0], p[1], p[2], s, s * 1.25, s, LANTERN[0], LANTERN[1], LANTERN[2], 1, 0, 0, 0, 1, KIND.LIGHT);
-    out(p[0], p[1], p[2] + 0.05, s * 6, s * 6, s * 2, LANTERN[0], LANTERN[1], LANTERN[2], 0.14, 0, 0, 0, 1, KIND.LIGHT);
+    // (a rider's lamp rides with it; anybody else's is an ordinary light)
+    const p = P(su + 0.36, sh - 0.62, 0.24), s = 0.13 * k, lo = move === MOVE.RIDE ? moveOut(out, move) : out;
+    lo(p[0], p[1], p[2], s, s * 1.25, s, LANTERN[0], LANTERN[1], LANTERN[2], 1, 0, 0, 0, 1, KIND.LIGHT);
+    lo(p[0], p[1], p[2] + 0.05, s * 6, s * 6, s * 2, LANTERN[0], LANTERN[1], LANTERN[2], 0.14, 0, 0, 0, 1, KIND.LIGHT);
   }
   if (out.due()) yield;
 }
@@ -1609,10 +1623,13 @@ function* dog(ctx, out, wx, y, d, yaw, k) {
 }
 
 // A bicycle and its rider, seen best from the side: two wheels as rings of struts, a frame, a front
-// basket; by night a lamp.
+// basket; by night a lamp. o.ride: it is riding, and every splat of it (lamp too) is MOVE.RIDE, so
+// it must stand near its ride cell's middle facing the cell's way (see rideCell). Otherwise it
+// stands still and flashes with its rider.
 function* cyclist(ctx, out, wx, y, d, o) {
   if (!inX(ctx, wx, 6)) return;
-  const k = o.k || figK(d), { P, E, L } = fig(ctx, out, wx, y, d, o.yaw || 0, k);
+  const move = o.ride ? MOVE.RIDE : MOVE.FLASH, lo = o.ride ? moveOut(out, move) : out;
+  const k = o.k || figK(d), { P, E, L } = fig(ctx, out, wx, y, d, o.yaw || 0, k, move);
   const tyre = [0.09, 0.09, 0.1], fc = o.frame || [0.6, 0.62, 0.64];
   for (const cu of [-0.54, 0.54]) for (let i = 0; i < 8; i++) {
     const a0 = (i / 8) * 6.2832, a1 = ((i + 1) / 8) * 6.2832;
@@ -1625,17 +1642,18 @@ function* cyclist(ctx, out, wx, y, d, o) {
   if (o.basket !== false) E(P(0.68, 0.88, 0), 0.13, 0.11, 0.16, [0.52, 0.52, 0.5]);
   if (o.night) {
     const p = P(0.72, 0.7, 0);
-    out(p[0], p[1], p[2], 0.1 * k, 0.1 * k, 0.1 * k, 1, 0.97, 0.8, 1, 0, 0, 0, 1, KIND.LIGHT);
-    out(p[0], p[1], p[2] + 0.05, 0.6 * k, 0.6 * k, 0.25 * k, 1, 0.97, 0.8, 0.15, 0, 0, 0, 1, KIND.LIGHT);
+    lo(p[0], p[1], p[2], 0.1 * k, 0.1 * k, 0.1 * k, 1, 0.97, 0.8, 1, 0, 0, 0, 1, KIND.LIGHT);
+    lo(p[0], p[1], p[2] + 0.05, 0.6 * k, 0.6 * k, 0.25 * k, 1, 0.97, 0.8, 0.15, 0, 0, 0, 1, KIND.LIGHT);
   }
-  yield* person(ctx, out, wx, y, d, { ...o, k, pose: 'ride', basket: false, what: o.what || 'cyclist' });
+  yield* person(ctx, out, wx, y, d, { ...o, k, move, pose: 'ride', basket: false, what: o.what || 'cyclist', log: { ride: !!o.ride, dir: Math.cos(o.yaw || 0) > 0 ? 1 : -1 } });
 }
 
 // A two-wheeled handcart (riyaka) and the farmer pulling it: a low bed with a load, rail sides, two
 // spoked wheels, the handles running forward to the puller.
 function* handcart(ctx, out, wx, y, d, o) {
   if (!inX(ctx, wx, 8)) return;
-  const k = o.k || figK(d), yaw = o.yaw || 0, { P, E, L } = fig(ctx, out, wx, y, d, yaw, k);
+  // (the cart is a thing: it swells on the beat; the farmer pulling it flashes)
+  const k = o.k || figK(d), yaw = o.yaw || 0, { P, E, L } = fig(ctx, out, wx, y, d, yaw, k, MOVE.BEAT);
   const steel = [0.36, 0.38, 0.4], tyre = [0.09, 0.09, 0.1];
   E(P(-0.3, 0.64, 0), 0.86, 0.13, 0.47, [0.42, 0.36, 0.28]);
   E(P(-0.3, 1.0, 0), 0.66, 0.27, 0.4, o.load || C.youngRice);
@@ -1719,7 +1737,7 @@ function* nobori(ctx, out, wx, y, d, k, c) {
 // and headbands: black lacquer and gold under a wide roof with a gold bird on top.
 function* mikoshi(ctx, out, wx, y, d, yaw, k, night) {
   if (!inX(ctx, wx, 12)) return;
-  const { P, E, T, L } = fig(ctx, out, wx, y, d, yaw, k);
+  const { P, E, T, L } = fig(ctx, out, wx, y, d, yaw, k, MOVE.BEAT);     // the shrine swells; its bearers flash
   const gold = [0.8, 0.62, 0.16], lac = [0.09, 0.07, 0.07], red = C.vermilion;
   for (const v of [-0.42, 0.42]) L(P(-2.0, 1.5, v), P(2.0, 1.5, v), 0.05, red, 8);
   E(P(0, 1.68, 0), 0.52, 0.13, 0.52, lac);
@@ -1776,7 +1794,7 @@ function* picnic(ctx, out, W, wx, d, seed, night) {
 // black neck and tail and a red cap). Twice life size and more: a bird is a small thing.
 function* egret(ctx, out, wx, y, d, o) {
   if (!inX(ctx, wx, 4)) return;
-  const B = beatOut(out), k = (o.crane ? 2.5 : o.heron ? 2.5 : 2.0) * clamp(0.75 + d / 240, 1, 1.25), kind = KIND.OTHER;
+  const B = moveOut(out, MOVE.FLASH), k = (o.crane ? 2.5 : o.heron ? 2.5 : 2.0) * clamp(0.75 + d / 240, 1, 1.25), kind = KIND.OTHER;
   logFig(ctx, o.crane ? 'crane' : o.heron ? 'heron' : 'bird', wx, d);
   const ca = Math.cos(o.yaw), sa = Math.sin(o.yaw), x0 = wx - ctx.x0;
   const P = (u, h, v) => [x0 + (u * ca - v * sa) * k, y + h * k, -(d + (u * sa + v * ca) * k)];
@@ -2216,7 +2234,90 @@ function openTo(W, wx, d) {
 // The kind of paddy panel at a point (a P value), or -1 where the ground is not paddy.
 function paddyAt(W, wx, d) { const S = surface(W, wx, d); return S.t === T.PADDY ? S.info.t : -1; }
 // Is distance d on or beside a farm lane (whose own traffic the field workers must keep clear of)?
-function onLane(W, d) { for (const q of W.rows) { if (q.D > d + 4) break; if (q.lane && d > q.D - 2 && d < q.D + laneW(q.D) + 1.5) return true; } return false; }
+// m widens the margin either side (trees, whose crowns spread over it).
+function onLane(W, d, m = 0) { for (const q of W.rows) { if (q.D > d + 4 + m) break; if (q.lane && d > q.D - 2 - m && d < q.D + laneW(q.D) + 1.5 + m) return true; } return false; }
+
+// --- Riders (MOVE.RIDE: see kit.js rideCell). The shader carries a rider along the line, in view by up
+// to about a quarter of its distance (more on the widest screens), so it may only ride where its way
+// runs straight, level and clear for RIDE_REACH either side of where it stands.
+const RIDE_REACH = 72;
+const RIDE_LEVEL = 0.15;      // metres the way may rise or fall over that reach (the shader moves along x only)
+// Can a rider standing at (wx, d) be carried along its way? way: 'lane' (D: the lane's row
+// boundary), 'road', 'river'. Straight: the lane is drawn all along (paddy on both hands, no yard,
+// road, village or hill across it), the road and the river path stay within a few tens of
+// centimetres of the same distance.
+function rideable(W, way, wx, d, D = 0) {
+  const hd = way === 'lane' ? D + 0.6 : d, h0 = W.H(wx, hd);
+  const a0 = way === 'road' ? roadD(W, wx) : way === 'river' ? riverN(W, wx) : 0;
+  for (let t = -RIDE_REACH; t <= RIDE_REACH; t += 6) {
+    const x = wx + t;
+    if (way === 'lane') {
+      const S = surface(W, x, hd);
+      if (S.t !== T.PADDY || S.info.t === P.HOUSE) return false;
+      // (nor the road's poles and vending machines, which stand up to 5.6 m beyond its middle)
+      if (roadOn(W, x) && Math.abs(roadD(W, x) + 1.5 - (D + laneW(D) / 2)) < laneW(D) / 2 + 5.6) return false;
+    } else if (way === 'road') { if (!roadOn(W, x) || Math.abs(roadD(W, x) - a0) > 0.7) return false; }
+    else if (riverAmt(W, x) < 0.98 || Math.abs(riverN(W, x) - a0) > 0.5) return false;
+    if (Math.abs(W.H(x, hd) - h0) > RIDE_LEVEL) return false;
+  }
+  // the river path runs under the trees of the near levee (riverside(), every 9 m where there are
+  // any): a rider drawn twice life size would ride with its head through their crowns
+  if (way === 'river') for (let i = Math.floor((wx - RIDE_REACH - 12) / 9); i <= Math.floor((wx + RIDE_REACH + 12) / 9); i++) if (riversideTree(W, i)) return false;
+  return true;
+}
+// Is there a tree on the near levee in riverside()'s 9 m cell i (as it draws them)?
+function riversideTree(W, i) {
+  const wx = i * 9 + 4.5;
+  if (riverAmt(W, wx) < 0.6) return false;
+  return makeRng(hashInts(W.ws, 1904, i, 0))() <= (noise1(wx / 2600, W.ws + 1903) > 0.3 ? 0.92 : 0.25);
+}
+// What the farm lanes' own ladder (laneLife) puts in its 90 m cell i of lane kq: the first two draws.
+const LANE_U = { ride: 0.08, school: 0.15, cart: 0.21, truck: 0.26, walk: 0.31, sit: 0.36 };
+function laneSlot(W, kq, i) { const r = makeRng(hashInts(W.ws, 2401, kq, i)); const u = r(); return { u, wx: i * 90 + 8 + 74 * r() }; }
+// The cyclists on farm lane kq: at most one (or a pair) in each LRCELL of it, standing on the middle
+// of one of the ride cells inside it (so no two share a cell), riding with the train on the near
+// half of the track and against it on the far half (walkers keep to the middle). Only where the lane
+// runs straight, level and clear for RIDE_REACH both ways: no cart or kei truck (they fill the
+// lane), nobody sitting on the near bank on the near side, nobody at all where it stands.
+const LRCELL = 240;           // ten ride cells
+function laneRider(W, kq, i) {
+  return cget(W.misc, 'lr' + kq + ':' + i, () => {
+    const q = W.rows[kq], r = makeRng(hashInts(W.ws, 2405, kq, i));
+    if (r() > 0.6) return null;
+    const lw = laneW(q.D), n = LRCELL / 24;
+    for (let tr = 0; tr < 3; tr++) {
+      const fc = rideCell((i * n + 1 + Math.floor(r() * (n - 1))) * 24), wx = fc.wx, dir = fc.dir;
+      const d = q.D + lw * (dir > 0 ? 0.12 : 0.76);
+      if (!rideable(W, 'lane', wx, d, q.D) || !openTo(W, wx, d)) continue;
+      let clear = true;
+      for (let j = Math.floor((wx - RIDE_REACH - 90) / 90); j <= Math.floor((wx + RIDE_REACH + 8) / 90) && clear; j++) {
+        const s = laneSlot(W, kq, j), dx = Math.abs(s.wx - wx);
+        if (s.u < LANE_U.ride || s.u >= LANE_U.sit) continue;
+        if (dx < 10) clear = false;
+        else if (dx < RIDE_REACH + 8 && ((s.u >= LANE_U.school && s.u < LANE_U.truck) || (dir > 0 && s.u >= LANE_U.walk))) clear = false;
+      }
+      if (clear) return { wx, d, dir, pair: r() < 0.35, seed: hashInts(W.ws, 2406, kq, i) };
+    }
+    return null;
+  });
+}
+// What the road holds in its 170 m cell i (as roadLife draws it), for the riders' checks.
+function roadSlot(W, i) {
+  const r = makeRng(hashInts(W.ws, 2411, i));
+  if (r() > 0.5) return null;
+  const wx = i * 170 + 15 + 140 * r();
+  if (!roadOn(W, wx) || !roadOn(W, wx - 12) || !roadOn(W, wx + 12)) return null;
+  const dir = r() < 0.5 ? 1 : -1;
+  return { wx, dir, truck: r() < 0.65 };
+}
+// What the river path holds in its 44 m cell i: is it a cyclist (as riverLife draws it)?
+function riverCyclist(W, i) {
+  const r = makeRng(hashInts(W.ws, 2421, i));
+  const wx = i * 44 + 6 + 32 * r(), u = r(), sakura = noise1(wx / 2600, W.ws + 1903) > 0.3;
+  if ((sakura && u < 0.3) || u >= (sakura ? 0.58 : 0.14)) return null;
+  r();
+  return r() >= 0.84 ? wx : null;
+}
 
 // Life in the paddies: farmers at work, planting teams bent double in a row across a flooded field,
 // somebody hoeing a vegetable plot; egrets, now and then a grey heron or a pair of cranes.
@@ -2250,7 +2351,7 @@ function* paddyLife(ctx, out, W, dLo, dHi) {
       for (let j = 0; j < n; j++) {
         const px = wx + (r2() - 0.5) * 18, pd = d + (r2() - 0.5) * 8;
         const yaw = r2() * 6.28, hunch = r2() < 0.3;
-        if (inD(pd, dLo, dHi)) yield* egret(ctx, out, px, y, pd, { yaw: crane ? (yaw < 3.14 ? 0.3 : 2.84) : yaw, heron, crane, hunch: hunch && !crane });
+        if (inD(pd, dLo, dHi) && !onLane(W, pd)) yield* egret(ctx, out, px, y, pd, { yaw: crane ? (yaw < 3.14 ? 0.3 : 2.84) : yaw, heron, crane, hunch: hunch && !crane });
       }
     }
   }
@@ -2301,19 +2402,25 @@ function* laneLife(ctx, out, W, dLo, dHi) {
     if (q.D > Math.min(dHi, 130)) break;
     if (!q.lane || q.D < dLo + 2) continue;
     const d = q.D + laneW(q.D) * 0.45, top = laneTop(q.D), k = figK(d);
+    // the cyclists, riding (see laneRider): a pupil in a white helmet, or somebody in a straw hat
+    // with the shopping; now and then two pupils riding together
+    for (const { i } of cellsAround(ctx, LRCELL, 12)) {
+      const c = laneRider(W, kq, i);
+      if (!c || !inX(ctx, c.wx, 12)) continue;
+      const r = makeRng(c.seed), yaw = c.dir > 0 ? 0 : Math.PI, kr = figK(c.d), y = W.H(c.wx, q.D + 0.6) + top + 0.05;
+      const pupil = c.pair || r() < 0.5, lead = c.pair ? c.wx + c.dir * 1.3 * kr : c.wx;
+      yield* cyclist(ctx, out, lead, y, c.d, { what: 'rider-lane', ride: true, k: kr, yaw, night, top: pupil ? WHITE : SHIRTS[Math.floor(r() * SHIRTS.length)], legs: TROUS, hat: pupil ? 'cap' : 'kasa', hatC: WHITE, frame: pupil ? [0.6, 0.62, 0.64] : [0.6, 0.2, 0.18], pack: pupil ? [0.14, 0.14, 0.2] : null });
+      if (c.pair) yield* cyclist(ctx, out, c.wx - c.dir * 1.3 * kr, y, c.d + 0.15, { what: 'rider-lane', ride: true, k: kr, yaw, night, top: WHITE, legs: TROUS, hat: 'cap', hatC: WHITE, frame: [0.2, 0.36, 0.6], pack: [0.72, 0.14, 0.14] });
+    }
     for (const { i, wx0 } of cellsAround(ctx, 90, 30)) {
       const r = makeRng(hashInts(W.ws, 2401, kq, i));
       const u = r(), wx = wx0 + 8 + 74 * r();
-      if (u > 0.36) continue;
+      // (u below LANE_U.ride was a cyclist: they have their own places now, above)
+      if (u >= LANE_U.sit || u < LANE_U.ride) continue;
       if (paddyAt(W, wx, d) < 0 || paddyAt(W, wx - 7, d) < 0 || paddyAt(W, wx + 7, d) < 0 || !openTo(W, wx, d)) continue;
       const y = W.H(wx, d) + top + 0.05, dir = r() < 0.5 ? 1 : -1, yaw = dir > 0 ? 0 : Math.PI;
       const shirt = () => SHIRTS[Math.floor(r() * SHIRTS.length)];
-      if (u < 0.08) {
-        // a cyclist: a pupil in a white helmet, or somebody in a straw hat with the shopping
-        const pupil = r() < 0.5;
-        yield* cyclist(ctx, out, wx, y, d, { k, yaw, night, top: pupil ? WHITE : shirt(), legs: TROUS, hat: pupil ? 'cap' : 'kasa', hatC: WHITE, frame: pupil ? [0.6, 0.62, 0.64] : [0.6, 0.2, 0.18], pack: pupil ? [0.14, 0.14, 0.2] : null });
-        if (r() < 0.3) yield* cyclist(ctx, out, wx - dir * 2.6 * k, y, d + 0.5, { k, yaw, night, top: WHITE, hat: 'cap', hatC: WHITE, pack: [0.14, 0.14, 0.2] });
-      } else if (u < 0.15) {
+      if (u < LANE_U.school) {
         // schoolchildren in file: yellow hats, satchels, umbrellas
         const n = 2 + Math.floor(r() * 3);
         for (let j = 0; j < n; j++) {
@@ -2355,7 +2462,17 @@ function* roadLife(ctx, out, W, dLo, dHi, scale) {
     if (!inD(rd, dLo, dHi)) continue;
     const dir = r() < 0.5 ? 1 : -1, yaw = dir > 0 ? 0 : Math.PI, y = W.H(wx, rd) + 0.24, k = figK(rd) * scale;
     if (r() < 0.65) yield* keiTruck(ctx, out, wx, y, rd - dir * 1.1, { k: k * 0.85, yaw, seed: hashInts(W.ws, 2412, i), body: r() < 0.7 ? WHITE : [0.5, 0.6, 0.66], load: [C.veg, [0.72, 0.6, 0.2], [0.7, 0.62, 0.36], null][Math.floor(r() * 4)], night });
-    else yield* cyclist(ctx, out, wx, y, rd - dir * 1.5, { k, yaw, night, top: SHIRTS[Math.floor(r() * SHIRTS.length)], hat: 'kasa', frame: [0.6, 0.2, 0.18] });
+    else {
+      // a cyclist: riding on its own side of the road (with the train on the near side), from the
+      // middle of its ride cell, where the road runs straight and level and nothing else stands on
+      // that side within reach; otherwise drawn up where it is
+      const fc = rideCell(wx), rdc = roadD(W, fc.wx), dc = rdc - fc.dir * 1.5;
+      let ride = inD(dc, dLo, dHi) && rideable(W, 'road', fc.wx, dc);
+      for (let j = i - 1; j <= i + 1 && ride; j += 2) { const s = roadSlot(W, j); if (s && s.dir === fc.dir && Math.abs(s.wx - fc.wx) < RIDE_REACH + 10) ride = false; }
+      const o = { what: 'rider-road', k, night, top: SHIRTS[Math.floor(r() * SHIRTS.length)], hat: 'kasa', frame: [0.6, 0.2, 0.18] };
+      if (ride) yield* cyclist(ctx, out, fc.wx, W.H(fc.wx, rdc) + 0.24, dc, { ...o, ride, yaw: fc.dir > 0 ? 0 : Math.PI });
+      else yield* cyclist(ctx, out, wx, y, rd - dir * 1.5, { ...o, yaw });
+    }
   }
 }
 
@@ -2373,7 +2490,8 @@ function* riverLife(ctx, out, W, dLo, dHi) {
     const shirt = () => SHIRTS[Math.floor(r() * SHIRTS.length)];
     if (sakura && u < 0.3) yield* picnic(ctx, out, W, wx, rn - 10, hashInts(W.ws, 2422, i), night);
     else if (u < (sakura ? 0.58 : 0.14)) {
-      const d = rn - 6.6, k = figK(d), dir = r() < 0.5 ? 1 : -1, yaw = dir > 0 ? 0 : Math.PI, v = r();
+      // (strollers keep to the middle of the levee top, between the riders' two sides)
+      const d = rn - 6.2, k = figK(d), dir = r() < 0.5 ? 1 : -1, yaw = dir > 0 ? 0 : Math.PI, v = r();
       const y = (px) => W.H(px, d) + 0.05;
       if (v < 0.3) {
         // a couple
@@ -2389,10 +2507,21 @@ function* riverLife(ctx, out, W, dLo, dHi) {
       } else if (v < 0.84) {
         yield* person(ctx, out, wx, y(wx), d, { what: 'stroller', k, yaw, pose: 'walk', top: shirt(), legs: [0.3, 0.3, 0.36], hat: 'cap', hatC: WHITE, lamp: night });
         yield* dog(ctx, out, wx + dir * 1.5 * k, y(wx), d - 0.3, yaw, k);
-      } else yield* cyclist(ctx, out, wx, y(wx), d, { what: 'stroller', k, yaw, night, top: shirt(), hat: r() < 0.5 ? 'cap' : null, hatC: WHITE });
+      } else {
+        // a cyclist on the levee path: riding from the middle of its ride cell, with the train on the
+        // near edge and against it on the far edge, where the river runs straight for the reach,
+        // with no trees along the levee and no other cyclist on the path within it (rare: mostly
+        // the path runs under cherries or pines); otherwise drawn up where it is
+        const fc = rideCell(wx), rnc = riverN(W, fc.wx), dc = rnc - (fc.dir > 0 ? 7.4 : 3.7);
+        let ride = inD(dc, dLo, dHi) && rideable(W, 'river', fc.wx, dc) && openTo(W, fc.wx, rnc - 12);
+        for (let j = i - 2; j <= i + 2 && ride; j++) { const cx = j === i ? null : riverCyclist(W, j); if (cx != null && Math.abs(cx - wx) < RIDE_REACH + 10) ride = false; }
+        const o = { what: 'rider-river', k, night, top: shirt(), hat: r() < 0.5 ? 'cap' : null, hatC: WHITE };
+        if (ride) yield* cyclist(ctx, out, fc.wx, W.H(fc.wx, dc) + 0.05, dc, { ...o, ride, k: figK(dc), yaw: fc.dir > 0 ? 0 : Math.PI });
+        else yield* cyclist(ctx, out, wx, y(wx), d, { ...o, yaw });
+      }
     } else if (u > (sakura ? 0.92 : 0.84)) {
       // an angler on the lip of the levee, the rod out over the river
-      const d = rn - 2.8, k = figK(d), side = r() < 0.5 ? 1 : -1;
+      const d = rn - 2.4, k = figK(d), side = r() < 0.5 ? 1 : -1;
       yield* person(ctx, out, wx, W.H(wx, d) + 0.05, d, { what: 'angler', k, yaw: side > 0 ? 0.5 : Math.PI - 0.5, pose: r() < 0.3 ? 'sit' : 'stand', top: r() < 0.5 ? [0.72, 0.34, 0.12] : [0.2, 0.36, 0.62], legs: [0.2, 0.2, 0.24], hat: r() < 0.6 ? 'kasa' : 'cap', hatC: r() < 0.5 ? STRAW : WHITE, arms: 'fwd', tool: 'rod' });
       out(wx - side * 0.9 * k - ctx.x0, W.H(wx, d) + 0.28 * k, -d, 0.2 * k, 0.2 * k, 0.2 * k, 0.16, 0.36, 0.66, 1, 0, 0, 0, 1, KIND.OTHER, MOVE.BEAT);
     }
@@ -2583,7 +2712,8 @@ function* fieldTrees(ctx, out, W, dLo, dHi) {
     const wx = wx0 + 60 * r(), d = dLo + (dHi - dLo) * Math.pow(r(), 1.2);
     if (!inX(ctx, wx, 12) || !inD(d, dLo, dHi)) continue;
     const S = surface(W, wx, d);
-    if (S.t !== T.PADDY && S.t !== T.BANK) continue;
+    // (not on a farm lane, nor so close that its crown hangs over the riders)
+    if ((S.t !== T.PADDY && S.t !== T.BANK) || onLane(W, d, 3)) continue;
     const y = S.y - 0.1, u = r();
     if (u < 0.35) yield* persimmon(ctx, out, wx - ctx.x0, d, y, r);
     else if (u < 0.6) yield* bamboo(ctx, out, wx - ctx.x0, d, { rng: r, height: 8 + 5 * r(), width: 5 + 5 * r(), y });
@@ -2915,7 +3045,8 @@ export const fujiBiome = {
   // the mountain itself: one mesh that stays with the journey
   backdrop: { share: 0.11, ...BD, generate: backdrop, pose: backdropPose },
   // Fuji stays still on the beat: buildings (houses, pagoda, torii, lanterns, viaduct) and lights
-  // answer it, and farmers and egrets by hand (MOVE.BEAT)
+  // answer it, carts and the portable shrine by hand (MOVE.BEAT); people and birds flash on it
+  // (MOVE.FLASH) and cyclists ride (MOVE.RIDE)
   beatKinds: [KIND.BUILDING, KIND.LIGHT],
   sky: { clear: 0.55 },
   generators: { trackside, near, mid, far },
