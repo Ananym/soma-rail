@@ -758,22 +758,22 @@ export function createSky(THREE) {
     const now = con.clock;
     U.uConOn.value = on || con.pin ? 1 : 0;
     // The ordinary stars answer every beat as they do everywhere (a third of them flare). A figure
-    // is the rare event on top of that: now and then, never sooner than a quarter of a minute
-    // after the last, a beat lights one constellation (two, once in a while), which lingers for
+    // is the occasional event on top of that: every ten seconds or so (never sooner than five
+    // after the last) a beat lights one constellation (two, once in a while), which lingers for
     // a second or two while the beats go on beneath it.
     U.uFlareThr.value.set(0.66, 0.6);
     if (on && live && onset && now >= con.nextAt) {
       const f = Math.abs((Math.sin(beatSeq * 12.9898) * 43758.5453) % 1);
       if (f < 0.3) {
         conStart(conDeal(f < 0.045 ? 2 : 1, aspect, shift), 1.8, 0.8 + 0.2 * beat);
-        con.nextAt = now + 15 + 15 * Math.random();
+        con.nextAt = now + 5 + 6 * Math.random();
       }
     }
     if (onset) con.lastOnset = now;
-    // with no music, one figure surfaces by itself every half minute or so
+    // with no music, one figure surfaces by itself every quarter of a minute or so
     if (on && live && now - con.lastOnset > 6 && now > con.idleNext) {
       conStart(conDeal(1, aspect, shift), 2.5, 0.85);
-      con.idleNext = now + 25 + 20 * Math.random();
+      con.idleNext = now + 10 + 8 * Math.random();
     }
     if (!(on && live)) for (let k = 0; k < N_CON; k++) con.cut[k] = Math.min(con.cut[k], now);   // stopped, reduced motion, day
     for (let k = 0; k < N_CON; k++) {

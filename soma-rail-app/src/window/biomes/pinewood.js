@@ -362,11 +362,16 @@ function groundColor(W, s, wx, d, rng) {
 // one in five of the grown spruce-shaped trees, lighter green) and the undergrowth, whatever its
 // species (the young spruce and birch at the forest's foot and on the rock cuttings' rims). The
 // young trees that crowd the line, and those standing alone out in clearings and on the bog, keep
-// their own kind's group (they are the biggest trees on screen there). The forest mass (the fill's tall dark
-// splats inside the forest) takes groups in world patches the size of a few trees, by the
-// species mix there, with some birch and undergrowth patches, so the wall ripples in patches.
+// their own kind's group (they are the biggest trees on screen there). Only individual trees in
+// the near and middle distance do this: trees beyond GROVE_FAR, and the forest mass (the fill's
+// tall dark splats inside the forest, which is the treeline) beyond MASS_NEAR, are MOVE.STILL.
+// Within MASS_NEAR the mass still takes groups in world patches a few trees across, so a dense
+// forest close to the line has something to move. (The whole mass used to ripple; the owner found
+// a distant treeline moving on the beat distracting.)
 // The sea eagle's dead pine (part of the animal) and the dreamlike level's trees stay as they were.
 const G_YOUNG = 3;
+const GROVE_FAR = 500;            // metres from the track: trees further off than this keep still
+const MASS_NEAR = 110;            // ... and so does the forest mass (the treeline) beyond this
 const GROVE_OF = new Map();       // filled in below the tree functions: scotsPine 0, spruce 1, birch 2
 function massGroup(W, wx, d) {
   const cs = 12 * Math.pow(2, Math.max(0, Math.floor(Math.log2(d / 150))));   // a few trees' width, wider far off
@@ -410,7 +415,9 @@ function* fillSurface(ctx, out, W, opts = {}) {
       c = mix3(c, mix3(C.spruce, C.pineCrown, pineMix(W, wx, d)), 0.4 * v);
       c = jitter(c, rng, 0.18);
       if (opts.colorHook) c = opts.colorHook(s, wx, d, c, true);
-      const gm = grove(massGroup(W, wx, d));
+      // The forest as a mass keeps still (a treeline rippling on the beat drew the eye from the trees
+      // in front of it), except close to the line, where the mass is the forest one is looking into.
+      const gm = d < MASS_NEAR ? grove(massGroup(W, wx, d)) : MOVE.STILL;
       if (v > 0.82) out(x, s.y + H * (0.72 + 0.2 * v), -d, r * 0.55 * ax, H * 0.17, r * 0.55, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, gm);
       else out(x, s.y + H * (0.12 + 0.7 * v), -d, r * 1.1 * ax, Math.max(r * 0.8, H * 0.2 * (1 - 0.4 * v)), r * 1.1, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, gm);
     } else {
@@ -678,7 +685,8 @@ function* drawPlan(ctx, out, plan, budget) {
     B -= t.n; wLeft -= t.w;
   }
   for (const t of plan) {
-    yield* t.fn(ctx, withMove(out, grove(t.g != null ? t.g : GROVE_OF.get(t.fn))), t.x, t.d, { ...t.opts, n: t.n });
+    // (only trees out to the middle distance answer the beat: beyond GROVE_FAR they keep still)
+    yield* t.fn(ctx, withMove(out, t.d > GROVE_FAR ? MOVE.STILL : grove(t.g != null ? t.g : GROVE_OF.get(t.fn))), t.x, t.d, { ...t.opts, n: t.n });
     if (out.due()) yield;
     if (out.n > out.limit) break;
   }
