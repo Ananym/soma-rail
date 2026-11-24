@@ -544,8 +544,8 @@ function danceTrack(sr, secs = 110, gain = 1, seed = 21) {
   const w = (a, b) => weather.filter(([t]) => t >= a && t < b).map((r) => r[1]);
   const bd = events.filter((e) => e.kind === 'breakdown'), dr = events.filter((e) => e.kind === 'drop');
   console.log('   events', JSON.stringify(events));
-  check(events.length === 2 && bd.length === 1 && dr.length === 1 && bd[0].t > 50 && bd[0].t < 53.5 && dr[0].t >= 66 && dr[0].t < 66.6,
-    `dance track (detector): ${bd.length} breakdown at ${bd.map((e) => e.t).join()} s (begins 50 s), ${dr.length} drop at ${dr.map((e) => e.t).join()} s (66 s), ${events.length} events in all`);
+  check(events.length === 2 && bd.length === 1 && dr.length === 1 && bd[0].t > 50 && bd[0].t < 57.5 && dr[0].t >= 66 && dr[0].t < 66.6,
+    `dance track (detector): ${bd.length} breakdown at ${bd.map((e) => e.t).join()} s (begins 50 s; confirmed once the quiet holds), ${dr.length} drop at ${dr.map((e) => e.t).join()} s (66 s), ${events.length} events in all`);
   const full = Math.min(...w(20, 50)), deep = Math.min(...w(50, 66)), at58 = w(58, 58.1)[0], back = w(80, 81)[0], back2 = w(92, 93)[0];
   check(full > 0.95 && deep < 0.5 && at58 < 0.8 && back > 0.8 && back2 > 0.97,
     `dance track weather: ${full.toFixed(2)} at least in the full part, ${at58.toFixed(2)} 8 s into the breakdown, ${deep.toFixed(2)} at its lowest, ${back.toFixed(2)} 14 s and ${back2.toFixed(2)} 26 s after the drop`);
@@ -608,8 +608,61 @@ function danceTrack(sr, secs = 110, gain = 1, seed = 21) {
   features(danceTrack(sr, 12).buf, sr, fps, (t, f, dt) => { d3.setAudio(f); d3.update(dt); if (t < 8 && d3.state.weather !== 1) exact = false; });
   check(exact, 'stream start: weather exactly 1 for the first 8 s of analysis');
 }
+{
+  // the end of a track: no fade-out is a breakdown. (1) everything fades over 8 s to silence;
+  // (2) the drums and bass stop and the pad then fades over 10 s (an abrupt fall that keeps
+  // sliding); (3) a slow 20 s fade. None may raise anything, from the detector or the director.
+  const sr = 44100, fps = 30;
+  for (const [label, drumsOut, fadeFrom, fadeLen] of [['8 s fade to silence', 1e9, 60, 8], ['drums stop, then a 10 s fade', 60, 61, 10], ['slow 20 s fade', 1e9, 55, 20]]) {
+    const on = (t) => (t < drumsOut ? 1 : 0);
+    const { buf } = song(sr, 75, { bpm: 124, seed: 13, parts: { kick: on, hat: on, snare: on, bass: on, pad: 1, lead: (t) => (t >= 20 ? 1 : 0) } });
+    for (let i = 0; i < buf.length; i++) { const t = i / sr; if (t > fadeFrom) buf[i] *= t > fadeFrom + fadeLen ? 0 : 10 ** (-3 * (t - fadeFrom) / fadeLen); }
+    const dyn = createDynamics(), dir = createDirector({ params: DIRECTOR_PARAMS }), raw = [];
+    let dirEv = 0, seq = 0;
+    features(buf, sr, fps, (t, f, dt) => {
+      const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt); if (r.event) raw.push(`${r.event}@${t.toFixed(1)}`);
+      dir.setAudio(f); dir.update(dt);
+      const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; dirEv++; }
+    });
+    check(raw.length === 0 && dirEv === 0, `end of a track, ${label}: ${raw.join(' ') || 'no'} detector events, ${dirEv} director events`);
+  }
+}
+{
+  // music that breathes (a lounge tune): swells of +-5 dB every 10 s, and every 30 s the drums and
+  // bass sit out for 4 s, for four minutes. No events at all.
+  const sr = 44100, fps = 30, secs = 240;
+  const out = (t) => (t % 30 > 26 ? 0 : 1);
+  const { buf } = song(sr, secs, { bpm: 96, seed: 17, parts: { kick: out, snare: out, hat: out, bass: out, pad: 1, pluck: (t) => (Math.floor(t / 12) % 2 ? 1 : 0), lead: (t) => (Math.floor(t / 20) % 3 === 1 ? 1 : 0) } });
+  for (let i = 0; i < buf.length; i++) buf[i] *= 10 ** ((5 * Math.sin((2 * Math.PI * i) / sr / 10)) / 20);
+  const dyn = createDynamics(), dir = createDirector({ params: DIRECTOR_PARAMS }), raw = [];
+  let dirEv = 0, seq = 0;
+  features(buf, sr, fps, (t, f, dt) => {
+    const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt); if (r.event) raw.push(`${r.event}@${t.toFixed(1)}`);
+    dir.setAudio(f); dir.update(dt);
+    const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; dirEv++; }
+  });
+  check(raw.length === 0 && dirEv === 0, `four minutes of music that breathes (swells, drums out 4 s in every 30): ${raw.join(' ') || 'no'} detector events, ${dirEv} director events`);
+}
 
 console.log('\nBeat clock');
+{
+  // a steady four-on-the-floor track for three minutes, with what real ones have: a kick a
+  // sixteenth early every other bar, and the kick out for a bar in every sixteen. Once on, the
+  // chase must stay on.
+  const sr = 44100, fps = 30, bpm = 124, T = 60 / bpm, secs = 180;
+  const kick = (t) => (Math.floor((t - 0.5 + 0.01) / (4 * T)) % 16 === 15 ? 0 : 1);
+  const { buf } = song(sr, secs, { bpm, seed: 23, parts: { kick, hat: 1, snare: 1, bass: 1, pad: 1 } });
+  for (let bar = 1; 0.5 + bar * 4 * T < secs - 1; bar += 2) addKick(buf, sr, 0.5 + bar * 4 * T - T / 4, 0.6);
+  const dir = createDirector({ params: DIRECTOR_PARAMS });
+  let flips = 0, was = false, onFrames = 0, frames = 0, firstOn = null;
+  features(buf, sr, fps, (t, f, dt) => {
+    dir.setAudio(f); dir.update(dt);
+    const on = dir.state.chaseOn > 0.5;
+    if (on !== was) { flips++; was = on; if (on && firstOn == null) firstOn = t; }
+    if (t > 20) { frames++; if (on) onFrames++; }
+  });
+  check(flips <= 1 && onFrames / frames > 0.97, `steady track with syncopated and missing kicks, 3 min: chase on at ${firstOn?.toFixed(1)} s, ${flips} flips in all, on ${(100 * onFrames / frames).toFixed(0)} % of the time after 20 s`);
+}
 {
   // 120 BPM for 40 s, then 140 BPM for 40 s (kick, off-beat hats, snare): the clock must relock,
   // whole numbers within 60 ms of the kicks, and chaseOn dip during the change rather than the
@@ -632,15 +685,16 @@ console.log('\nBeat clock');
     const e2 = hits.kick.filter((k) => k > 65).map((k) => errMs(k, 140));
     const worst1 = Math.max(...e1.map(Math.abs)), worst2 = Math.max(...e2.map(Math.abs));
     const onFirst = rows.find((r) => r.on > 0.9), onDuring = Math.min(...rows.filter((r) => r.t > CHANGE && r.t < CHANGE + 15).map((r) => r.on));
-    const back = rows.find((r) => r.t > CHANGE + 2 && r.on > 0.9);
+    const dipAt = rows.filter((r) => r.t > CHANGE && r.t < CHANGE + 15).reduce((a, r) => (r.on < a.on ? r : a)).t;
+    const back = rows.find((r) => r.t > dipAt && r.on > 0.9);
     // the clock never steps: while it is on, each frame advances it by its tempo give or take 25 %
     let worstStep = 0;
     for (const r of rows) if (r.on > 0.5 && r.bpm > 0) worstStep = Math.max(worstStep, Math.abs(r.step / (r.dt * r.bpm / 60) - 1));
     const bpmRows = rows.filter((r) => r.t > CHANGE - 1 && r.t < CHANGE + 15 && Math.round(r.t * 4) === r.t * 4 || false);
-    console.log(`   ${fps} fps: on ${onFirst ? onFirst.t.toFixed(1) : '-'} s; mean error ${mean(e1).toFixed(1)} ms at 120, ${mean(e2).toFixed(1)} ms at 140; relocked (on > 0.9) ${back ? (back.t - CHANGE).toFixed(1) + ' s' : 'never'} after the change`);
+    console.log(`   ${fps} fps: on ${onFirst ? onFirst.t.toFixed(1) : '-'} s; mean error ${mean(e1).toFixed(1)} ms at 120, ${mean(e2).toFixed(1)} ms at 140; lowest at ${(dipAt - CHANGE).toFixed(1)} s after the change, relocked (on > 0.9) ${back ? (back.t - CHANGE).toFixed(1) + ' s' : 'never'} after it`);
     console.log(`      through the change (t, bpm, conf, on): ${rows.filter((r) => r.t > CHANGE - 1 && r.t < CHANGE + 14 && Math.abs(r.t - Math.round(r.t)) < 0.5 / fps).map((r) => `${r.t.toFixed(0)}:${r.bpm.toFixed(0)}/${r.conf.toFixed(2)}/${r.on.toFixed(2)}`).join(' ')}`);
     void bpmRows;
-    check(onFirst && onFirst.t < 12 && worst1 <= 60 && worst2 <= 60 && onDuring < 0.5 && back && worstStep <= 0.3,
+    check(onFirst && onFirst.t < 15 && worst1 <= 60 && worst2 <= 60 && onDuring < 0.5 && back && worstStep <= 0.3,
       `120 -> 140 BPM @ ${fps} fps: whole numbers within ${worst1.toFixed(1)} ms of the kicks at 120 and ${worst2.toFixed(1)} ms at 140 (after relock); chaseOn fell to ${onDuring.toFixed(2)} in the change; steps never more than ${(worstStep * 100).toFixed(0)} % off the tempo while on`);
   }
 }

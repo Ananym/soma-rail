@@ -399,12 +399,21 @@ export function createLift({ envUp = 0.15, envDown = 0.05, riseTau = 6, fallTau 
  *             ~15 s and sinks over ~2 minutes, so it stands for "this music when it is going"):
  *             1 within 2 dB of it, 0 at 12 dB under (a 16 s breakdown 12 dB down ends near 0.3)
  *   event     null, 'drop' or 'breakdown' on the one frame it is detected; strength 0.2..1
- *   breakdown: the fast loudness more than 6 dB under the reference for 1.5 s with the bass more
- *             than 8 dB under its own. Re-armed after 2 s of loud music.
- *   drop:     after at least 3 s more than 6 dB under, the fast loudness comes back within 3 dB of
- *             the reference suddenly (3 dB above its 2 s average); or, after at least 3 s with the
- *             bass more than 10 dB under its reference, the bass comes back within 4 dB, 6 dB
- *             above its 2 s average, with the onset rate up by half.
+ *   breakdown: an abrupt fall to a lower plateau that holds. A candidate opens once the fast
+ *             loudness has been more than 6 dB under the reference for 1.5 s with the bass more
+ *             than 8 dB under its own, if the 1 s level fell more than abruptDb over the last
+ *             slideSeconds (else it is a slow fade, and nothing opens until loud music again); it is confirmed confirmSeconds later if the level (1 s
+ *             smoothing) has stopped falling (less than slideDb down over the last slideSeconds),
+ *             is still quiet, and is not on its way to silence (within silenceDb of the
+ *             reference). It is dropped if the music comes back first (a dip, a breathing phrase),
+ *             and given up maxConfirm seconds on (a fade, which keeps sliding). Re-armed after 2 s
+ *             of loud music.
+ *   drop:     only as the end of a confirmed breakdown (within episodeSeconds of it, whether or not
+ *             the caller let the breakdown through): the fast loudness comes back within 3 dB of
+ *             the reference suddenly (3 dB above its 2 s average) with the bass jumping dropBassDb
+ *             above its own 2 s average; or the bass comes back within 4 dB of its reference, 6 dB
+ *             above its 2 s average, with the onset rate up by half. A louder phrase in music that
+ *             breathes is never a drop.
  * The first learnSeconds (and again after relearn(), on a change of track) only learn the levels;
  * meanwhile `weather` holds its last value (1 at the start).
  */
@@ -414,15 +423,20 @@ export function createDynamics({
   weatherDb = [-12, -2],
   quietDb = 6, loudDb = 3, loudReset = 2,
   breakdownBassDb = 8, breakdownHold = 1.5,
-  dropQuiet = 3, dropRiseDb = 3,
+  confirmSeconds = 4, maxConfirm = 10, slideSeconds = 3, slideDb = 2, abruptDb = 5, silenceDb = 30, backFor = 0.5,
+  dropQuiet = 3, dropRiseDb = 3, dropBassDb = 6, episodeSeconds = 60,
   bassGoneDb = 10, bassBackDb = 4, bassJumpDb = 6,
   minGap = 8,
 } = {}) {
   let started = false, learn = 0;
-  let fast = 0, med = 0, slow = 0, ref = 0, bFast = 0, bMed = 0, bRef = 0, oFast = 0, oSlow = 0;
+  let fast = 0, med = 0, slow = 0, ref = 0, bFast = 0, bMed = 0, bRef = 0, oFast = 0, oSlow = 0, lvl = 0;
   let quiet = 0, quietMin = Infinity, loudFor = 0, armedB = true, bassGone = 0, bLoudFor = 0, since = Infinity;
+  let cand = false, candFor = 0, episode = Infinity;
+  // the 1 s level every 0.25 s over the last few seconds, to see whether it is still falling
+  const HIST_STEP = 0.25, hist = new Float32Array(Math.ceil(slideSeconds / HIST_STEP) + 1);
+  let histAt = 0, histN = 0, histT = 0;
   const res = { weather: 1, event: null, strength: 0, fast: 0, slow: 0, ref: 0 };
-  function clearEpisode() { quiet = 0; quietMin = Infinity; loudFor = 0; armedB = true; bassGone = 0; bLoudFor = 0; }
+  function clearEpisode() { quiet = 0; quietMin = Infinity; loudFor = 0; armedB = true; bassGone = 0; bLoudFor = 0; cand = false; candFor = 0; episode = Infinity; }
   return {
     res,
     push(loud, bass, onset, dt) {
@@ -431,12 +445,16 @@ export function createDynamics({
       if (!(bass > -140)) bass = -140;
       if (!started) {
         started = true; learn = learnSeconds;
-        fast = med = slow = ref = loud; bFast = bMed = bRef = bass; oFast = oSlow = 0; clearEpisode();
+        fast = med = slow = ref = lvl = loud; bFast = bMed = bRef = bass; oFast = oSlow = 0; clearEpisode();
+        histN = 0; histT = 0;
       }
       fast += (loud - fast) * smoothing(dt, fastTau);
       med += (loud - med) * smoothing(dt, medTau);
       bFast += (bass - bFast) * smoothing(dt, fastTau);
       bMed += (bass - bMed) * smoothing(dt, medTau);
+      lvl += (loud - lvl) * smoothing(dt, 1);
+      histT += dt;
+      if (histT >= HIST_STEP) { histT -= HIST_STEP; hist[histAt] = lvl; histAt = (histAt + 1) % hist.length; if (histN < hist.length) histN++; }
       oFast = oFast * Math.exp(-dt / 1.5) + (onset ? 1 / 1.5 : 0);
       oSlow = oSlow * Math.exp(-dt / 10) + (onset ? 1 / 10 : 0);
       since += dt;
@@ -455,16 +473,32 @@ export function createDynamics({
         if (fast > ref - loudDb) loudFor += dt; else loudFor = 0;
         if (bFast > bRef - bassBackDb) bLoudFor += dt; else bLoudFor = 0;
         let ev = null, st = 0;
-        if (armedB && quiet >= breakdownHold && bRef - bFast > breakdownBassDb) {
-          ev = 'breakdown'; st = clamp01((ref - fast) / 15); armedB = false;
-        } else if (quiet >= dropQuiet && fast > ref - loudDb && fast - med > dropRiseDb) {
-          ev = 'drop'; st = clamp01((fast - Math.min(quietMin, med)) / 15);
-          quiet = 0; quietMin = Infinity; bassGone = 0;
-        } else if (bassGone >= dropQuiet && bFast > bRef - bassBackDb && bFast - bMed > bassJumpDb && oFast > 1.5 * oSlow + 0.5) {
-          ev = 'drop'; st = clamp01((bFast - bMed) / 15);
-          quiet = 0; quietMin = Infinity; bassGone = 0;
+        episode += dt;
+        // the 1 s level slideSeconds ago (the oldest sample in the history)
+        const ago = histN === hist.length ? hist[histAt] : hist[0];
+        if (armedB && !cand && quiet >= breakdownHold && bRef - bFast > breakdownBassDb) {
+          // only an abrupt fall opens one: a level that has been drifting down is fading
+          if (lvl - ago < -abruptDb) { cand = true; candFor = 0; } else armedB = false;
         }
-        if (loudFor > loudReset) { quiet = 0; quietMin = Infinity; armedB = true; }
+        if (cand) {
+          candFor += dt;
+          if (loudFor > backFor || bFast > bRef - bassBackDb) cand = false;   // it came back: a dip
+          else if (candFor >= confirmSeconds) {
+            if (lvl < ref - silenceDb || candFor >= maxConfirm) { cand = false; armedB = false; }   // a fade, or the end
+            else if (lvl - ago > -slideDb && lvl < ref - quietDb) {
+              ev = 'breakdown'; st = clamp01((ref - lvl) / 15); cand = false; armedB = false; episode = 0;
+            }
+          }
+        }
+        if (!ev && episode < episodeSeconds) {
+          if (quiet >= dropQuiet && fast > ref - loudDb && fast - med > dropRiseDb && bFast - bMed > dropBassDb) {
+            ev = 'drop'; st = clamp01((fast - Math.min(quietMin, med)) / 15);
+          } else if (bassGone >= dropQuiet && bFast > bRef - bassBackDb && bFast - bMed > bassJumpDb && oFast > 1.5 * oSlow + 0.5) {
+            ev = 'drop'; st = clamp01((bFast - bMed) / 15);
+          }
+          if (ev) { quiet = 0; quietMin = Infinity; bassGone = 0; episode = Infinity; }
+        }
+        if (loudFor > loudReset) { quiet = 0; quietMin = Infinity; armedB = true; cand = false; episode = Infinity; }
         if (bLoudFor > loudReset) bassGone = 0;
         if (ev && since >= minGap) { res.event = ev; res.strength = Math.max(0.2, st); since = 0; }
       }
@@ -494,20 +528,27 @@ export function createDynamics({
  * - the correction is spread over frames (trackTau) and, while `on` is up, limited to maxSlew of
  *   the clock's own rate: the clock never steps, it only runs a little faster or slower. With `on`
  *   down nobody is watching, so it pulls in fast (acquireTau);
- * - quality: the running mean of cos(4 pi e) (1 for onsets on the beat or half-beat grid, about 0
- *   for a clock that does not match the music). `on` rises (upTau) while the lock is fresh and the
- *   quality above 0.5, and falls (downTau) otherwise;
+ * - quality: the running mean of max(0, cos(4 pi e)): 1 for onsets on the beat or half-beat grid,
+ *   0 for syncopations a quarter-beat off, about 0.32 for a clock that does not match the music. `on` rises (upTau) once the lock has been fresh with
+ *   the quality above qualityOn for holdOn seconds, and falls (downTau) only after holdOff seconds
+ *   of a poor lock, or at once when the onsets or the analysis stop (see the hysteresis options);
  * - `latency` is the detector's own delay (seconds), taken off before measuring the phase;
  * - frozen (a stopped train) holds everything.
  */
 export function createBeatClock({
   lockConfidence = 0.6, freshSeconds = 1, onsetGap = 3, kickShare = 0.4,
   latency = 0, trackTau = 0.4, acquireTau = 0.08, maxSlew = 0.25, ki = 0.03, maxFreq = 0.05,
-  upTau = 0.6, downTau = 0.35, quality = 0.5, wrap = 1024,
+  upTau = 0.6, downTau = 0.35, wrap = 1024,
+  // Hysteresis, in quality and in time: the chase comes on once the lock has held (fresh, quality
+  // over qualityOn) for holdOn seconds, and goes off only after holdOff seconds of a poor one
+  // (quality under qualityOff, no confident tempo for holdFresh seconds, or no steering onset for
+  // onsetGap beats), or at once when the analysis stops. qualityRate is the weight of each onset in
+  // the running quality (about the last 1 / qualityRate onsets).
+  qualityOn = 0.6, qualityOff = 0.4, qualityRate = 0.1, holdOn = 3, holdOff = 1.5, holdFresh = 1.5,
 } = {}) {
   const TWO_PI = 2 * Math.PI;
-  const s = { value: 0, on: 0, tempo: 0, perr: 0, quality: 0, fcorr: 0, kick: false, locked: false };
-  let t = 0, lastLock = -Infinity, lastOnset = -Infinity, lowRate = 0;
+  const s = { value: 0, on: 0, tempo: 0, perr: 0, quality: 0, fcorr: 0, kick: false, locked: false, gate: false };
+  let t = 0, lastLock = -Infinity, lastOnset = -Infinity, lowRate = 0, goodFor = 0, badFor = 0;
   return {
     state: s,
     step(dt, active, bpm, confidence, onset, onsetLow, frozen = false) {
@@ -523,13 +564,30 @@ export function createBeatClock({
       if (active && s.tempo > 0 && (s.kick ? onsetLow : onset)) {
         let e = s.value - latency * rate;
         e -= Math.round(e);
-        const pd = Math.sin(TWO_PI * e) / TWO_PI;
-        s.perr += (pd - s.perr) * 0.5;
-        s.quality += (Math.cos(2 * TWO_PI * e) - s.quality) * 0.25;
+        // Once the chase is on, an onset steers in proportion to how near the beat it is, and not
+        // at all from a quarter of a beat or more away: syncopated kicks a sixteenth early would
+        // otherwise drag the whole clock early. While acquiring, every onset steers.
+        const c1 = Math.cos(TWO_PI * e), w = s.gate ? (c1 > 0 ? c1 * c1 : 0) : 1;
+        const pd = (w * Math.sin(TWO_PI * e)) / TWO_PI;
+        if (w > 0) s.perr += (pd - s.perr) * 0.5 * w;
+        const q = Math.cos(2 * TWO_PI * e);
+        s.quality += ((q > 0 ? q : 0) - s.quality) * qualityRate;
         s.fcorr = Math.max(-maxFreq, Math.min(maxFreq, s.fcorr - ki * pd));
         lastOnset = t;
       }
-      s.locked = active && s.tempo > 0 && t - lastLock < freshSeconds && (t - lastOnset) * s.tempo / 60 < onsetGap;
+      const hearing = active && s.tempo > 0 && (t - lastOnset) * s.tempo / 60 < onsetGap;
+      const fresh = t - lastLock < (s.gate ? holdFresh : freshSeconds);
+      s.locked = hearing && fresh;
+      if (!s.gate) {
+        goodFor = s.locked && s.quality > qualityOn ? goodFor + dt : 0;
+        if (goodFor >= holdOn) { s.gate = true; badFor = 0; }
+      } else if (!active || s.tempo <= 0) s.gate = false;
+      else {
+        // (leaky, so a quality that hovers about the line still counts against the lock)
+        badFor = !s.locked || s.quality < qualityOff ? badFor + dt : Math.max(0, badFor - 0.5 * dt);
+        if (badFor >= holdOff) s.gate = false;
+      }
+      if (!s.gate) badFor = 0; else goodFor = 0;
       if (s.tempo > 0 && (s.locked || s.on > 0)) {
         const tau = acquireTau + (trackTau - acquireTau) * s.on;
         const lim = (0.9 - (0.9 - maxSlew) * s.on) * rate * dt;
@@ -539,12 +597,12 @@ export function createBeatClock({
         s.perr += d;
         if (s.value >= wrap) s.value -= wrap;
       }
-      const target = s.locked && s.quality > quality ? 1 : 0;
+      const target = s.gate ? 1 : 0;
       s.on += (target - s.on) * smoothing(dt, target > s.on ? upTau : downTau);
       if (target === 0 && s.on < 0.002) s.on = 0;
       return s;
     },
-    reset() { s.on = 0; s.perr = 0; s.quality = 0; s.fcorr = 0; s.locked = false; lastLock = -Infinity; lastOnset = -Infinity; lowRate = 0; },
+    reset() { s.on = 0; s.perr = 0; s.quality = 0; s.fcorr = 0; s.locked = false; s.gate = false; lastLock = -Infinity; lastOnset = -Infinity; lowRate = 0; goodFor = 0; badFor = 0; },
   };
 }
 
