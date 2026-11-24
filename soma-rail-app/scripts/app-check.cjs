@@ -42,6 +42,11 @@ const outDir = process.argv[2] || '.';
     { name: 'touch', query: '?budget=120000&seed=check', wait: 20000, expect: 'window', touch: true,
       context: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 } },
   ];
+  // Not one of the six: ONLY=signals listens to the real radio for SIGNAL_SECONDS (default 200) and
+  // prints what the music signals did (director.state: beatBig, beatSmall, mid, weather, chaseOn,
+  // events). The detectors behind them are tested on synthetic signals; this is the one look at
+  // real music. Nothing is asserted beyond the usual start-up checks.
+  if (process.env.ONLY === 'signals') cases.push({ name: 'signals', query: '?budget=60000&seed=check', wait: 20000, expect: 'window', tap: true, signals: Number(process.env.SIGNAL_SECONDS || 200) });
   for (const c of cases.filter((k) => !process.env.ONLY || k.name === process.env.ONLY)) {
     const name = c.name;
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...(c.context || {}), userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' });
@@ -99,6 +104,27 @@ const outDir = process.argv[2] || '.';
       };
     });
     state.goneAtOnce = goneAtOnce;
+    if (c.signals) {
+      const sig = await page.evaluate((seconds) => new Promise((done) => {
+        const d = window.__trainWindow.director.state, t0 = performance.now();
+        const r = { frames: 0, beatPeak: 0, bigPeak: 0, smallPeak: 0, bigSum: 0, smallSum: 0, beatSum: 0, midSum: 0, midPeak: 0, weatherMin: 1, weatherUnder95: 0, weatherSum: 0, chaseOnFrames: 0, chaseFlips: 0, events: [], bpm: 0, song: '' };
+        let wasOn = false, lastSeq = d.event ? d.event.seq : 0;
+        const tick = () => {
+          r.frames++;
+          r.beatPeak = Math.max(r.beatPeak, d.beat); r.bigPeak = Math.max(r.bigPeak, d.beatBig); r.smallPeak = Math.max(r.smallPeak, d.beatSmall);
+          r.beatSum += d.beat; r.bigSum += d.beatBig; r.smallSum += d.beatSmall;
+          r.midSum += d.mid; r.midPeak = Math.max(r.midPeak, d.mid);
+          r.weatherMin = Math.min(r.weatherMin, d.weather); r.weatherSum += d.weather; if (d.weather < 0.95) r.weatherUnder95++;
+          const on = d.chaseOn > 0.5; if (on) r.chaseOnFrames++; if (on !== wasOn) { r.chaseFlips++; wasOn = on; }
+          if (d.event && d.event.seq !== lastSeq) { lastSeq = d.event.seq; r.events.push({ kind: d.event.kind, at: Math.round((performance.now() - t0) / 1000) }); }
+          r.bpm = Math.round(d.bpm);
+          if (performance.now() - t0 < seconds * 1000) requestAnimationFrame(tick);
+          else { const n = r.frames, f = (v) => +(v / n).toFixed(3), el = document.querySelector('.song-title'); done({ seconds, frames: n, fps: +(n / seconds).toFixed(1), song: el ? el.textContent.trim() : '', beat: { peak: +r.beatPeak.toFixed(2), mean: f(r.beatSum) }, beatBig: { peak: +r.bigPeak.toFixed(2), mean: f(r.bigSum) }, beatSmall: { peak: +r.smallPeak.toFixed(2), mean: f(r.smallSum) }, mid: { peak: +r.midPeak.toFixed(2), mean: f(r.midSum) }, weather: { min: +r.weatherMin.toFixed(2), mean: f(r.weatherSum), shareUnder95: f(r.weatherUnder95) }, chaseOn: { share: f(r.chaseOnFrames), flips: r.chaseFlips }, bpm: r.bpm, events: r.events }); }
+        };
+        requestAnimationFrame(tick);
+      }), c.signals);
+      console.log('signals:', JSON.stringify(sig));
+    }
     // A view that stays very slow must say so (TrainWindow's watchSpeed, App's .slow-notice). This
     // renderer usually is that slow at the default budget: if the engine's own frame rate is seen
     // under 14 for 35 seconds running, the notice must have come up; and when it does it must offer
