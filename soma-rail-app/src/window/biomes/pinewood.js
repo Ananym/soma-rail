@@ -18,8 +18,8 @@
 // pack of three to six (about every 4 km), a brown bear, sometimes reared up or with cubs (every 7
 // to 10 km), a fox by the line (every 4 to 5 km) and a sea eagle on a dead pine (every 5 to 9 km).
 // They stand only where the train can see them, are drawn larger than life, and every splat of
-// them answers the beat. Birds of prey on the wing ("Birds of prey" below): about one every 4 to
-// 5 km, never two within about 1.6 km, against the sky over a lake, a bog, a clearing or the trees.
+// them answers the beat. Birds of prey on the wing ("Birds of prey" below): about one every 5 to
+// 7 km, always alone, never two within 2.5 km, against the sky over a lake, a bog, a clearing or the trees.
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     spruces of impossible height among the others; far mountains that keep going up
@@ -31,7 +31,7 @@ import {
   KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, house, church,
   overheadLine, fence, lamp, floatingIsland, wires, jitter, mul3, mix3, shade, smooth, clamp, lerp,
   quatYaw, quatRoll, quatUpTo, quatXTo, quatMul, quatAxis, strut, norm3, Q_ID, SUN,
-  flightCell, flyBody, flyWing, FLY_CELL,
+  flightCell, flyBody, flyWing, FLY_CELL, grove,
 } from './kit.js';
 
 const PAL = {
@@ -57,6 +57,8 @@ const C = {
   clearcut: [0.33, 0.28, 0.18],
   spruce: [0.07, 0.13, 0.085],
   spruceTip: [0.15, 0.24, 0.12],
+  larch: [0.1, 0.16, 0.075],          // a larch among the spruces: a lighter, yellower green
+  larchTip: [0.21, 0.28, 0.12],
   pineCrown: [0.085, 0.14, 0.09],
   pineBark: [0.44, 0.28, 0.18],
   barkGrey: [0.24, 0.2, 0.16],
@@ -354,6 +356,26 @@ function groundColor(W, s, wx, d, rng) {
 //   opts: n, dNear, dFar, power, cover, minR, maxR, mass (draw the forest mass), massFrom (only this
 //   far inside the forest), shadeK, colorHook(s, wx, d, c) -> c
 // ---------------------------------------------------------------------------------------------
+// Trees on the beat, a kind at a time (MOVE.GROVE through kit grove(g)): every splat of a tree,
+// trunk and crown, carries its kind's group, and on each beat one or two of the four groups swell
+// and rise. 0: Scots pine; 1: spruce; 2: birch (the only broadleaf here); 3: the larches (about
+// one in five of the grown spruce-shaped trees, lighter green) and the undergrowth, whatever its
+// species (the young spruce and birch at the forest's foot and on the rock cuttings' rims). The
+// young trees that crowd the line, and those standing alone out in clearings and on the bog, keep
+// their own kind's group (they are the biggest trees on screen there). The forest mass (the fill's tall dark
+// splats inside the forest) takes groups in world patches the size of a few trees, by the
+// species mix there, with some birch and undergrowth patches, so the wall ripples in patches.
+// The sea eagle's dead pine (part of the animal) and the dreamlike level's trees stay as they were.
+const G_YOUNG = 3;
+const GROVE_OF = new Map();       // filled in below the tree functions: scotsPine 0, spruce 1, birch 2
+function massGroup(W, wx, d) {
+  const cs = 12 * Math.pow(2, Math.max(0, Math.floor(Math.log2(d / 150))));   // a few trees' width, wider far off
+  const h = hashInts(W.ws, 507, Math.floor(wx / cs), Math.floor(d / cs)) / 4294967296;
+  if (h < 0.12) return 2;
+  if (h < 0.24) return G_YOUNG;
+  return (h - 0.24) / 0.76 < pineMix(W, wx, d) ? 0 : 1;
+}
+
 function* fillSurface(ctx, out, W, opts = {}) {
   out.limit = Infinity;
   const n = Math.floor(opts.n != null ? opts.n : out.left());
@@ -388,8 +410,9 @@ function* fillSurface(ctx, out, W, opts = {}) {
       c = mix3(c, mix3(C.spruce, C.pineCrown, pineMix(W, wx, d)), 0.4 * v);
       c = jitter(c, rng, 0.18);
       if (opts.colorHook) c = opts.colorHook(s, wx, d, c, true);
-      if (v > 0.82) out(x, s.y + H * (0.72 + 0.2 * v), -d, r * 0.55 * ax, H * 0.17, r * 0.55, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE);
-      else out(x, s.y + H * (0.12 + 0.7 * v), -d, r * 1.1 * ax, Math.max(r * 0.8, H * 0.2 * (1 - 0.4 * v)), r * 1.1, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE);
+      const gm = grove(massGroup(W, wx, d));
+      if (v > 0.82) out(x, s.y + H * (0.72 + 0.2 * v), -d, r * 0.55 * ax, H * 0.17, r * 0.55, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, gm);
+      else out(x, s.y + H * (0.12 + 0.7 * v), -d, r * 1.1 * ax, Math.max(r * 0.8, H * 0.2 * (1 - 0.4 * v)), r * 1.1, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, gm);
     } else {
       let c = groundColor(W, s, wx, d, rng);
       if (opts.colorHook) c = opts.colorHook(s, wx, d, c, false);
@@ -643,6 +666,7 @@ export function* birch(ctx, out, x, d, opts = {}) {
 // Placing trees with a shared budget: collect them first, then give each a share of the splats in
 // proportion to its size on screen, capped at full detail.
 // ---------------------------------------------------------------------------------------------
+GROVE_OF.set(scotsPine, 0).set(spruce, 1).set(birch, 2);
 function* drawPlan(ctx, out, plan, budget) {
   let sw = 0;
   for (const t of plan) sw += t.w;
@@ -654,7 +678,7 @@ function* drawPlan(ctx, out, plan, budget) {
     B -= t.n; wLeft -= t.w;
   }
   for (const t of plan) {
-    yield* t.fn(ctx, out, t.x, t.d, { ...t.opts, n: t.n });
+    yield* t.fn(ctx, withMove(out, grove(t.g != null ? t.g : GROVE_OF.get(t.fn))), t.x, t.d, { ...t.opts, n: t.n });
     if (out.due()) yield;
     if (out.n > out.limit) break;
   }
@@ -670,8 +694,12 @@ function forestTree(ctx, out, W, wx, d, rng, opts = {}) {
   else if (u < (opts.birch || 0) + pm * 0.85) { fn = scotsPine; H = Hc * (0.95 + 0.25 * rng()); Wd = H * 0.4; }
   else { fn = spruce; H = Hc * (0.8 + 0.35 * rng()); Wd = H * (0.24 + 0.08 * rng()); }
   if (opts.young) H *= opts.young;
+  // about one in five of the grown spruce-shaped trees is a larch (from the same draw, so the
+  // forest is laid out as before): lighter, a little wider, in the fourth beat group
+  const larch = fn === spruce && !opts.young && (u * 7.13) % 1 < 0.22;
+  if (larch) Wd *= 1.15;
   const nMax = Math.round(coniferSplats(out, d, H, Wd) * (opts.detail || 1));
-  return { fn, x: wx - ctx.x0, d, w: (H * Wd) / (d * d), nMax: Math.max(1, nMax), opts: { rng, height: H, width: Wd, y, kind: opts.kind, open: !!opts.young } };
+  return { fn, g: (opts.young && !opts.scattered) || larch ? G_YOUNG : undefined, x: wx - ctx.x0, d, w: (H * Wd) / (d * d), nMax: Math.max(1, nMax), opts: { rng, height: H, width: Wd, y, kind: opts.kind, open: !!opts.young, ...(larch ? { color: C.larch, tip: C.larchTip } : {}) } };
 }
 
 // The forest seen from outside: trees on a world grid; those at an edge facing the camera are
@@ -689,7 +717,7 @@ function forestPlan(ctx, out, W, plan, dLo, dHi, sp, opts = {}) {
       if (s.t !== T.FOREST) {
         // scattered trees out in the open: young ones in clearings, stunted pines on the bog
         if ((s.t === T.OPEN || s.t === T.BOG || s.t === T.CLEARCUT) && r() < (s.t === T.BOG ? 0.03 : 0.01 + 0.12 * smooth(0.4, 0.5, s.f))) {
-          const t = forestTree(ctx, out, W, wx, d, r, { birch: 0.4, young: s.t === T.BOG ? 0.35 : 0.3 + 0.5 * r(), y: s.y - 0.1, detail: opts.detail });
+          const t = forestTree(ctx, out, W, wx, d, r, { birch: 0.4, young: s.t === T.BOG ? 0.35 : 0.3 + 0.5 * r(), scattered: true, y: s.y - 0.1, detail: opts.detail });
           plan.push(t);
         }
         continue;
@@ -806,7 +834,7 @@ function* rockCutting(ctx, out, W, c, plan) {
       const d = 6 + (h - 1.45) / 3.2 + 1 + 6 * r();
       const H = 2 + 7 * r(), isB = r() < 0.35;
       const Wd = H * (isB ? 0.45 : 0.3);
-      plan.push({ fn: isB ? birch : spruce, x: wx0 - ctx.x0, d, w: (H * Wd) / (d * d), nMax: coniferSplats(out, d, H, Wd), opts: { rng: r, height: H, width: Wd, y: h - 0.2 } });
+      plan.push({ fn: isB ? birch : spruce, g: G_YOUNG, x: wx0 - ctx.x0, d, w: (H * Wd) / (d * d), nMax: coniferSplats(out, d, H, Wd), opts: { rng: r, height: H, width: Wd, y: h - 0.2 } });
     }
   }
 }
@@ -987,7 +1015,7 @@ function* lakeProps(ctx, out, W, dLo, dHi) {
         if (cd >= dLo && cd < dHi) {
           yield* cabin(ctx, out, W, wx, cd, cr, {});
           yield* jetty(ctx, out, wx + 3, sd + 1, sd - 12, lk.level, cr);
-          yield* birch(ctx, out, wx - ctx.x0 - 7, cd + 2, { rng: cr, height: 11, y: surfY(W, wx - 7, cd + 2) });
+          yield* birch(ctx, withMove(out, grove(GROVE_OF.get(birch))), wx - ctx.x0 - 7, cd + 2, { rng: cr, height: 11, y: surfY(W, wx - 7, cd + 2) });
         }
       }
     }
@@ -1659,8 +1687,8 @@ function* wildlife(ctx, out, W, dLo, dHi) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Birds of prey on the wing: one bird (now and then a pair of buzzards) in most stretches of
-// BIRD_CELL metres of line, never two within about 1.6 km of each other: a white-tailed eagle or an
+// Birds of prey on the wing: one bird, always alone, in most stretches of BIRD_CELL metres of
+// line, never two within 2.5 km of each other (so never two in one window): a white-tailed eagle or an
 // osprey carrying a fish over a lake, a buzzard or a golden eagle over a bog, a clear-cut or the
 // forest, a goshawk dashing low over open ground before the trees, and at dusk and dawn an owl in
 // place of any of them (an eagle owl over the water, a great grey owl elsewhere).
@@ -1673,17 +1701,18 @@ function* wildlife(ctx, out, W, dLo, dHi) {
 // the fingered hands, the pale head and the tail beyond. The goshawk, dashing past, is seen from
 // the side and in front.
 // A wing piece flaps by its lift (in the shader's second frame it drops 1.7 times that), given
-// piece by piece in proportion to its distance from the body: a soaring eagle's wings only flex,
-// a goshawk's beat. They are drawn three to four times life size.
+// piece by piece in proportion to its distance from the body. The soarers (eagles, osprey,
+// buzzard) carry none, so their wings hold still through the shader's flap bursts, V and all; the
+// goshawk and the owls beat, a little. They are drawn about 2 to 2.6 times life size.
 //
-// Where: in each world cell, the first of a few tries in the middle half of the cell where the
+// Where: in each world cell, the first of a few tries in the middle 36% of the cell where the
 // bird can fly so that, from the train level with it and as it comes and goes, it stands clear
 // of everything in front of it and above every tree top behind it (against the sky or the
 // water), and below the top of a landscape window. Soarers fly the train's way (even flight
 // cells, within 112 m of the line); the goshawk the other way, fast. The whole bird lies inside
 // one near-band chunk, so no chunk border ever splits one.
 // ---------------------------------------------------------------------------------------------
-const BIRD_CELL = 3600, NEAR_CHUNK = 200;
+const BIRD_CELL = 4200, BIRD_SPAN = 0.36, NEAR_CHUNK = 200;   // cells' middles 0.64 * 4200 - 2 * 72 m of snapping apart at least: > 2.5 km
 // Each kind in life-size metres. wing: points out along the span [distance from the body,
 // leading edge, trailing edge (both along the body, forward +), height above the root]; arm and
 // hand: the colours of the three rows of the wing (front to back) inside and outside the middle
@@ -1694,7 +1723,7 @@ const BIRD_CELL = 3600, NEAR_CHUNK = 200;
 // amp: the flap (lift per metre out from the body).
 const RAPTOR = {
   seaEagle: {
-    S: 3.1, amp: 0.1,
+    S: 2.2, amp: 0,
     wing: [[0.06, 0.2, -0.34, 0], [0.48, 0.24, -0.37, 0.04], [0.88, 0.2, -0.22, 0.08]],
     arm: [[0.24, 0.17, 0.11], [0.18, 0.13, 0.09], [0.12, 0.09, 0.07]], hand: [[0.2, 0.15, 0.1], [0.13, 0.1, 0.08], [0.1, 0.08, 0.06]],
     fingers: [7, 0.32, 0.02, [0.08, 0.065, 0.055]],
@@ -1702,7 +1731,7 @@ const RAPTOR = {
     body: [0.36, 0.13, [0.21, 0.15, 0.1]], head: [0.46, 0.095, [0.66, 0.6, 0.47]], bill: [0.6, 0.05, [0.8, 0.64, 0.15]],
   },
   golden: {
-    S: 3.2, amp: 0.12,
+    S: 2.2, amp: 0,
     wing: [[0.06, 0.15, -0.26, 0], [0.42, 0.23, -0.38, 0.1], [0.84, 0.18, -0.2, 0.2]],
     arm: [[0.22, 0.15, 0.09], [0.28, 0.23, 0.19], [0.22, 0.19, 0.16]], hand: [[0.2, 0.14, 0.09], [0.3, 0.26, 0.21], [0.2, 0.17, 0.14]],
     fingers: [6, 0.3, 0.04, [0.07, 0.06, 0.05]],
@@ -1710,7 +1739,7 @@ const RAPTOR = {
     body: [0.36, 0.13, [0.2, 0.14, 0.09]], head: [0.42, 0.085, [0.6, 0.44, 0.2]], bill: [0.54, 0.035, [0.24, 0.22, 0.2]],
   },
   osprey: {
-    S: 3.6, amp: 0.22,
+    S: 2.35, amp: 0,
     wing: [[0.05, 0.12, -0.17, 0], [0.36, 0.21, -0.11, 0.12], [0.76, 0.0, -0.15, 0.02]],
     arm: [[0.76, 0.75, 0.72], [0.7, 0.7, 0.68], [0.5, 0.49, 0.47]], hand: [[0.7, 0.7, 0.68], [0.5, 0.49, 0.47], [0.42, 0.41, 0.4]],
     fingers: [4, 0.16, 0.1, [0.1, 0.09, 0.08]],
@@ -1719,7 +1748,7 @@ const RAPTOR = {
     carpal: [0.1, 0.08, 0.07],
   },
   buzzard: {
-    S: 4.2, amp: 0.16,
+    S: 2.35, amp: 0,
     wing: [[0.05, 0.14, -0.22, 0], [0.36, 0.17, -0.25, 0.07], [0.6, 0.13, -0.15, 0.12]],
     arm: [[0.3, 0.2, 0.13], [0.74, 0.7, 0.62], [0.26, 0.22, 0.19]], hand: [[0.3, 0.21, 0.14], [0.74, 0.7, 0.63], [0.24, 0.2, 0.17]],
     fingers: [5, 0.17, 0.02, [0.1, 0.08, 0.07]],
@@ -1728,7 +1757,7 @@ const RAPTOR = {
     carpal: [0.12, 0.09, 0.06], breast: [0.7, 0.64, 0.54],
   },
   goshawk: {
-    S: 4.2, amp: 0.5,
+    S: 2.35, amp: 0.18,
     wing: [[0.05, 0.14, -0.22, 0], [0.3, 0.16, -0.24, 0.12], [0.5, 0.12, -0.12, 0.22]],
     arm: [[0.6, 0.6, 0.58], [0.5, 0.5, 0.49], [0.36, 0.36, 0.36]], hand: [[0.52, 0.52, 0.51], [0.4, 0.4, 0.4], [0.3, 0.3, 0.31]],
     fingers: [5, 0.11, 0.02, [0.14, 0.14, 0.15]],
@@ -1737,7 +1766,7 @@ const RAPTOR = {
     brow: [0.78, 0.78, 0.76],
   },
   greatGrey: {
-    S: 3.6, amp: 0.3, pitch: 0.1,
+    S: 2.3, amp: 0.1, pitch: 0.1,
     wing: [[0.05, 0.13, -0.17, 0], [0.4, 0.15, -0.2, 0.05], [0.7, 0.1, -0.11, 0.08]],
     arm: [[0.5, 0.5, 0.48], [0.4, 0.4, 0.38], [0.24, 0.24, 0.23]], hand: [[0.46, 0.46, 0.44], [0.34, 0.34, 0.33], [0.2, 0.2, 0.19]],
     fingers: [5, 0.13, 0.03, [0.2, 0.2, 0.19]],
@@ -1746,7 +1775,7 @@ const RAPTOR = {
     disc: [0.8, 0.8, 0.76],
   },
   eagleOwl: {
-    S: 3.6, amp: 0.3, pitch: 0.1,
+    S: 2.3, amp: 0.1, pitch: 0.1,
     wing: [[0.05, 0.14, -0.18, 0], [0.42, 0.16, -0.21, 0.05], [0.72, 0.1, -0.11, 0.08]],
     arm: [[0.66, 0.52, 0.32], [0.54, 0.41, 0.25], [0.26, 0.19, 0.12]], hand: [[0.62, 0.48, 0.3], [0.48, 0.36, 0.22], [0.22, 0.16, 0.1]],
     fingers: [5, 0.14, 0.03, [0.18, 0.13, 0.08]],
@@ -1756,7 +1785,7 @@ const RAPTOR = {
   },
 };
 // Further out, drawn larger still (as the animals: wildK), so a bird at 110 m reads as well as one at 50.
-const raptorK = (d) => 0.9 + 0.35 * smooth(50, 110, d);
+const raptorK = (d) => 0.92 + 0.18 * smooth(50, 110, d);
 // How far a bird reaches from its middle, at its drawn scale: out to the wing tip.
 const raptorReach = (R, d) => (R.wing[R.wing.length - 1][0] + R.fingers[1]) * R.S * raptorK(d);
 
@@ -1796,7 +1825,7 @@ function makeRaptor(W, i) {
   const r = makeRng(hashInts(W.ws, 830, i));
   if (r() > 0.85) return null;
   // the near lakes in the middle half of the cell: the first tries are over one of them
-  const lakes = [], c0 = (i + 0.25) * BIRD_CELL, c1 = (i + 0.75) * BIRD_CELL, LC = LAKE_FAMS[0].cell;
+  const lakes = [], c0 = (i + 0.5 - BIRD_SPAN / 2) * BIRD_CELL, c1 = (i + 0.5 + BIRD_SPAN / 2) * BIRD_CELL, LC = LAKE_FAMS[0].cell;
   for (let li = Math.floor(c0 / LC) - 1; li <= Math.floor(c1 / LC) + 1; li++) {
     const lk = lakeIn(W, 0, li);
     if (lk && lk.dc - lk.rd < 90 && lk.cx + lk.rx * 0.6 > c0 && lk.cx - lk.rx * 0.6 < c1) lakes.push(lk);
@@ -1805,7 +1834,7 @@ function makeRaptor(W, i) {
     const u0 = r(), u1 = r(), u2 = r(), u3 = r(), u4 = r(), u5 = r(), byLake = t < 4 && lakes.length > 0;
     const dash = !byLake && u1 < 0.3;                    // a goshawk, low and the other way
     // a flight cell going the right way, its bird well inside one near-band chunk
-    let wx = (i + 0.25 + 0.5 * u0) * BIRD_CELL;
+    let wx = (i + 0.5 + BIRD_SPAN * (u0 - 0.5)) * BIRD_CELL;
     if (byLake) { const lk = lakes[Math.floor(u1 * lakes.length)]; wx = clamp(lk.cx + (u0 - 0.5) * 1.2 * lk.rx, c0, c1); }
     let fc = flightCell(wx);
     if ((fc.dir < 0) !== dash) fc = flightCell(fc.wx + FLY_CELL);
@@ -1831,15 +1860,15 @@ function makeRaptor(W, i) {
     if (c.lake && c.w1 - c.w0 >= 14 && c.w1 >= 50 && c.w0 <= 104) { at = 'lake'; d = spread(c.w0, c.w1, u2); }
     else if (run) { at = 'open'; d = spread(run[0], run[1], u2); }
     const type = at === 'lake' ? (u3 < 0.5 ? 'seaEagle' : 'osprey') : at === 'open' ? (u3 < 0.55 ? 'buzzard' : 'golden') : (u3 < 0.55 ? 'golden' : 'buzzard');
-    const R = RAPTOR[type], ext = raptorReach(R, d), pair = type === 'buzzard' && u5 < 0.35;
-    const below = 0.45 * ext + 1.7 * R.amp * ext + 1.2, above = 0.45 * ext + 0.8 + (pair ? 2.5 : 0);
+    const R = RAPTOR[type], ext = raptorReach(R, d);
+    const below = 0.45 * ext + 1.7 * R.amp * ext + 1.2, above = 0.45 * ext + 0.8;
     let need = -Infinity;
     for (const [cam, bx] of birdViews(cx, d, fc.dir)) need = Math.max(need, skyNeed(W, cam, bx, d) + below);
     const top = 2.6 + 0.4 * d - above;                   // about 22 degrees up, level with it
     if (need > top) continue;
     // facing the train, nose a little up, so the window sees it from below and in front: the
     // whole spread of its wings across the frame, the hand's fingers, the head and the tail beyond
-    return { type, at, wx: cx, d, y: need + Math.min(3, top - need) * u5, dir: fc.dir, yaw: -Math.PI / 2 + (u2 - 0.5) * 0.7, pitch: 0.3 + 0.12 * u3, bank: (r() - 0.5) * 0.4, pair, juv: u4 < 0.4, seed };
+    return { type, at, wx: cx, d, y: need + Math.min(3, top - need) * u5, dir: fc.dir, yaw: -Math.PI / 2 + (u2 - 0.5) * 0.7, pitch: 0.3 + 0.12 * u3, bank: (r() - 0.5) * 0.4, juv: u4 < 0.4, seed };
   }
   return null;
 }
@@ -1933,11 +1962,8 @@ function* raptors(ctx, out, W) {
     const x = b.wx - ctx.x0;
     if (x < -20 || x > ctx.length + 20) continue;
     const type = dusk ? (b.at === 'lake' ? 'eagleOwl' : 'greatGrey') : b.type;
-    if (b.pair && !dusk) {                                      // owls hunt alone
-      drawRaptor(out, x - 4 * b.dir, b.y, -b.d, b, type);
-      drawRaptor(out, x + 5 * b.dir, b.y + 2.5, -(b.d - 5), b, type, 0.3 - b.bank, b.yaw + 0.5);
-    } else drawRaptor(out, x, b.y, -b.d, b, type);
-    if (log && x >= 0 && x < ctx.length) log.push({ kind: 'raptor', type, at: b.at, wx: b.wx, d: Math.round(b.d), y: +b.y.toFixed(1), dir: b.dir, pair: !!b.pair });
+    drawRaptor(out, x, b.y, -b.d, b, type);
+    if (log && x >= 0 && x < ctx.length) log.push({ kind: 'raptor', type, at: b.at, wx: b.wx, d: Math.round(b.d), y: +b.y.toFixed(1), dir: b.dir });
     if (out.due()) yield;
   }
 }
@@ -2141,15 +2167,24 @@ function* settlements(ctx, out, W) {
   }
 }
 
-// An out that tags every splat MOVE.STILL (kit blob() and strut() have no slot for a motion class).
-function withMoveStill(out) {
-  const m = (x, y, z, sx, sy, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = KIND.OTHER) => out(x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind, MOVE.STILL);
-  m.q = (x, y, z, sx, sy, sz, c, o, q, k) => out(x, y, z, sx, sy, sz, c[0], c[1], c[2], o, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, k, MOVE.STILL);
+// An out that tags every splat with one motion class (kit blob() and strut() and the tree
+// functions have no slot for one): MOVE.STILL for rigid things, grove(g) for a kind of tree.
+// Cached per out and class, so a forest of trees shares one wrapper per group.
+const moveOuts = new WeakMap();
+function withMove(out, move) {
+  let byMove = moveOuts.get(out);
+  if (!byMove) { byMove = new Map(); moveOuts.set(out, byMove); }
+  let m = byMove.get(move);
+  if (m) return m;
+  m = (x, y, z, sx, sy, sz, r, g, b, o = 1, qx = 0, qy = 0, qz = 0, qw = 1, kind = KIND.OTHER) => out(x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind, move);
+  m.q = (x, y, z, sx, sy, sz, c, o, q, k) => out(x, y, z, sx, sy, sz, c[0], c[1], c[2], o, q ? q[0] : 0, q ? q[1] : 0, q ? q[2] : 0, q ? q[3] : 1, k, move);
   m.due = out.due; m.left = out.left; m.density = out.density; m.detailK = out.detailK; m.ctx = out.ctx;
   Object.defineProperty(m, 'n', { get: () => out.n });
   Object.defineProperty(m, 'limit', { get: () => out.limit, set: (v) => { out.limit = v; } });
+  byMove.set(move, m);
   return m;
 }
+const withMoveStill = (out) => withMove(out, MOVE.STILL);
 
 // Far: the mountains. Dark forest up to a tree line, then grey rock, then snow on the summits.
 // The terrain's own relief is smooth at this scale, so the far band adds sculpted relief of its own
@@ -2341,7 +2376,7 @@ function debugLayout(seedStr, x0, x1) {
   const res = { lakes: [], cabins: [], sites: [], cuttings: [], sidings: [], pylons: [], wildlife: [], raptors: [] };
   for (let i = Math.floor(x0 / BIRD_CELL); i <= Math.floor(x1 / BIRD_CELL); i++) {
     const b = raptorAt(W, i);
-    if (b && b.wx >= x0 && b.wx <= x1) res.raptors.push({ type: b.type, at: b.at, x: b.wx, d: Math.round(b.d), y: +b.y.toFixed(1), dir: b.dir, pair: !!b.pair, juv: !!b.juv });
+    if (b && b.wx >= x0 && b.wx <= x1) res.raptors.push({ type: b.type, at: b.at, x: b.wx, d: Math.round(b.d), y: +b.y.toFixed(1), dir: b.dir, juv: !!b.juv });
   }
   for (const kind in WILD) {
     for (let i = Math.floor(x0 / WILD[kind].cell); i <= Math.floor(x1 / WILD[kind].cell); i++) {
