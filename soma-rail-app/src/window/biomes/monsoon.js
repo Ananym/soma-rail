@@ -113,6 +113,18 @@ function hourOf(ctx) { const h = ctx.hour != null ? ctx.hour : 12; return ((h % 
 function lightsOn(ctx) { const h = hourOf(ctx); return h > 15.5 || h < 7.2; }
 // For scripts that look for things: globalThis.__monsoonLog = [] collects { what, wx, d }.
 function note(what, wx, d) { const log = globalThis.__monsoonLog; if (log) log.push({ what, wx: Math.round(wx), d: Math.round(d) }); }
+// For scripts that audit buildings: globalThis.__monsoonBuilt = [] collects one row per building per
+// chunk drawn: { what, wx, d, layer, x0, n (splats kept), skip (none kept), cut (the limit stopped it) }.
+// A building is drawn whole or not at all, and the same in every chunk it straddles: the band's prop
+// limit (out.limit) is lifted while one is drawn, so it can never stop one part-way, nor draw one
+// chunk's half of a house and drop the other's. (The buildings are a small share of a band; what is
+// drawn after them, plants and the ground fill, takes up the difference.)
+function* built(out, what, wx, d, g) {
+  const log = globalThis.__monsoonBuilt, n0 = out.n, lim = out.limit;
+  out.limit = Infinity;
+  try { yield* g; } finally { out.limit = lim; }
+  if (log) log.push({ what, wx: Math.round(wx * 10) / 10, d: Math.round(d * 10) / 10, layer: out.ctx.layer, x0: out.ctx.x0, n: out.n - n0, skip: false, cut: false, over: Math.max(0, out.n - Math.max(n0, lim)) });
+}
 const inX = (ctx, wx, m = 0) => wx >= ctx.x0 - m && wx < ctx.x0 + ctx.length + m;
 const pick = (list, r) => list[Math.min(list.length - 1, Math.floor(r() * list.length))];
 
@@ -786,12 +798,44 @@ const TIN = [[0.26, 0.4, 0.56], [0.56, 0.22, 0.16], [0.44, 0.38, 0.32], [0.6, 0.
 const SIGNS = [[1, 0.14, 0.1], [0.1, 0.4, 1], [1, 0.82, 0.1], [0.08, 0.78, 0.98], [1, 0.3, 0.62], [0.2, 1, 0.4]];
 const LIT = [1, 0.78, 0.45], LIT_COOL = [0.82, 0.92, 1];
 const TIMBER = [0.3, 0.2, 0.13], THATCH = [0.42, 0.37, 0.28], PALMTHATCH = [0.36, 0.33, 0.24];
-const bs = (out, d, k = 1.5) => Math.max(0.18, detail(out, d, k));
+// (a little coarser below the default budget: buildings are always drawn whole, so at a low count
+// they must leave the ground fill its share; it depends on the budget alone, never on what a chunk
+// has drawn, so a house straddling two chunks is the same grid in both)
+const bs = (out, d, k = 1.5) => Math.max(0.18, detail(out, d, k)) * (1 + 0.3 * clamp(1 - Math.sqrt(out.density), 0, 1));
 // A rectangle in a vertical plane facing +z (front) or along z (an end), or level (a roof or slab).
 //   front(x0, y0, z, w, h): x0..x0+w, y0..y0+h at depth z      end(x, y0, z0, dep, h): z0 back to z0+dep
 function* front(out, x0, y0, z, w, h, s, col, kind, rng, move = 0) { yield* panel(out, [x0, y0, z], [1, 0, 0], [0, 1, 0], w, h, s, col, kind, rng, 0.12, move); }
 function* endWall(out, x, y0, z0, dep, h, s, col, kind, rng) { yield* panel(out, [x, y0, z0], [0, 0, 1], [0, 1, 0], dep, h, s, col, kind, rng); }
 function* slab(out, x0, y, z0, w, dep, s, col, kind, rng) { yield* panel(out, [x0, y, z0], [1, 0, 0], [0, 0, 1], w, dep, s, col, kind, rng); }
+// An end wall of a house in a row (front at distance d, dep deep, H tall at x). A neighbour built
+// wall to wall hides it up to lh, but only where the two overlap front to back (nb = [front, back]
+// of the neighbour, in distance): before and behind that, the wall is drawn from the ground.
+function* sideWall(out, x, y0, d, dep, H, lh, nb, s, col, kind, rng) {
+  // (each piece hands col its place on the whole wall, 0..1 front to back and up, so streaks and damp
+  // run on across the joins)
+  const seg = function* (a, b, lo) {
+    if (!(b - a > 0.05 && H - lo > 0.3)) return;
+    yield* endWall(out, x, y0 + lo, -b, b - a, H - lo, s, (u, v) => col((d + dep - (b - u * (b - a))) / dep, (lo + v * (H - lo)) / H), kind, rng);
+  };
+  if (!(lh > 0) || !nb) { yield* seg(d, d + dep, 0); return; }
+  const c0 = clamp(nb[0], d, d + dep), c1 = clamp(nb[1], c0, d + dep);
+  yield* seg(d, c0, 0);
+  yield* seg(c0, c1, lh);
+  yield* seg(c1, d + dep, 0);
+}
+// The triangles of wall under a pitched roof's two ends (x0 and x0 + w), up to its ridge rh above y.
+function* gables(out, x0, y, zf, w, dep, rh, s, wallCol, kind, rng) {
+  for (const ex of [x0, x0 + w]) {
+    const c = faceTone(wallCol, ex === x0 ? -1 : 1, 0);
+    yield* panel(out, [ex, y, zf - dep], [0, 0, 1], [0, 1, 0], dep, rh, s, (a, b) => (Math.abs(a - 0.5) * 2 > 1 - b ? null : c), kind, rng);
+  }
+}
+// Draw the random numbers a panel of this size would have drawn (when a wall is now drawn another
+// way, so that everything after it keeps the look it had: tanks, awnings, chimney heights).
+function burn(rng, lu, lv, s) {
+  const n = Math.max(1, Math.round(lu / (s * 1.4))) * Math.max(1, Math.round(lv / (s * 1.4))) * 2;
+  for (let i = 0; i < n; i++) rng();
+}
 // A pitched roof: two slopes from the eaves (front at z = zf, back at zf - dep) up to a ridge along
 // x, with gable triangles at the ends in wallCol. `curl` turns the four corners up (pagodas, dinh).
 function* gableRoof(out, x0, y, zf, w, dep, rh, ov, s, col, wallCol, kind, rng, curl = 0) {
@@ -801,12 +845,7 @@ function* gableRoof(out, x0, y, zf, w, dep, rh, ov, s, col, wallCol, kind, rng, 
   // front slope: from the front eave (y - ov*rh/half... a little below the wall top) up to the ridge
   yield* panel(out, [x0 - ov, y - ov * rh / half, zf + ov], [1, 0, 0], [0, ny, -nz], w + 2 * ov, sl, s, () => jitter(cf, rng, 0.06), kind, rng);
   yield* panel(out, [x0 - ov, y - ov * rh / half, zf - dep - ov], [1, 0, 0], [0, ny, nz], w + 2 * ov, sl, s, () => jitter(cb, rng, 0.06), kind, rng);
-  if (wallCol) {
-    for (const ex of [x0, x0 + w]) {
-      const c = faceTone(wallCol, ex === x0 ? -1 : 1, 0);
-      yield* panel(out, [ex, y, zf - dep], [0, 0, 1], [0, 1, 0], dep, rh, s, (a, b) => (Math.abs(a - 0.5) * 2 > 1 - b ? null : c), kind, rng);
-    }
-  }
+  if (wallCol) yield* gables(out, x0, y, zf, w, dep, rh, s, wallCol, kind, rng);
   if (curl > 0) {
     const cc = mul3(col, 0.8), r = Math.max(0.08, s * 0.5);
     for (const ex of [x0 - ov, x0 + w + ov]) for (const ez of [zf + ov, zf - dep - ov]) {
@@ -846,7 +885,8 @@ function* tubeHouse(ctx, out, hs, night) {
     const yy = b * H, fl = Math.floor(yy / FH), fy = yy - fl * FH, ax = a * w;
     if (yy > H - 0.7) return mul3(wf, 0.92);
     if (fl === 0) {
-      if (ax > 0.35 && ax < w - 0.35 && fy < 2.7) return night && fine ? null : fy > 2.2 ? [0.42, 0.42, 0.42] : [0.1, 0.09, 0.08];
+      // (lit, the opening is left open only where the light is drawn: the shutter box above stays)
+      if (ax > 0.35 && ax < w - 0.35 && fy < 2.7) return fy > 2.2 ? [0.42, 0.42, 0.42] : night && fine ? null : [0.1, 0.09, 0.08];
       return wf;
     }
     if (fl < hs.n && winAt(fl, ax, fy)) {
@@ -884,9 +924,11 @@ function* tubeHouse(ctx, out, hs, night) {
     if (brick && Math.sin(a * 4.1 + streak) + Math.sin(b * 5.3 + streak * 2) > 1.1) return mul3(faceTone([0.52, 0.3, 0.22], base === cw ? -1 : 1, 0), 0.9 + 0.1 * Math.sin(b * 60));
     return mul3(base, (0.8 + 0.16 * Math.sin(a * 23 + streak)) * (1 - 0.25 * b * b));
   };
-  const lh = hs.lh || 0, rh = hs.rh || 0;
-  if (H - lh > 0.3) yield* endWall(out, x0, y0 + lh, zf - dep, dep, H - lh, s * 1.6, sideCol(cw), K, r);
-  if (H - rh > 0.3) yield* endWall(out, x0 + w, y0 + rh, zf - dep, dep, H - rh, s * 1.6, sideCol(ce), K, r);
+  const lh = hs.lh || 0, rh = hs.rh || 0, rw = makeRng(hs.seed ^ 0x51de);
+  yield* sideWall(out, x0, y0, hs.d, dep, H, lh, hs.ln, s * 1.6, sideCol(cw), K, rw);
+  yield* sideWall(out, x0 + w, y0, hs.d, dep, H, rh, hs.rn, s * 1.6, sideCol(ce), K, rw);
+  if (H - lh > 0.3) burn(r, dep, H - lh, s * 1.6);
+  if (H - rh > 0.3) burn(r, dep, H - rh, s * 1.6);
   // the roof: flat, a parapet, a water tank, sometimes a little tiled roof
   yield* slab(out, x0, y0 + H, zf - dep, w, dep, s * 2, () => jitter(CONC_D, r, 0.08), K, r);
   if (r() < 0.65) { const tx = x0 + 0.8 + r() * (w - 1.6); out(tx, y0 + H + 0.75, zf - dep * 0.4, 0.75, 0.45, 0.45, 0.66, 0.68, 0.7, 1, 0, 0, 0, 1, K); out(tx, y0 + H + 0.3, zf - dep * 0.4, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 1, 0, 0, 0, 1, K); }
@@ -907,10 +949,18 @@ function* tinShop(ctx, out, hs, night) {
     return wf;
   }, K, r);
   if (night) yield* front(out, x0 + 0.5, y0, zf + 0.02, w - 1, 2.5, s, () => LIT, KIND.LIGHT, r);
-  if (!hs.lh) yield* endWall(out, x0, y0, zf - dep, dep, H, s * 1.4, () => faceTone(hs.col, -1, 0), K, r);
-  if (!hs.rh) yield* endWall(out, x0 + w, y0, zf - dep, dep, H, s * 1.4, () => faceTone(hs.col, 1, 0), K, r);
+  const rw = makeRng(hs.seed ^ 0x51de);
+  yield* sideWall(out, x0, y0, hs.d, dep, H, hs.lh || 0, hs.ln, s * 1.4, () => faceTone(hs.col, -1, 0), K, rw);
+  yield* sideWall(out, x0 + w, y0, hs.d, dep, H, hs.rh || 0, hs.rn, s * 1.4, () => faceTone(hs.col, 1, 0), K, rw);
+  if (!hs.lh) burn(r, dep, H, s * 1.4);
+  if (!hs.rh) burn(r, dep, H, s * 1.4);
   // the tin roof: a single pitch, falling to the front, ribbed
   const tin = hs.tin, rise = 1.0, sl = Math.hypot(dep + 0.6, rise);
+  // the triangles of wall under its ends, as it rises to the back
+  for (const [ex, nx] of [[x0, -1], [x0 + w, 1]]) {
+    const c = faceTone(hs.col, nx, 0);
+    yield* panel(out, [ex, y0 + H - 0.05, zf - dep], [0, 0, 1], [0, 1, 0], dep, rise, s * 1.4, (a, b) => (b > 1.08 - a ? null : c), K, rw);
+  }
   yield* panel(out, [x0 - 0.3, y0 + H, zf + 0.5], [1, 0, 0], [0, rise / sl, -(dep + 0.6) / sl], w + 0.6, sl, s, (a) => mul3(soft(tin, 0.8), 0.86 + 0.14 * (Math.sin(a * w * 9) > 0 ? 1 : 0)), K, r);
   if (hs.sg) yield* sign(out, x0 + 0.3, y0 + H - 0.55, zf + 0.15, w - 0.6, 0.5, hs.sg, r);
   // the awning: a tarpaulin sloping down toward the road on two poles; its hem flutters
@@ -934,10 +984,11 @@ function* tiledHouse(ctx, out, hs, night) {
   const doors = Math.max(1, Math.round(w / 3.2));
   yield* front(out, x0, y0, zf, w, H, s, (a, b) => {
     const fx = a * doors - Math.floor(a * doors), yy = b * H;
-    if (fx > 0.3 && fx < 0.7 && yy < 2.3) return night && hs.d < 250 && fx > 0.4 ? null : [0.3, 0.18, 0.1];
+    // (lit, the door is left open just where the light is drawn)
+    if (fx > 0.3 && fx < 0.7 && yy < 2.3) return night && hs.d < 250 && fx > 0.4 && fx < 0.6 && yy < 2.1 ? null : [0.3, 0.18, 0.1];
     return mul3(wf, yy > H - 0.5 ? 0.8 : 1);
   }, K, r);
-  if (night && hs.d < 250) for (let k = 0; k < doors; k++) yield* front(out, x0 + (k + 0.4) * w / doors, y0 + 0.1, zf + 0.02, 0.2 * w / doors, 2.0, s, () => LIT, KIND.LIGHT, r);
+  if (night && hs.d < 250) for (let k = 0; k < doors; k++) yield* front(out, x0 + (k + 0.4) * w / doors, y0, zf + 0.02, 0.2 * w / doors, 2.1, s, () => LIT, KIND.LIGHT, r);
   yield* endWall(out, x0, y0, zf - dep, dep, H, s * 1.2, () => faceTone(hs.col, -1, 0), K, r);
   yield* endWall(out, x0 + w, y0, zf - dep, dep, H, s * 1.2, () => faceTone(hs.col, 1, 0), K, r);
   yield* gableRoof(out, x0, y0 + H, zf, w, dep, dep * 0.42, 0.7, s, roof, hs.col, K, r, hs.curl || 0);
@@ -988,8 +1039,14 @@ function* pagoda(ctx, out, p, night) {
   }, K, r);
   yield* endWall(out, x - w / 2, y0, zf - dep, dep, 3.6, s, () => faceTone(wall, -1, 0), K, r);
   yield* endWall(out, x + w / 2, y0, zf - dep, dep, 3.6, s, () => faceTone(wall, 1, 0), K, r);
+  // (its gable ends walled, and the upper hall's ends too: open, the roofs read as lids on nothing)
+  // (with their own rng, so the rest keeps the look it had)
+  const rw = makeRng(p.seed ^ 0x51de);
   yield* gableRoof(out, x - w / 2, y0 + 3.6, zf, w, dep, 2.0, 1.2, s, TILE_OLD, null, K, r, 1.0);
+  yield* gables(out, x - w / 2, y0 + 3.6, zf, w, dep, 2.0, s, wall, K, rw);
   yield* front(out, x - w / 2 + 2, y0 + 4.6, zf - 2.2, w - 4, 1.4, s, () => faceTone(wall, 0, 1), K, r);
+  yield* endWall(out, x - w / 2 + 2, y0 + 4.4, zf - 2.2 - (dep - 4.4), dep - 4.4, 1.6, s, () => faceTone(wall, -1, 0), K, rw);
+  yield* endWall(out, x + w / 2 - 2, y0 + 4.4, zf - 2.2 - (dep - 4.4), dep - 4.4, 1.6, s, () => faceTone(wall, 1, 0), K, rw);
   yield* gableRoof(out, x - w / 2 + 2, y0 + 6.0, zf - 2.2, w - 4, dep - 4.4, 2.2, 0.8, s, TILE_OLD, wall, K, r, 0.9);
   if (night && p.d < 300) for (const ex of [-3, 3]) out(x + ex, y0 + 3.0, zf + 1.2, 0.3, 0.38, 0.3, 1, 0.3, 0.12, 1, 0, 0, 0, 1, KIND.LIGHT);
   if (p.tower) {
@@ -1002,6 +1059,7 @@ function* pagoda(ctx, out, p, night) {
       yield* endWall(out, tx - tw / 2, ty, tz - tw, tw, th, s, () => faceTone(wall, -1, 0), K, r);
       yield* endWall(out, tx + tw / 2, ty, tz - tw, tw, th, s, () => faceTone(wall, 1, 0), K, r);
       yield* gableRoof(out, tx - tw / 2, ty + th, tz, tw, tw, 0.9, 0.7, s, TILE_OLD, null, K, r, 0.6);
+      yield* gables(out, tx - tw / 2, ty + th, tz, tw, tw, 0.9, s, wall, K, rw);
       ty += th + 0.7; tw *= 0.8;
     }
     bar(out, tx, ty, tz - tw / 2, tx, ty + 1.6, tz - tw / 2, Math.max(0.08, thin(p.d)), [0.6, 0.5, 0.2], 2, K);
@@ -1034,6 +1092,7 @@ function* gate(ctx, out, g) {
   }
   yield* front(out, x - 2.2, y0 + 3.6, z + 0.05, 4.4, 1.3, s, (a, b) => (b > 0.3 && b < 0.7 && a > 0.1 && a < 0.9 && Math.sin(a * 31) > -0.3 ? [0.8, 0.7, 0.12] : [0.66, 0.1, 0.08]), K, r);
   yield* gableRoof(out, x - 2.2, y0 + 4.9, z, 4.4, 1.2, 0.7, 0.4, s, TILE_OLD, null, K, r, 0.5);
+  yield* gables(out, x - 2.2, y0 + 4.9, z, 4.4, 1.2, 0.7, s, col, K, makeRng(g.seed ^ 0x51de));
 }
 
 // The flag of Vietnam on a pole: red with a yellow star, fluttering (MOVE.FLAG).
@@ -1085,8 +1144,12 @@ function* church(ctx, out, p, night) {
   // the nave, side on to the line, its gable end with the tower facing the way the train comes
   yield* front(out, x - dep / 2, y0, zf, dep, H, s, (a, b) => (a * 6 - Math.floor(a * 6) > 0.4 && a * 6 - Math.floor(a * 6) < 0.6 && b > 0.25 && b < 0.8 ? (night && p.d < 300 ? null : [0.2, 0.22, 0.28]) : faceTone(col, 0, 1)), K, r);
   if (night && p.d < 300) for (let k = 0; k < 6; k++) yield* front(out, x - dep / 2 + (k + 0.4) * dep / 6, y0 + H * 0.25, zf + 0.03, dep / 30, H * 0.55, s, () => [1, 0.72, 0.4], KIND.LIGHT, r);
+  // (both ends of the nave walled to the ridge: the tower hides only the front half of the west end)
+  const rw = makeRng(p.seed ^ 0x51de);
+  yield* endWall(out, x - dep / 2, y0, zf - w, w, H, s, () => faceTone(col, -1, 0), K, rw);
   yield* endWall(out, x + dep / 2, y0, zf - w, w, H, s, () => faceTone(col, 1, 0), K, r);
   yield* gableRoof(out, x - dep / 2, y0 + H, zf, dep, w, 5, 0.6, s, [0.42, 0.24, 0.18], null, K, r);
+  yield* gables(out, x - dep / 2, y0 + H, zf, dep, w, 5, s, col, K, rw);
   // the tower at the west end, square, then the belfry, then the spire with its cross
   const tx = x - dep / 2 - 3, tw = 6, th = 22;
   yield* front(out, tx - tw / 2, y0, zf + 0.5, tw, th, s, (a, b) => (Math.abs(a - 0.5) < 0.14 && ((b > 0.05 && b < 0.3) || (b > 0.72 && b < 0.88)) ? [0.16, 0.14, 0.14] : Math.abs(a - 0.5) < 0.12 && b > 0.5 && b < 0.6 ? [0.78, 0.78, 0.74] : faceTone(col, 0, 1)), K, r);
@@ -1112,6 +1175,7 @@ function* kiln(ctx, out, k) {
   yield* endWall(out, x - 9, y0, zf - 10, 10, 4, s, () => faceTone(brick, -1, 0), K, r);
   yield* endWall(out, x + 9, y0, zf - 10, 10, 4, s, () => faceTone(brick, 1, 0), K, r);
   yield* gableRoof(out, x - 9, y0 + 4, zf, 18, 10, 2.2, 0.5, s, [0.36, 0.34, 0.3], null, K, r);
+  yield* gables(out, x - 9, y0 + 4, zf, 18, 10, 2.2, s, brick, K, makeRng(k.seed ^ 0x51de));
   const cx = x + 5, ch = 20 + 6 * r();
   yield* front(out, cx - 0.9, y0, zf - 4, 1.8, ch, s, (a, b) => faceTone(brick, 0, 1).map((v) => v * (0.92 + 0.1 * b)), K, r);
   yield* endWall(out, cx - 0.9, y0, zf - 5.8, 1.8, ch, s, () => faceTone(brick, -1, 0), K, r);
@@ -1137,7 +1201,7 @@ function kilnAt(W, i) {
 function* kilns(ctx, out, W, dLo, dHi) {
   for (const { i } of cellsAround(ctx, KILNCELL, 60)) {
     const k = kilnAt(W, i);
-    if (k && k.d >= dLo && k.d < dHi && inX(ctx, k.wx, 30)) { note('kiln', k.wx, k.d); yield* kiln(ctx, out, k); }
+    if (k && k.d >= dLo && k.d < dHi && inX(ctx, k.wx, 30)) { note('kiln', k.wx, k.d); yield* built(out, 'kiln', k.wx, k.d, kiln(ctx, out, k)); }
   }
 }
 // Lotus in the ponds among the paddies: big round pads crowding the water, pink flowers standing
@@ -1360,6 +1424,10 @@ function village(W, i) {
       const h = houses[j], a = houses[j - 1], b = houses[j + 1];
       h.lh = a && h.wx - h.w / 2 - (a.wx + a.w / 2) < 0.5 ? Math.min(hOf(a), hOf(h)) : 0;
       h.rh = b && b.wx - b.w / 2 - (h.wx + h.w / 2) < 0.5 ? Math.min(hOf(b), hOf(h)) : 0;
+      // (and how far front to back the neighbour covers it: fronts are staggered and depths differ,
+      // so the strips before and behind the neighbour are drawn full height)
+      h.ln = h.lh ? [a.d, a.d + a.dep] : null;
+      h.rn = h.rh ? [b.d, b.d + b.dep] : null;
     }
     // behind the street (on the plain): palms, bamboo and trees standing over the roofs
     if (v0 < 0.55) {
@@ -1513,9 +1581,8 @@ function roadPlant(W, i) {
 // ---------------------------------------------------------------------------------------------
 function templeOf(t) { return t.kind === 'church' ? church : t.kind === 'dinh' ? dinh : pagoda; }
 function* drawHouse(ctx, out, h, night) {
-  if (h.type === 'tube') yield* tubeHouse(ctx, out, h, night);
-  else if (h.type === 'shop') yield* tinShop(ctx, out, h, night);
-  else yield* tiledHouse(ctx, out, h, night);
+  const g = h.type === 'tube' ? tubeHouse(ctx, out, h, night) : h.type === 'shop' ? tinShop(ctx, out, h, night) : tiledHouse(ctx, out, h, night);
+  yield* built(out, h.type, h.wx, h.d, g);
 }
 function* drawPlant(ctx, out, p, W) {
   const r = makeRng(p.seed);
@@ -1527,9 +1594,9 @@ function* villages(ctx, out, W, dLo, dHi, night) {
     const v = village(W, i);
     if (!v || v.cx + v.half + 40 < ctx.x0 || v.cx - v.half - 40 > ctx.x0 + L) continue;
     note('village', v.cx, v.rd0);
-    if (v.temple && v.temple.d >= dLo && v.temple.d < dHi && inX(ctx, v.temple.wx, 30)) { note(v.temple.kind, v.temple.wx, v.temple.d); yield* templeOf(v.temple)(ctx, out, v.temple, night); }
-    if (v.gate && v.gate.d >= dLo && v.gate.d < dHi && inX(ctx, v.gate.wx, 6)) { note('gate', v.gate.wx, v.gate.d); yield* gate(ctx, out, v.gate); }
-    if (v.market && v.market.d >= dLo && v.market.d < dHi && inX(ctx, v.market.wx, 24)) { note('market', v.market.wx, v.market.d); yield* market(ctx, out, W, v.market, night); }
+    if (v.temple && v.temple.d >= dLo && v.temple.d < dHi && inX(ctx, v.temple.wx, 30)) { note(v.temple.kind, v.temple.wx, v.temple.d); yield* built(out, v.temple.kind, v.temple.wx, v.temple.d, templeOf(v.temple)(ctx, out, v.temple, night)); }
+    if (v.gate && v.gate.d >= dLo && v.gate.d < dHi && inX(ctx, v.gate.wx, 6)) { note('gate', v.gate.wx, v.gate.d); yield* built(out, 'gate', v.gate.wx, v.gate.d, gate(ctx, out, v.gate)); }
+    if (v.market && v.market.d >= dLo && v.market.d < dHi && inX(ctx, v.market.wx, 24)) { note('market', v.market.wx, v.market.d); yield* built(out, 'market', v.market.wx, v.market.d, market(ctx, out, W, v.market, night)); }
     for (const h of v.houses) if (h.d >= dLo && h.d < dHi && inX(ctx, h.wx, h.w)) yield* drawHouse(ctx, out, h, night);
     for (const p of v.plants) if (p.d >= dLo && p.d < dHi && inX(ctx, p.wx, 8)) yield* drawPlant(ctx, out, p, W);
   }
@@ -1543,13 +1610,18 @@ function* hamlets(ctx, out, W, dLo, dHi, night) {
     note('hamlet', h.cx, h.dc);
     for (const p of h.plants) if (p.d >= dLo && p.d < dHi && inX(ctx, p.wx, 8)) yield* drawPlant(ctx, out, p, W);
     for (const hs of h.houses) if (hs.d >= dLo && hs.d < dHi && inX(ctx, hs.wx, hs.w)) yield* drawHouse(ctx, out, hs, night);
-    if (h.temple && h.temple.d >= dLo && h.temple.d < dHi && inX(ctx, h.temple.wx, 30)) { note(h.temple.kind, h.temple.wx, h.temple.d); yield* templeOf(h.temple)(ctx, out, h.temple, night); }
+    if (h.temple && h.temple.d >= dLo && h.temple.d < dHi && inX(ctx, h.temple.wx, 30)) { note(h.temple.kind, h.temple.wx, h.temple.d); yield* built(out, h.temple.kind, h.temple.wx, h.temple.d, templeOf(h.temple)(ctx, out, h.temple, night)); }
   }
 }
 function* tombsDraw(ctx, out, W, dLo, dHi) {
   for (const { i } of cellsAround(ctx, TOMBCELL, 10)) {
     const t = tombs(W, i);
     if (!t || t.d < dLo || t.d >= dHi || !inX(ctx, t.wx, 8)) continue;
+    yield* built(out, 'tombs', t.wx, t.d, tombGroup(ctx, out, W, t, i));
+  }
+}
+function* tombGroup(ctx, out, W, t, i) {
+  {
     const x = t.wx - ctx.x0, s = bs(out, t.d, 1.2), rr = makeRng(hashInts(W.ws, 122, i));
     out(x, t.y + 0.1, -t.d, t.list.length * 1.4 + 1, 0.4, 2.2, 0.26, 0.34, 0.14, 1, 0, 0, 0, 1, KIND.GROUND);
     for (const g of t.list) {
@@ -1569,7 +1641,7 @@ function* stiltsDraw(ctx, out, W, dLo, dHi, night) {
     for (const h of g.list) {
       if (h.d < dLo || h.d >= dHi || !inX(ctx, h.wx, 10)) continue;
       note('stilt', h.wx, h.d);
-      yield* stiltHouse(ctx, out, h, night);
+      yield* built(out, 'stilt', h.wx, h.d, stiltHouse(ctx, out, h, night));
       const r = makeRng(h.seed ^ 77);
       yield* plant(ctx, out, h.plant, h.wx - ctx.x0 + (r() < 0.5 ? -1 : 1) * (h.w * 0.5 + 3), h.d + 3, W.H(h.wx, h.d + 3), r);
     }
@@ -1626,7 +1698,7 @@ function* stationDraw(ctx, out, W, st, night) {
   }
   const hs = { wx: st.wx, d: 13, y: -0.4, w: 18, dep: 5, col: [0.8, 0.66, 0.26], seed: st.seed, roof: TILE };
   if (inX(ctx, st.wx, 20)) {
-    yield* tiledHouse(ctx, out, hs, night);
+    yield* built(out, 'station', st.wx, 13, tiledHouse(ctx, out, hs, night));
     // the name board on its posts, white with dark letters
     const bx = st.wx - ctx.x0 - 18;
     for (const ex of [-1.6, 1.6]) bar(out, bx + ex, -0.3, -8.2, bx + ex, 3.2, -8.2, 0.07, [0.3, 0.3, 0.3], 2, KIND.MAST);
