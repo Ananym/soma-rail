@@ -204,28 +204,77 @@ export function* cityBlock(ctx, out, x, d, o) {
   const fadeAt = o.fade ? (yy) => 1 - smooth(0.3, 1, (yy - base) / H) : () => 1;
   // walls: a jittered grid of flat splats, coarser on the sides
   const p = s * 1.6;
+  const ends = o.ends !== false;
+  // The top. The eye is below the roof of every tall building, so what it sees of the roof is the
+  // top edge against the night sky. Where the wall splats just stopped, that edge was a row of soft
+  // jittered bumps a whole splat pitch deep (with needles at the corners, where the coarser side
+  // walls stood higher), lit windows ran right up into it, and against the dark sky the tower
+  // read as open at the top. So a flat roof above the eye gets a parapet: a solid darker band,
+  // drawn first, on the front and both sides, thicker than half the coarsest wall pitch; the walls
+  // stop under it with a flattened top row whose tail ends inside it, and the windows stop below.
+  const capped = !(o.roofH > 0) && !o.fade && base + H >= 2.4;
+  const T = capped ? Math.min(0.3 * H, Math.max(0.45 * p * (ends ? 1.4 : 1), 1.6 * d / 1158, 0.3)) : 0;
+  const Hw = H - T;
+  if (capped) {
+    const capFace = (x0, d0, U, alongX, col) => {
+      const ov = Math.min(0.2, T * 0.2), UU = U + 2 * ov;
+      // one row of long flat splats, overlapping (centres at most 1.5 radii apart); its edges are
+      // under half the band deep, far crisper than the wall rows it closes. The end splats sit a
+      // radius in from the corners, or their tails stick out past the walls like eaves.
+      const n = Math.max(2, Math.ceil(UU / Math.min(1.1 * p, T * 4))), su = (UU / n) * 0.66, sv = T * 0.42;
+      const c = mul3(col, 0.8);
+      for (let i = 0; i < n; i++) {
+        const u = -ov + su + i * (UU - 2 * su) / (n - 1), yy = base + Hw + T * 0.4;   // reaching a little down over the walls' top row
+        if (alongX) out(x0 + u, yy, -(d0 - 0.08), su, sv, s * 0.12, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+        else out(x0, yy, -(d0 + u), s * 0.12, sv, su, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+      }
+    };
+    capFace(x - w / 2, df, w, true, front);
+    // the sides too, where they are more than one splat deep (a narrower side is a single column
+    // whose level top row ends under the front band)
+    if (ends && dep >= 2.8 * p) {
+      capFace(x - w / 2 - 0.08, df, dep, false, shade(wall, -1, 0, 0.3, 0.6, 0.4));
+      capFace(x + w / 2 + 0.08, df, dep, false, shade(wall, 1, 0, 0.3, 0.6, 0.4));
+    }
+    if (out.due()) yield;
+  }
   const wallFace = function* (x0, d0, U, alongX, col, pk) {
     const pp = p * pk;
-    const nu = Math.max(1, Math.round(U / pp)), nv = Math.max(1, Math.round(H / pp));
-    const su = (U / nu) * 0.64, sv = (H / nv) * 0.64;
+    const nu = Math.max(1, Math.round(U / pp)), nv = Math.max(1, Math.round(Hw / pp));
+    const su = (U / nu) * 0.64, sv = (Hw / nv) * 0.64;
     for (let i = 0; i < nu; i++) {
       const a = (i + 0.5 + (r() - 0.5) * 0.25) / nu;
       for (let j = 0; j < nv; j++) {
-        const b = (j + 0.5 + (r() - 0.5) * 0.25) / nv;
+        let b = (j + 0.5 + (r() - 0.5) * 0.25) / nv, sy = sv;
+        if (capped && j === nv - 1) { b = (j + 0.5) / nv; sy = sv * 0.7; }   // the top row: level, and its tail ends under the parapet
         const c = mul3(col, 0.92 + 0.12 * b + 0.06 * (r() - 0.5));
-        const yy = base + b * H;
+        const yy = base + b * Hw;
         const f = fadeAt(yy);
         if (f < 0.03) continue;
-        if (alongX) out(x0 + a * U, yy, -d0, su, sv, s * 0.1, c[0], c[1], c[2], f, 0, 0, 0, 1, kind);
-        else out(x0, yy, -(d0 + a * U), s * 0.1, sv, su, c[0], c[1], c[2], f, 0, 0, 0, 1, kind);
+        if (alongX) out(x0 + a * U, yy, -d0, su, sy, s * 0.1, c[0], c[1], c[2], f, 0, 0, 0, 1, kind);
+        else out(x0, yy, -(d0 + a * U), s * 0.1, sy, su, c[0], c[1], c[2], f, 0, 0, 0, 1, kind);
         if (out.due()) yield;
       }
     }
   };
   yield* wallFace(x - w / 2, df, w, true, front, 1);
-  if (o.ends !== false) {
+  if (ends) {
     yield* wallFace(x - w / 2, df, dep, false, shade(wall, -1, 0, 0.3, 0.6, 0.4), 1.4);
     yield* wallFace(x + w / 2, df, dep, false, shade(wall, 1, 0, 0.3, 0.6, 0.4), 1.4);
+  }
+  // a block floating above the eye shows its underside: close it with a soffit
+  if (o.y != null && base > EYE + 1) {
+    const sr = makeRng(hashInts(id, 11));
+    const pr = p * 1.3;
+    const nu = Math.max(1, Math.round(w / pr)), nv = Math.max(1, Math.round(dep / pr));
+    const sc = shade(o.wall, 0, -1, 0.2, 0.5, 0.3);
+    for (let i = 0; i < nu; i++) {
+      for (let j = 0; j < nv; j++) {
+        const c = mul3(sc, 0.75 + 0.15 * sr());
+        out(x - w / 2 + (i + 0.5) * w / nu, base + 0.05, -(df + (j + 0.5) * dep / nv), w / nu * 0.66, s * 0.1, dep / nv * 0.66, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+        if (out.due()) yield;
+      }
+    }
   }
   // a flat roof is only drawn where the eye (2.6 m above rail level) can look down on it
   if (!(o.roofH > 0) && base + H < 2.4) {
@@ -265,8 +314,12 @@ export function* cityBlock(ctx, out, x, d, o) {
   }
   // windows
   const shopH = o.shop ? 4.2 : 0.9;
-  const nf = Math.max(1, Math.floor((h - shopH) / fh + 0.25)), nb = Math.max(1, Math.floor(w / bw));
   const agX = Math.max(1, Math.ceil((s * 1.3) / bw)), agY = Math.max(1, Math.ceil((s * 1.3) / fh));
+  // under a parapet the top floor of windows stops below it: a single window reaches 0.7 m above
+  // its floor's middle, a merged cell almost to the top of the grid. A floor that cleared the top
+  // before keeps its windows.
+  const nf0 = Math.floor((h - shopH) / fh + 0.25);
+  const nf = Math.max(1, capped ? Math.min(nf0, Math.floor(agY === 1 ? (Hw - shopH - 0.8) / fh + 0.5 : (Hw - shopH - 0.2) / fh)) : nf0), nb = Math.max(1, Math.floor(w / bw));
   const nx = Math.ceil(nb / agX), ny = Math.ceil(nf / agY);
   const cw = w / nx, ch = (nf * fh) / ny;
   const single = agX === 1 && agY === 1;
@@ -300,7 +353,7 @@ export function* cityBlock(ctx, out, x, d, o) {
     }
   };
   yield* winFace(0);
-  if (o.ends !== false && o.sideWindows !== false) { yield* winFace(-1); yield* winFace(1); }
+  if (ends && o.sideWindows !== false) { yield* winFace(-1); yield* winFace(1); }
   if (o.shop) yield* shopFront(ctx, out, x, df, base, w, id, o.shop);
 }
 
@@ -685,6 +738,9 @@ function* streetLights(ctx, out, L, dLo, dHi, far) {
   }
 }
 
+// Whether world x range [a, b] crosses either end of this chunk.
+function acrossEnds(ctx, a, b) { const e = ctx.x0 + ctx.length; return (a < ctx.x0 && b > ctx.x0) || (a < e && b > e); }
+
 // One block (row k, between cross streets j and j+1) in the near band: terraces, flats, shops,
 // a floodlit yard or a small park, by world hash. Heights grow with distance.
 function* nearBlock(ctx, out, L, k, j, opts) {
@@ -725,13 +781,13 @@ function* nearBlock(ctx, out, L, k, j, opts) {
       const dep = 10 + 8 * pr();
       const mat = pr() < 0.5 ? BRICK : pr() < 0.6 ? RENDER : CONCRETE;
       const shop = type === 'shops' || pr() < 0.12 ? { color: NEON[Math.floor(pr() * NEON.length)] } : null;
+      if (out.n > opts.cap && !acrossEnds(ctx, x, x + w)) { x += w; p++; continue; }
       yield* cityBlock(ctx, out, x + w / 2 - ctx.x0, da + 1 + dep / 2, { w: w - 0.6, dep, h, id: hashInts(bid, 5, p), wall: mat[Math.floor(pr() * mat.length)], shop, k: opts.k, pattern: opts.pattern });
       if (db - da > 34 && db < ctx.zFar && pr() < 0.7) {     // the back row beyond the band belongs to nobody
         const h2 = Math.round(storeys * (0.8 + 0.6 * pr())) * 3.1;
         yield* cityBlock(ctx, out, x + w / 2 - ctx.x0, db - dep / 2, { w: w - 0.6, dep, h: h2, id: hashInts(bid, 7, p), wall: mat[Math.floor(pr() * mat.length)], k: opts.k * 1.3, pattern: opts.pattern });
       }
       x += w; p++;
-      if (out.n > opts.cap) return;
     }
   } else if (type === 'yard') {
     // a builders' or bus yard: a shed, floodlights on tall poles, light on the ground
@@ -849,7 +905,9 @@ function* near(ctx, emit) {
   const ja = Math.floor((ctx.x0 - 60) / CW) - 1, jb = Math.floor((ctx.x0 + ctx.length + 60) / CW) + 1;
   for (let k = 0; k + 1 < L.rows.length && L.rows[k].D < ctx.zFar; k++) {
     for (let j = ja; j <= jb; j++) {
-      if (out.n > cap) break;
+      // past the cap only blocks across the chunk's ends are drawn: their neighbour draws its half
+      // of them whatever its own count, so a building at a seam is never left half built
+      if (out.n > cap && !acrossEnds(ctx, crossX(L, j), crossX(L, j + 1))) continue;
       if ((dz.logic || 0) > 0 && k === 0 && repeatingStretch(ctx, (crossX(L, j) + crossX(L, j + 1)) / 2, dz.logic)) continue;
       yield* nearBlock(ctx, out, L, k, j, { k: 1.0, cap, pattern });
     }
@@ -885,6 +943,7 @@ function* midBuildings(ctx, out, L, cap, pattern, dz) {
       const h = storeys * 3.2;
       const w = P * (0.55 + 0.4 * r()), dep = Math.min(db - da, 14 + 30 * r());
       const d = da + dep / 2 + r() * Math.max(0, (db - da) - dep) * 0.3;
+      if (out.n > cap && !acrossEnds(ctx, cx - w / 2, cx + w / 2)) continue;   // see near()
       if (d < ctx.zNear - 10 || d > ctx.zFar + 50) continue;
       if (inRiver(L, cx, d - dep / 2) || inRiver(L, cx, d + dep / 2)) continue;
       const mat = r() < 0.35 ? BRICK : CONCRETE;
@@ -905,7 +964,6 @@ function* midBuildings(ctx, out, L, cap, pattern, dz) {
         light(out, x, top + 2.2, d - dep / 2 + 0.2, sw * 0.6, Math.max(2, 0.006 * d), 0.5, nc, 0.12);
       }
       if (out.due()) yield;
-      if (out.n > cap) return;
     }
   }
 }
@@ -928,8 +986,9 @@ function* mid(ctx, emit) {
     const d = 400 + r() * 2200;
     yield* crane(ctx, out, wx0 + r() * 420 - ctx.x0, d, 45 + 35 * r(), 40 + 30 * r(), r);
   }
-  yield* midBuildings(ctx, out, L, cap, pattern, dz);
+  // the floating blocks before the buildings: drawn after them, the splat limit could cut one
   if ((dz.topology || 0) > 0) yield* floatingBlocks(ctx, out, L, dz.topology);
+  yield* midBuildings(ctx, out, L, cap, pattern, dz);
   out.limit = Infinity;
   yield* fillGround(ctx, out, { power: 1.2, cover: 3, maxR: 0.05, color: (wx, d, rng) => groundColor(L, wx, d, rng) });
 }
@@ -951,21 +1010,35 @@ function* farTower(ctx, out, x, d, w, h, id, opts = {}) {
   const s = Math.max(4, 0.0042 * d / Math.sqrt(Math.min(1, out.density)));
   const col = shade(CONCRETE[Math.floor(r() * CONCRETE.length)], 0, 0, 1, 0.6, 0.45);
   const kind = opts.kind != null ? opts.kind : KIND.BUILDING;
-  const nx = Math.max(1, Math.round(w / (s * 1.5))), ny = Math.max(1, Math.round(h / (s * 1.5)));
+  const nx = Math.max(1, Math.round(w / (s * 1.5)));
   const fade = opts.fade ? (t) => 1 - smooth(0.25, 1, t) : () => 1;
+  // The top, as on the near blocks: these were a few rows of big splats with no edge at all, a
+  // soft dome some tens of metres deep, and the window lights ran up into it. A tower that does
+  // not fade gets a dark parapet band, the rows stop under it (the top one level and flattened)
+  // and the lights stop below. The impossible towers keep thinning out into the sky.
+  const capped = !opts.fade;
+  const ny = capped ? Math.max(2, Math.round(h / (s * 1.05))) : Math.max(1, Math.round(h / (s * 1.5)));
+  const T = capped ? Math.min(0.3 * h, Math.max(0.5 * h / ny, 2 * d / 1158)) : 0;
+  const hb = h - T;
+  if (capped) {
+    const su = w / nx * 0.72, c = mul3(col, 0.6);
+    for (let i = 0; i < nx; i++) for (let k = 0; k < 3; k++) out(x - w / 2 + (i + 0.5) * w / nx, y0 + hb + (k + 0.5) * T / 3, -(d - 0.5), su, T / 3 * 0.72, s * 0.3, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+  }
   for (let j = 0; j < ny; j++) {
+    const top = capped && j === ny - 1;
     const t = (j + 0.5) / ny;
     const f = fade(t);
     if (f <= 0.02) break;
     for (let i = 0; i < nx; i++) {
-      out(x - w / 2 + (i + 0.5) * w / nx, y0 + t * h, -d, w / nx * 0.7, h / ny * 0.7, s * 0.3, col[0], col[1], col[2], f, 0, 0, 0, 1, kind);
+      out(x - w / 2 + (i + 0.5) * w / nx, y0 + t * hb, -d, w / nx * 0.7, hb / ny * (top ? 0.4 : 0.7), s * 0.3, col[0], col[1], col[2], f, 0, 0, 0, 1, kind);
     }
     if (out.due()) yield;
   }
   // window lights: a grid of cells, each about 0.003 d across, lit at a fraction of the night share
   const L = out.L;
   const cs = Math.max(6, 0.004 * d);
-  const cx = Math.max(1, Math.round(w / cs)), cy = Math.max(1, Math.round(h / cs));
+  const hw = capped ? hb - cs * 0.35 : h;     // the lights' own height stops under the parapet
+  const cx = Math.max(1, Math.round(w / cs)), cy = Math.max(1, Math.round(hw / cs));
   const lit = L.lit * (opts.litK || 0.55);
   for (let j = 0; j < cy; j++) {
     const t = (j + 0.5) / cy, f = fade(t);
@@ -976,7 +1049,7 @@ function* farTower(ctx, out, x, d, w, h, id, opts = {}) {
       let on = opts.pattern && (id % 3) === 0 ? opts.pattern(i, j, cx, cy, 0) : null;
       if (on == null) on = u < lit;
       if (!on) continue;
-      light(out, x - w / 2 + (i + 0.5) * w / cx, y0 + t * h, d - 1, cs * 0.26, cs * 0.24, 1, winColor((hh >>> 16) / 65536), 0.85 * f);
+      light(out, x - w / 2 + (i + 0.5) * w / cx, y0 + t * hw, d - 1, cs * 0.26, Math.min(cs * 0.24, hw / cy * 0.3), 1, winColor((hh >>> 16) / 65536), 0.85 * f);
     }
     if (out.due()) yield;
   }
@@ -1457,12 +1530,17 @@ function* hangingCity(ctx, out, topo) {
       const id = hashInts(ws, 923, i, t);
       const tr = makeRng(id);
       const s = Math.max(5, 0.0045 * d / Math.sqrt(Math.min(1, out.density)));
-      const ny = Math.max(1, Math.round(h / (s * 1.5)));
-      const col = shade(CONCRETE[t % CONCRETE.length], 0, -1, 0.5, 0.5, 0.3);
+      // its top hangs downward: a parapet band closes the tip, the body stops above it (the last
+      // row level and flattened) and the lights stop short of it, as on the towers below
+      const ny = Math.max(2, Math.round(h / (s * 1.05))), ny0 = Math.max(1, Math.round(h / (s * 1.5)));   // ny0: the old row count, which set how many lights
+      const T = Math.min(0.3 * h, Math.max(0.5 * h / ny, 2 * d / 1158)), hb = h - T;
+      const col = shade(CONCRETE[t % CONCRETE.length], 0, -1, 0.5, 0.5, 0.3), cc = mul3(col, 0.6);
+      for (let k = 0; k < 3; k++) out(x, ceil - hb - (k + 0.5) * T / 3, -(d - 0.5), w * 0.5, T / 3 * 0.72, s * 0.3, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, KIND.SURREAL);
       for (let j = 0; j < ny; j++) {
-        const yy = ceil - (j + 0.5) / ny * h;
-        out(x, yy, -d, w * 0.5, h / ny * 0.7, s * 0.3, col[0], col[1], col[2], 0.9, 0, 0, 0, 1, KIND.SURREAL);
-        if (tr() < out.L.lit * 0.8 + 0.1 * out.L.night) light(out, x + (tr() - 0.5) * w * 0.7, yy, d - 2, s * 0.35, s * 0.3, 1, winColor(tr()), 0.85);
+        const tip = j === ny - 1;
+        const yy = ceil - (j + 0.5) / ny * hb;
+        out(x, yy, -d, w * 0.5, hb / ny * (tip ? 0.4 : 0.7), s * 0.3, col[0], col[1], col[2], 0.9, 0, 0, 0, 1, KIND.SURREAL);
+        if (tr() < (out.L.lit * 0.8 + 0.1 * out.L.night) * ny0 / ny && !tip) light(out, x + (tr() - 0.5) * w * 0.7, yy, d - 2, s * 0.35, Math.min(s * 0.3, hb / ny * 0.3), 1, winColor(tr()), 0.85);
         if (out.due()) yield;
       }
       if (out.L.night > 0.1 && tr() < 0.25) glowPoint(out, x, ceil - h - 4, d - 3, RED, Math.max(3, 0.0025 * d), 0.15, 3);
