@@ -41,6 +41,7 @@ import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, detail, jitter, mul3, mix3, smooth,
   clamp, lerp, quatXTo, strut, hedge, broadleaf, house, overheadLine, fence, blob, bush, treeSplats,
+  facetRock,
 } from './kit.js';
 import { downsLayout } from './downs.js';
 
@@ -505,7 +506,9 @@ function* stonehenge(ctx, out, W) {
     for (let k = 0; k < 6; k++) { const a = at(16.4, A(k)), b = at(16.4, A(k + 1)); hengeLintel(out, a, b, Math.max(yAt(a), yAt(b)) + 4.1 * K, 1.0 * K, 0.8 * K, r); }
     for (const k of [7, 12, 17, 24]) {        // fallen sarsens
       const p = at(15 + 3 * r(), A(k) + 0.1);
-      out(p[0], yAt(p) + 0.5 * K, -p[1], 1.9 * K, 0.4 * K, 0.8 * K, 0.36, 0.36, 0.34, 1, 0, Math.sin(r() * 1.5), 0, Math.cos(r() * 1.5), KIND.ROCK);
+      r(); r();                               // (the two draws that turned the old single splat, so what follows stays put)
+      // a fallen slab: kit facetRock() with hard facets (it was one soft splat 3 m across)
+      facetRock(out, p[0], yAt(p) + 0.15, p[1], 2.4 * K, 0.85 * K, 1.0 * K, { color: [0.36, 0.36, 0.34], rng: makeRng(hashInts(g.seed, 91, k)), slab: 1, n: 300 });
     }
     // the horseshoe of five great trilithons inside, open the way the axis runs: three stand whole,
     // one has fallen, and of the tallest a single upright is left
@@ -519,9 +522,9 @@ function* stonehenge(ctx, out, W) {
         hengeLintel(out, p1, p2, Math.max(yAt(p1), yAt(p2)) + h * K, 1.2 * K, 1.0 * K, r);
       } else if (whole === null) {
         hengeStone(out, p1[0], yAt(p1), p1[1], ya, 2.4 * K, h * K, 1.3 * K, r, 0.03);
-        out(p2[0], yAt(p2) + 0.6 * K, -p2[1], 2.6 * K, 0.5 * K, 1.0 * K, 0.36, 0.36, 0.34, 1, 0, 0.3, 0, 0.95, KIND.ROCK);
+        facetRock(out, p2[0], yAt(p2) + 0.15, p2[1], 3.2 * K, 1.0 * K, 1.2 * K, { color: [0.36, 0.36, 0.34], rng: makeRng(hashInts(g.seed, 92)), slab: 1, n: 300 });
       } else {
-        for (const p of [p1, p2]) out(p[0], yAt(p) + 0.5 * K, -p[1], 2.4 * K, 0.45 * K, 0.9 * K, 0.36, 0.36, 0.34, 1, 0, Math.sin(r()), 0, Math.cos(r()), KIND.ROCK);
+        for (const p of [p1, p2]) { r(); r(); facetRock(out, p[0], yAt(p) + 0.15, p[1], 3.0 * K, 0.9 * K, 1.1 * K, { color: [0.36, 0.36, 0.34], rng: makeRng(hashInts(g.seed, 93, p === p1 ? 1 : 2)), slab: 1, n: 300 }); }
       }
     }
     // the low bluestones, a broken ring between the two

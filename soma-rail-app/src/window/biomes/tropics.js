@@ -34,7 +34,7 @@ import { hashInts, hashString, makeRng, noise1, noise2 } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, cellsAround, detail, shade, jitter, mul3, mix3, smooth, clamp, lerp, norm3,
-  quatYaw, quatPitch, quatMul, quatXTo, strut, lamp, blob, treeSplats, wires, flightCell, flyBody, flyWing, Q_ID,
+  quatYaw, quatPitch, quatMul, quatXTo, strut, lamp, blob, treeSplats, wires, flightCell, flyBody, flyWing, Q_ID, facetRock,
 } from './kit.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -1173,7 +1173,9 @@ function* lighthouse(ctx, out, W, x, d, r, night) {
   yield* hut(ctx, out, x + 6, y0 + 0.4, d + 2, { w: 5, dep: 4, h: 2.6, roof: 'gable', tin: true, wall: [0.8, 0.78, 0.74], rng: r, s, seed: 3, lit: night ? 0.9 : 0 });
   for (let k = 0; k < 9; k++) {
     const a = r() * Math.PI * 2, rr = 4 + 5 * r(), R = 1.2 + 1.6 * r();
-    yield* blob(ctx, out, x + Math.cos(a) * rr, y0 + R * 0.3, d + Math.sin(a) * rr * 0.6, R, R * 0.6, R * 0.8, { n: Math.max(4, Math.round(R * R * 4 / (s * s))), color: C.volcRock, rng: r, kind: KIND.ROCK, inner: 0.3, amb: 0.55 });
+    // black volcanic boulders round the point: kit facetRock(), hard facets (they were soft blob()s)
+    facetRock(out, x + Math.cos(a) * rr, y0, d + Math.sin(a) * rr * 0.6, R, R * 1.15, R * 0.8, { color: C.volcRock, rng: r, n: 250 });
+    if (out.due()) yield;
   }
 }
 // A pier on piles with lamp posts, and a white inter-island ferry moored at its end.

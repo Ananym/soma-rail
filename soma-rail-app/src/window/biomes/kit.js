@@ -40,7 +40,8 @@
 //   mast(ctx, out, x, d, opts); wires(ctx, out, span, list); overheadLine(ctx, out, beat, opts)
 //   fence(ctx, out, d, opts)                 post-and-wire fence on world-x posts
 //   lamp(ctx, out, x, y, d, color, opts)     a light source (ignores the time-of-day tint)
-//   rock(ctx, out, x, d, r, opts)
+//   rock(ctx, out, x, d, r, opts)            a boulder on the ground (facetRock at the ground height)
+//   facetRock(out, x, y0, d, rx, ry, rz, opts)   stone: flat hard-edged facets, any size, any budget
 //   strut(out, ax, ay, az, bx, by, bz, r, c, n)   a thin straight member; quatXTo(vx, vy, vz)
 //   blade(out, hx, hy, z, len, angle, r0, r1, c, n)  one blade of a rotor that turns (MOVE.SPIN)
 //   floatingIsland(ctx, out, x, y, d, r, opts); monolith(ctx, out, x, d, opts)   surreal pieces
@@ -828,11 +829,273 @@ export function* lamp(ctx, out, x, y, d, color = [1, 0.85, 0.55], opts = {}) {
   if (out.due()) yield;
 }
 
-// A rock or boulder: a lumpy grey blob half buried. opts: { color, n, rng }
+// ---------------------------------------------------------------------------------------------
+// Stone
+// ---------------------------------------------------------------------------------------------
+// Rocks were drawn as blob()s: a few soft splats the size of the rock itself. A splat is a
+// Gaussian whose scale is one standard deviation and which still shows at twice that, so such a
+// rock had no edge at all, only a halo fading over half its own width: right for a sheep or a bush,
+// wrong for stone (the owner: "confusingly fuzzy... rocks are, y'know, rocks").
+// facetRock() draws a boulder as a small convex solid: a handful of flat facets (a top, sides,
+// chamfered shoulders) cut from a squat block by planes. Each facet is tiled with flat splats lying
+// in its plane, opaque, overlapping their neighbours, and each splat is set in from the facet's
+// edges by its own reach (2 sigma), so nothing shows past the outline (as discFace in downs.js).
+// Every facet takes one tone from its normal (lit top, mid sides, a dark east side and underside),
+// so the edges between facets are where the tone changes abruptly. A dark opaque core keeps the
+// creases between facets closed at every angle of a pass, and a dark seat on the ground sets it in.
+// Splat size follows the distance (as everything else): close up a rock has a hundred or more
+// splats, far off one or two per facet (each still sized to stay inside it), and when the rock is
+// only a few pixels tall, three tight ellipsoids (a dark base, the body, a lit top).
+// Random numbers come only from opts.rng (pass a world rng: a rock on a chunk border is drawn by
+// both chunks). It always draws the same number of them for a given rock, whatever the budget.
+//   x, y0, d   chunk-local x, the ground height at the rock (its base sits `sink` below it), distance
+//   rx, ry, rz half-length along the line, height above y0, half-depth toward the camera
+//   opts: { color, rng, kind (KIND.ROCK), move (motion class, default none), s (splat radius),
+//     n (about the most splats, default 600; under 8 draws the three-ellipsoid pebble), sink (default 0.15 ry), sides (5..7), moss (0..1, on the tops),
+//     mossColor, lichen (0..1, pale spots), cracks (0..2, default 1), seat (true: a dark contact
+//     line on the ground), slab (0..1: flatter, more angular top), amb, sun (shading) }
+// Returns the number of splats emitted (at most about n + 30); the caller yields on out.due().
+const ROCK_SEAT = [0.045, 0.043, 0.038];
+// The rotation taking local x to e and local y to n (e and n unit and at right angles).
+function frameQuat(ex, ey, ez, nx, ny, nz) {
+  const zx = ey * nz - ez * ny, zy = ez * nx - ex * nz, zz = ex * ny - ey * nx;   // e x n
+  const m00 = ex, m11 = ny, m22 = zz, tr = m00 + m11 + m22;
+  // columns: x -> e, y -> n, z -> e x n
+  if (tr > 0) { const S = Math.sqrt(tr + 1) * 2; return [(nz - zy) / S, (zx - ez) / S, (ey - nx) / S, 0.25 * S]; }
+  if (m00 > m11 && m00 > m22) { const S = Math.sqrt(1 + m00 - m11 - m22) * 2; return [0.25 * S, (nx + ey) / S, (zx + ez) / S, (nz - zy) / S]; }
+  if (m11 > m22) { const S = Math.sqrt(1 + m11 - m00 - m22) * 2; return [(nx + ey) / S, 0.25 * S, (zy + nz) / S, (zx - ez) / S]; }
+  const S = Math.sqrt(1 + m22 - m00 - m11) * 2; return [(zx + ez) / S, (zy + nz) / S, 0.25 * S, (ey - nx) / S];
+}
+export function facetRock(out, x, y0, d, rx, ry, rz, opts = {}) {
+  const rng = opts.rng || (out.ctx && out.ctx.rng) || Math.random;
+  const col0 = opts.color || [0.45, 0.44, 0.42];
+  const kind = opts.kind != null ? opts.kind : KIND.ROCK, move = opts.move || 0;
+  const sink = opts.sink != null ? opts.sink : 0.15 * ry;
+  const hy = (ry + sink) / 2, cy = y0 - sink + hy;              // half height, centre height
+  const slab = opts.slab || 0;
+  // ---- the shape: planes n . p <= h around the centre (local x, y, z; z toward the camera) ----
+  // every random number is drawn here, a fixed count of them, before anything depends on the budget
+  const K = opts.sides || 5 + Math.floor(rng() * 3);
+  const yaw = rng() * Math.PI * 2;
+  const planes = [];
+  const add = (ux, uy, uz, h) => {
+    const lu = Math.hypot(ux, uy, uz);
+    const mx = ux / lu / rx, my = uy / lu / hy, mz = uz / lu / rz, l = Math.hypot(mx, my, mz);
+    planes.push([mx / l, my / l, mz / l, h / l]);
+  };
+  add((rng() - 0.5) * 0.5 * (1 - slab), 1, (rng() - 0.5) * 0.5 * (1 - slab), 0.9 + 0.1 * rng());
+  for (let k = 0; k < K; k++) {
+    const a = yaw + ((k + (rng() - 0.5) * 0.55) / K) * Math.PI * 2, e = -0.3 + 0.62 * rng();
+    add(Math.cos(e) * Math.cos(a), Math.sin(e), Math.cos(e) * Math.sin(a), 0.92 + 0.12 * rng());
+  }
+  for (let k = 0; k < K; k++) {
+    const a = yaw + ((k + 0.5 + (rng() - 0.5) * 0.5) / K) * Math.PI * 2, e = 0.4 + 0.55 * rng();
+    add(Math.cos(e) * Math.cos(a), Math.sin(e), Math.cos(e) * Math.sin(a), (0.88 + 0.1 * rng()) * (1 + 0.14 * slab));
+  }
+  add(0, -1, 0, 1);                                              // the buried base
+  const tone = [];
+  for (let i = 0; i < planes.length; i++) tone.push(0.94 + 0.12 * rng());
+  const crackA = rng(), crackB = rng(), crackC = rng(), crackD = rng();
+  const salt = Math.floor(rng() * 9973);
+  const c0 = col0;
+  const amb = opts.amb != null ? opts.amb : 0.5, sunK = opts.sun != null ? opts.sun : 0.62;
+  const moss = opts.moss || 0, lichen = opts.lichen || 0, cracks = opts.cracks != null ? opts.cracks : 1;
+  const mossC = opts.mossColor || [0.2, 0.26, 0.1];
+  const zc = -d;
+  const dens = out.density || 1, dk = out.detailK || 1;
+  // the tone of a facet: baked sun, steeper steps than shade()'s defaults so facets read apart
+  const faceTone = (n, i) => {
+    const l = Math.max(0, n[0] * SUN[0] + n[1] * SUN[1] + n[2] * SUN[2]);
+    let k = (amb + sunK * l) * tone[i];
+    if (n[1] < -0.05) k *= 0.72 + 0.28 * (1 + n[1]);              // overhangs and undersides
+    return [c0[0] * k, c0[1] * k, c0[2] * k];
+  };
+  let emitted = 0;
+  const put = (px, py, pz, sx, sy, sz, c, q, o = 1) => {
+    if (out(px, py, pz, sx, sy, sz, c[0], c[1], c[2], o, q[0], q[1], q[2], q[3], kind, move)) emitted++;
+  };
+  // ---- tiny: a few pixels tall. Three tight ellipsoids, each inside the form ----
+  const px = (1158 * (ry + Math.min(rx, rz) * 0.5)) / Math.max(1, d) * Math.sqrt(Math.min(1, dens));
+  if ((opts.s == null && px < 7) || (opts.n != null && opts.n < 8)) {
+    const top = faceTone([0, 1, 0], 0), side = faceTone(norm3(0, 0.2, 1), 1), base = mul3(faceTone(norm3(0.6, -0.2, 0.8), 2), 0.7);
+    put(x, y0 + ry * 0.22, zc, rx * 0.46, Math.max(0.05, ry * 0.2), rz * 0.42, base, Q_ID);
+    put(x, y0 + ry * 0.45, zc + rz * 0.12, rx * 0.44, ry * 0.24, rz * 0.4, side, Q_ID);
+    put(x - rx * 0.05, y0 + ry * 0.72, zc, rx * 0.34, ry * 0.13, rz * 0.32, top, Q_ID);
+    return emitted;
+  }
+  // ---- facets ----
+  // the camera over a pass: from 0.9 d to the left of the rock to 0.9 d to its right, 2.6 m up
+  const camY = 2.6 - cy;
+  const R = 2.2 * Math.max(rx, hy, rz);
+  const faces = [];
+  let area = 0;
+  for (let i = 0; i < planes.length; i++) {
+    const [nx, ny, nz, h] = planes[i];
+    if (ny < -0.9) continue;                                     // the buried base
+    // basis in the plane
+    let ux, uy, uz;
+    if (Math.abs(ny) < 0.9) { ux = nz; uy = 0; uz = -nx; } else { ux = 1; uy = 0; uz = 0; ux -= nx * nx; uy -= nx * ny; uz -= nx * nz; }
+    const lu = Math.hypot(ux, uy, uz); ux /= lu; uy /= lu; uz /= lu;
+    const vx = ny * uz - nz * uy, vy = nz * ux - nx * uz, vz = nx * uy - ny * ux;
+    const p0 = [nx * h, ny * h, nz * h];
+    // constraints A a + B b <= C from every other plane, and the polygon they cut from a square
+    const cons = [];
+    let poly = [[-R, -R], [R, -R], [R, R], [-R, R]];
+    for (let j = 0; j < planes.length && poly.length; j++) {
+      if (j === i) continue;
+      const P = planes[j];
+      const A = P[0] * ux + P[1] * uy + P[2] * uz, B = P[0] * vx + P[1] * vy + P[2] * vz;
+      const Cc = P[3] - (P[0] * p0[0] + P[1] * p0[1] + P[2] * p0[2]);
+      const L = Math.hypot(A, B);
+      if (L < 1e-6) { if (Cc < 0) poly = []; continue; }
+      cons.push([A / L, B / L, Cc / L]);
+      const np = [];
+      for (let k = 0; k < poly.length; k++) {
+        const p = poly[k], q = poly[(k + 1) % poly.length];
+        const fp = Cc - A * p[0] - B * p[1], fq = Cc - A * q[0] - B * q[1];
+        if (fp >= 0) np.push(p);
+        if ((fp >= 0) !== (fq >= 0)) { const t = fp / (fp - fq); np.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]); }
+      }
+      poly = np;
+    }
+    if (poly.length < 3) continue;
+    let A2 = 0, ca = 0, cb = 0;
+    for (let k = 0; k < poly.length; k++) {
+      const p = poly[k], q = poly[(k + 1) % poly.length], cr = p[0] * q[1] - q[0] * p[1];
+      A2 += cr; ca += (p[0] + q[0]) * cr; cb += (p[1] + q[1]) * cr;
+    }
+    const fa = Math.abs(A2) / 2;
+    if (fa < 1e-6) continue;
+    ca /= 3 * A2; cb /= 3 * A2;
+    // seen at all over the pass? (a convex facet faces the eye when (eye - centroid) . n > 0)
+    const fx = p0[0] + ux * ca + vx * cb, fy = p0[1] + uy * ca + vy * cb, fz = p0[2] + uz * ca + vz * cb;
+    const base = nx * (-fx) + ny * (camY - fy) + nz * (d - fz);
+    if (base + Math.abs(nx) * 0.9 * d <= 0) continue;
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const p of poly) { a0 = Math.min(a0, p[0]); a1 = Math.max(a1, p[0]); b0 = Math.min(b0, p[1]); b1 = Math.max(b1, p[1]); }
+    faces.push({ i, poly, n: [nx, ny, nz], u: [ux, uy, uz], v: [vx, vy, vz], p0, cons, a0, a1, b0, b1, ca, cb, q: quatUpTo(nx, ny, nz) });
+    area += fa;
+  }
+  // splat radius: from the distance, coarser if the rock would take more than n splats
+  const nMax = opts.n || 600;
+  let perim = 0;
+  for (const f of faces) for (let k = 0; k < f.poly.length; k++) { const p = f.poly[k], q = f.poly[(k + 1) % f.poly.length]; perim += Math.hypot(q[0] - p[0], q[1] - p[1]); }
+  // (never coarser than a fifth of the rock's smallest half-size unless the count forces it: a
+  // facet needs a few splats across it to have an edge)
+  let s = opts.s || Math.max(0.025, Math.min(0.0032 * d * 1.2 * dk / Math.sqrt(dens), 0.2 * Math.min(rx, hy, rz)), 0.0007 * d);
+  // about area / (1.3 s)^2 splats inside the facets and 1.6 perim / s along their edges: at most nMax
+  const sN = (1.6 * perim + Math.sqrt(2.56 * perim * perim + (4 * nMax * area) / 1.69)) / (2 * nMax);
+  s = Math.max(s, sN, Math.min(rx, ry, rz) * 0.07);
+  // but a rock more than about 20 px tall keeps a few splats across every facet, unless the caller
+  // set n under 20 to keep it cheap (one splat a facet reads as a lumpy blob again at that size)
+  if (px >= 20 && opts.s == null && !(opts.n < 20)) s = Math.min(s, 0.29 * Math.min(rx, ry, rz));
+  const g = 1.3 * s;
+  // a coarse rock (far, or kept cheap with a small n): one splat in the middle of each facet
+  const coarse = s > 0.3 * Math.min(rx, ry, rz);
+  // the core: dark, opaque and well inside, so no crease between facets ever opens onto the ground
+  const core = mul3(faceTone(norm3(0.3, 0.2, 0.8), 1), 0.85);
+  put(x, cy, zc, rx * 0.36, hy * 0.36, rz * 0.36, core, Q_ID);
+  // cracks: one or two dark lines where a plane across the rock meets its surface, running over the
+  // faces the window sees for part of the rock's width (drawn by darkening the splats they cross)
+  const crk = [];
+  if (cracks > 0 && s < Math.min(rx, ry) * 0.3) {
+    for (let k = 0; k < Math.min(2, cracks); k++) {
+      const t = (0.15 + 0.7 * (k ? crackC : crackA)) * Math.PI;       // never quite level
+      crk.push([Math.cos(t), Math.sin(t), ((k ? crackD : crackB) - 0.5) * rx * 0.8]);
+    }
+  }
+  for (const f of faces) {
+    const c = faceTone(f.n, f.i);
+    const [ux, uy, uz] = f.u, [vx, vy, vz] = f.v, p0 = f.p0, q = f.q;
+    const edgeDist = (a, b) => { let e = Infinity; for (const k of f.cons) e = Math.min(e, k[2] - k[0] * a - k[1] * b); return e; };
+    const mossK = moss * smooth(0.3, 0.75, f.n[1]);
+    // one splat at (a, b) in the facet: round, sg across, flat in the plane; or, given an edge
+    // direction (ta, tb), long along the edge and narrow across it
+    const one = (a, b, sg, ta, tb, sl) => {
+      const lx = p0[0] + ux * a + vx * b, ly = p0[1] + uy * a + vy * b, lz = p0[2] + uz * a + vz * b;
+      if (cy + ly + sg < y0 - 0.02) return;                          // under the ground
+      let cc = c;
+      // the foot of the rock darkens toward the ground: the contact line
+      if (f.n[1] < 0.6) cc = mul3(cc, 0.62 + 0.38 * smooth(0, 0.3 * ry, cy + ly - y0));
+      const wx = lx, wy = cy + ly;                                     // (rock-local x: a rock cut by a chunk border gets one pattern)
+      if (mossK > 0) { const m = smooth(0.48, 0.6, noise2(wx / (0.4 * rx + 0.2), lz / (0.4 * rz + 0.2), salt)); if (m > 0) cc = mix3(cc, mul3(mossC, 0.75 + 0.35 * f.n[1]), m * mossK); }
+      if (lichen > 0) { const m = smooth(0.74, 0.8, noise2(wx / (0.25 * rx + 0.1) + 3.1, (wy + lz) / (0.25 * ry + 0.1), salt + 1)); if (m > 0) cc = mix3(cc, mul3([0.62, 0.62, 0.56], 0.6 + 0.4 * Math.max(0, f.n[1])), m * lichen * 0.6); }
+      for (const k of crk) {
+        if (f.n[2] > -0.2 && Math.abs(k[0] * lx + k[1] * ly - k[2]) < s * 0.5 && Math.abs(k[0] * ly - k[1] * lx) < Math.max(rx, hy) * 0.6) { cc = mul3(cc, 0.5); break; }
+      }
+      if (ta == null) { put(x + lx, wy, zc + lz, sg, sg * 0.16, sg, cc, q); return; }
+      const ex = ux * ta + vx * tb, ey = uy * ta + vy * tb, ez = uz * ta + vz * tb;
+      put(x + lx, wy, zc + lz, sl, sg * 0.16, sg, cc, frameQuat(ex, ey, ez, f.n[0], f.n[1], f.n[2]));
+    };
+    if (coarse) { const e = edgeDist(f.ca, f.cb); if (e > 0) one(f.ca, f.cb, Math.min(s, e / 1.4)); continue; }
+    const na = Math.max(1, Math.floor((f.a1 - f.a0) / g)), nb = Math.max(1, Math.floor((f.b1 - f.b0) / g));
+    const oa = f.a0 + ((f.a1 - f.a0) - (na - 1) * g) / 2, ob = f.b0 + ((f.b1 - f.b0) - (nb - 1) * g) / 2;
+    let placed = 0;
+    for (let ia = 0; ia < na; ia++) {
+      for (let ib = 0; ib < nb; ib++) {
+        const a = oa + ia * g + ((ib & 1) ? g * 0.25 : -g * 0.25), b = ob + ib * g;
+        const e = edgeDist(a, b);
+        if (e < s * 0.8) continue;
+        one(a, b, Math.min(s, e / 1.5));
+        placed++;
+      }
+    }
+    // the rim: along each edge, a row of splats long along it and narrow across, set in by their
+    // own reach, so the facet ends in a line rather than a fringe
+    const sw = s * 0.36, inset = sw * 1.9;
+    const P = f.poly;
+    for (let k = 0; k < P.length; k++) {
+      const p = P[k], q2 = P[(k + 1) % P.length];
+      let ta = q2[0] - p[0], tb = q2[1] - p[1];
+      const L = Math.hypot(ta, tb);
+      if (L < inset * 2.2) continue;
+      ta /= L; tb /= L;
+      let na2 = -tb, nb2 = ta;                                         // inward normal: toward the middle
+      if ((f.ca - p[0]) * na2 + (f.cb - p[1]) * nb2 < 0) { na2 = -na2; nb2 = -nb2; }
+      const m = Math.max(1, Math.round((L - 2 * inset) / (s * 1.3)));
+      const sl = Math.min(s, ((L - 2 * inset) / m) * 0.62);
+      for (let j = 0; j < m; j++) {
+        const t = inset + ((j + 0.5) / m) * (L - 2 * inset);
+        const a = p[0] + ta * t + na2 * inset, b = p[1] + tb * t + nb2 * inset;
+        if (edgeDist(a, b) < inset * 0.85) continue;
+        one(a, b, sw, ta, tb, Math.max(sl, sw));
+        placed++;
+      }
+      // the crease itself, behind the two rims that meet there: a darker row sunk into the rock by
+      // its own reach, so the seam between facets never opens onto what lies behind
+      const sc = s * 0.5, mc = Math.max(1, Math.round(L / (s * 1.2))), cc = mul3(c, 0.85);
+      const qe = frameQuat(ux * ta + vx * tb, uy * ta + vy * tb, uz * ta + vz * tb, f.n[0], f.n[1], f.n[2]), scl = Math.max(sc, (L / mc) * 0.62);
+      for (let j = 0; j < mc; j++) {
+        const t = ((j + 0.5) / mc) * L;
+        const a = p[0] + ta * t + na2 * sc * 1.4, b = p[1] + tb * t + nb2 * sc * 1.4;
+        const lx = p0[0] + ux * a + vx * b - f.n[0] * sc * 1.6, ly = p0[1] + uy * a + vy * b - f.n[1] * sc * 1.6, lz = p0[2] + uz * a + vz * b - f.n[2] * sc * 1.6;
+        if (cy + ly + sc < y0 - 0.02) continue;
+        put(x + lx, cy + ly, zc + lz, scl, sc, sc, cc, qe);
+      }
+    }
+    if (!placed) {                                                   // a narrow facet: one splat at its middle
+      const e = edgeDist(f.ca, f.cb);
+      if (e > 0) one(f.ca, f.cb, Math.min(s, e / 1.8));
+    }
+  }
+  // the seat: a dark contact line on the ground along the camera side of the base
+  if (opts.seat !== false && s < Math.min(rx, rz) * 0.6) {
+    const ss = Math.max(s * 0.5, 0.03), m = Math.max(3, Math.min(20, Math.round((Math.PI * (rx + rz) * 0.35) / (ss * 1.5))));
+    for (let k = 0; k < m; k++) {
+      const t = 0.15 * Math.PI + ((k + 0.5) / m) * 0.7 * Math.PI;
+      put(x + Math.cos(t) * rx * 0.8, y0 + 0.03, zc + Math.sin(t) * rz * 0.85, ss * 1.1, ss * 0.1, ss * 0.7, ROCK_SEAT, quatYaw(-t - Math.PI / 2), 0.8);
+    }
+  }
+  return emitted;
+}
+// A rock or boulder sitting on the ground: facetRock() at (x, d), r its half-length along the line.
+// opts as facetRock() plus { y (base height; default the lowest ground under it), h (height,
+// default 0.9 r), depth (half-depth, default 0.9 r) }
 export function* rock(ctx, out, x, d, r, opts = {}) {
   out = asOut(ctx, out);
-  const y = groundY(ctx, x, d) + r * 0.25;
-  yield* blob(ctx, out, x, y, d, r, r * 0.65, r * 0.9, { n: opts.n || Math.max(3, Math.round(treeSplats(out, d, r * 2) * 0.5)), color: opts.color || ctx.palette.rock || [0.45, 0.44, 0.42], rng: opts.rng, kind: KIND.ROCK, inner: 0.25, amb: 0.55 });
+  const y0 = opts.y != null ? opts.y : Math.min(groundY(ctx, x, d), groundY(ctx, x - r * 0.8, d), groundY(ctx, x + r * 0.8, d), groundY(ctx, x, d + r * 0.7), groundY(ctx, x, d - r * 0.7));
+  facetRock(out, x, y0, d, r, opts.h || r * 0.9, opts.depth || r * 0.9, { color: ctx.palette.rock || [0.45, 0.44, 0.42], ...opts, rng: opts.rng || ctx.rng });
+  if (out.due()) yield;
 }
 
 // ---------------------------------------------------------------------------------------------

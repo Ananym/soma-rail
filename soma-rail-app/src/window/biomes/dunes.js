@@ -34,7 +34,7 @@ import { makeRng } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, strut, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, wires, lamp, detail, treeSplats,
-  flightCell, flyBody, flyWing,
+  flightCell, flyBody, flyWing, facetRock,
   jitter, mul3, mix3, shade, smooth, clamp, lerp, quatYaw, quatRoll, quatPitch, quatMul, quatUpTo, norm3, rotY, Q_ID, SUN,
 } from './kit.js';
 import { telegraphPole } from './saltflat.js';
@@ -1256,13 +1256,14 @@ function* thornBush(ctx, out, x, d, rng, size = 1) {
   const n = d < 15 ? 26 : d < 60 ? 8 : 3;
   yield* blob(ctx, out, x, y0 + h * 0.4, d, w / 2, h * 0.6, w * 0.4, { n, color: jitter(C.thorn, rng, 0.12), rng, kind: KIND.HEDGE, inner: 0.5, clump: 0.8, size: n > 10 ? Math.max(0.05, w * 0.09) : undefined });
 }
-// A stone, half sunk in the sand, with its shadow.
+// A stone, half sunk in the sand, with its shadow. Drawn as kit facetRock() (it was one or two
+// soft splats the size of the stone, a dark smudge with no edge): bare, sun-baked facets. Small
+// stones are kept cheap (there are about one a metre by the line): a pebble is three tight
+// ellipsoids, a stone up to half a metre one splat a facet.
 function stone(out, x, y0, d, r, rng, col) {
   const c = jitter(col || C.rockDark, rng, 0.2);
-  const cs = mul3(c, 0.6);
   out(x + r * 0.5, y0 + 0.01, -(d + r * 0.2), r * 1.1, 0.01, r * 0.6, 0.36, 0.26, 0.2, 0.6, 0, 0, 0, 1, KIND.GROUND);
-  out(x, y0 + r * 0.35, -d, r, r * 0.6, r * 0.8, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK);
-  if (r > 0.12) out(x + r * 0.4, y0 + r * 0.3, -(d - r * 0.2), r * 0.6, r * 0.45, r * 0.5, cs[0], cs[1], cs[2], 1, 0, 0, 0, 1, KIND.ROCK);
+  facetRock(out, x, y0, d, r, r * 0.9, r * 0.8, { color: c, rng, n: r < 0.15 ? 4 : r < 0.5 ? 14 : 160, sink: r * 0.2, cracks: r > 0.6 ? 1 : 0 });
 }
 // A dark rock outcrop: a low, jagged ridge of black rock breaking out of the sand, drawn as a
 // curtain facing the line with a second, offset curtain behind for depth. Faces turned toward the
@@ -2713,14 +2714,16 @@ function fox(o, x, y0, d, dir, r, sitting) {
 function* foxRock(ctx, out, W, w, r) {
   const X = w.x - ctx.x0, d = w.d, y0 = heightAt(W, w.x, d), k = BIG.fox;
   note('fox', w.x, d, 0.6 * k);
-  // the rock: dark slabs, lit along the top, behind the foxes so they stand out against it
-  const rc = jitter(C.rockDark, r, 0.1), rt = mul3(C.rock, 1.15);
+  // the rock: dark slabs behind the foxes so they stand out against it, each a kit facetRock() with
+  // its sunlit top and hard edges (they were single soft splats metres across: a dark halo)
+  const rc = jitter(C.rockDark, r, 0.1);
   out(X + 2.6, y0 + 0.08, -(d + 1.2), 3.4, 0.02, 1.6, SHADOW[0], SHADOW[1], SHADOW[2], 0.55, 0, 0, 0, 1, KIND.GROUND);
+  const rr = makeRng(hashInts(W.ws, 2713, Math.round(w.x)));
   for (const [u, h, w, dd, k2] of [[-0.6, 2.9, 2.0, 1.9, 1], [1.6, 2.2, 1.7, 1.7, 0.85], [-2.6, 1.7, 1.3, 1.6, 1.1], [3.4, 1.2, 1.2, 1.4, 0.9]]) {
-    out(X + u, y0 + h * 0.42, -(d + dd), w, h * 0.5, 0.9, rc[0] * k2, rc[1] * k2, rc[2] * k2, 1, 0, 0, 0, 1, KIND.ROCK);
-    out(X + u - w * 0.2, y0 + h * 0.86, -(d + dd), w * 0.6, h * 0.1, 0.7, rt[0] * k2, rt[1] * k2, rt[2] * k2, 1, 0, 0, 0, 1, KIND.ROCK);   // lit along the top
+    facetRock(out, X + u, y0, d + dd, w * 1.15, h * 0.95, 0.95, { color: mul3(rc, k2 * 1.15), rng: rr, slab: 0.5 });
+    if (out.due()) yield;
   }
-  out(X - 2.1, y0 + 0.4, -(d + 0.8), 1.1, 0.34, 0.7, C.rockDark[0] * 1.25, C.rockDark[1] * 1.25, C.rockDark[2] * 1.25, 1, 0, 0, 0, 1, KIND.ROCK);   // the ledge
+  facetRock(out, X - 2.1, y0, d + 0.8, 1.1, 0.72, 0.7, { color: mul3(C.rockDark, 1.25), rng: rr, slab: 1, cracks: 0 });   // the ledge
   const dir = r() < 0.5 ? 1 : -1;
   fox(magOut(out, X - 2.1, y0 + 0.72, -(d + 0.5), k, MOVE.FLASH), X - 2.1, y0 + 0.72, d + 0.5, dir, r, true);
   if (r() < 0.75) { const fx = X + 0.6 + 1.6 * r(), fd = d - 0.4 - r(), fy = heightAt(W, ctx.x0 + fx, fd); fox(magOut(out, fx, fy, -fd, k, MOVE.FLASH), fx, fy, fd, r() < 0.5 ? 1 : -1, r, r() < 0.4); }

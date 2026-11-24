@@ -60,6 +60,7 @@ import {
   KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, detail, shade, jitter, mul3, mix3, smooth,
   clamp, lerp, quatYaw, quatRoll, quatMul, quatXTo, rotY, SUN,
   overheadLine, flightCell, flyBody, flyWing, Q_ID, broadleaf, floatingIsland, chorus,
+  facetRock,
 } from './kit.js';
 
 const PAL = {
@@ -2482,25 +2483,13 @@ function* outcrops(ctx, out, W, dLo, dHi) {
     const oc = outcrop(W, i);
     if (!oc || !inD(oc.d, dLo, dHi) || !inX(ctx, oc.wx, 16)) continue;
     const r = makeRng(oc.seed), y = W.H(oc.wx, oc.d), x = oc.wx - ctx.x0;
-    // a pile of grey blocks: every lump shaded from its own faces, edelweiss and gentian in the cracks
+    // a pile of grey blocks, each a kit facetRock(): flat facets with hard edges, one tone a facet,
+    // turf on the tops (they were clouds of round splats over ellipsoids, soft-edged and woolly).
+    // Each block's top stays where the old lump's was, so the animals still stand on it.
     const lumps = [[0, oc.H * 0.5, 0, oc.R * 0.6, oc.H * 0.55], [-oc.R * 0.55, oc.H * 0.28, 0.6, oc.R * 0.5, oc.H * 0.34], [oc.R * 0.6, oc.H * 0.24, -0.4, oc.R * 0.46, oc.H * 0.3], [oc.R * 0.2, oc.H * 0.16, 1.6, oc.R * 0.5, oc.H * 0.2]];
-    const s = Math.max(0.16, detail(out, oc.d, 1.2));
     for (const [lx, ly, lz, rx, ry] of lumps) {
-      const n = clamp(Math.round(rx * ry * 9 / (s * s)), 10, 260);
-      for (let j = 0; j < n; j++) {
-        let ux = r() * 2 - 1, uy = r() * 2 - 1, uz = r() * 2 - 1;
-        const l = Math.hypot(ux, uy, uz) || 1; ux /= l; uy /= l; uz /= l;
-        if (uz < -0.2 && r() < 0.6) uz = -uz;
-        // blocky: push the surface out toward a box
-        const m = 1 / Math.max(Math.abs(ux), Math.abs(uy), Math.abs(uz)) ** 0.45;
-        const bed = Math.floor((ly + uy * ry) / 0.7) % 2;
-        let c = mix3(C.rock, C.rockDark, bed ? 0.1 : 0.42);
-        c = mul3(c, 0.5 + 0.75 * Math.max(0, ux * SX + uy * SY + uz * SZ));
-        if (uy > 0.75 && r() < 0.3) c = jitter(C.turf, r, 0.1);
-        const ss = Math.max(s, Math.sqrt(rx * ry * 5 / n));
-        out(x + lx + ux * rx * m * 0.86, y + ly + uy * ry * m * 0.86, -(oc.d + lz - uz * rx * 0.7 * m * 0.86), ss, ss * 0.85, ss * 0.8, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK);
-      }
-      out(x + lx, y + ly, -(oc.d + lz), rx * 0.7, ry * 0.75, rx * 0.5, C.rockDark[0] * 0.8, C.rockDark[1] * 0.8, C.rockDark[2] * 0.8, 1, 0, 0, 0, 1, KIND.ROCK);
+      const col = mix3(C.rock, C.rockDark, 0.1 + 0.3 * r());
+      facetRock(out, x + lx, y, oc.d + lz, rx, (ly + ry) * 1.04, rx * 0.7, { color: col, rng: r, slab: 0.6, sink: 0.25, moss: 0.4, mossColor: C.turf, lichen: 0.35 });
       if (out.due()) yield;
     }
     for (let j = 0; j < 8; j++) { const a = r() * 6.28, c = FL[r() < 0.5 ? 12 : 3].c; out(x + Math.cos(a) * oc.R * 0.9, y + 0.5 + r() * oc.H * 0.3, -(oc.d - Math.abs(Math.sin(a)) * oc.R * 0.6), 0.2, 0.16, 0.16, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.OTHER); }

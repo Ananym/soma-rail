@@ -45,6 +45,7 @@ import {
   KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, detail, shade, jitter, mul3, mix3, smooth,
   clamp, lerp, norm3, quatXTo, quatYaw, quatUpTo, quatMul, quatAxis, quatPitch, overheadLine, blob, strut, house,
   rotY, SUN,
+  facetRock,
 } from './kit.js';
 
 const PAL = {
@@ -1777,11 +1778,12 @@ function* cairn(ctx, out, W, c, kind = KIND.OTHER) {
   for (let k = 0; k < n; k++) {
     const r = (c.small ? 0.42 : 0.55) * (1 - k * 0.18);
     const col = jitter(mix3(C.stone, C.stoneDark, hh(k, c.seed | 0, 9) * 0.6), () => hh(k, c.seed | 0, 10), 0.1);
-    out(x, yy + r * 0.6, -c.d, r, r * 0.65, r * 0.9, col[0], col[1], col[2], 1, 0, 0, 0, 1, kind);
+    // each stone a small kit facetRock() (they were single soft splats reaching twice their size)
+    facetRock(out, x, yy, c.d, r * 1.1, r * 1.15, r * 0.9, { color: col, rng: makeRng(hashInts(c.seed | 0, 77, k)), kind, n: 50, sink: r * 0.1, cracks: 0, seat: k === 0 });
     yy += r * 1.05;
   }
   if (!c.small) {
-    out(x, yy + 0.2, -c.d, 0.12, 0.12, 0.12, 0.76, 0.76, 0.74, 1, 0, 0, 0, 1, kind);
+    out(x, yy + 0.02, -c.d, 0.12, 0.12, 0.12, 0.76, 0.76, 0.74, 1, 0, 0, 0, 1, kind);   // (down on the top stone, which is now no taller than it looks)
   }
 }
 
@@ -2027,8 +2029,10 @@ function* sheepGroups(ctx, out, W, dLo, dHi) {
     if (!g || !inX(ctx, g.wx, 40) || !inD(g.d, dLo, dHi)) continue;
     for (const b of g.blocks) {
       const rng = makeRng(b.seed);
-      const n = Math.round(clamp(treeSplats2(out, b.d, b.rx * 2) * 3, 8, 1200));
-      yield* blob(ctx, out, b.wx - ctx.x0, b.y, b.d, b.rx, b.ry, b.rz, { n, color: mix3(C.rock, C.stone, 0.4 * rng()), rng, kind: KIND.ROCK, inner: 0.5, amb: 0.45, clump: 0.9 });
+      // a block of rock, kit facetRock(): hard facets (it was a blob(), soft and woolly as the sheep on
+      // it); its top where the blob's was, so the sheep still stand on it
+      facetRock(out, b.wx - ctx.x0, b.y - b.ry * 0.45, b.d, b.rx, b.ry * 1.5, b.rz, { color: mix3(C.rock, C.stone, 0.4 * rng()), rng, sink: b.ry * 0.3, lichen: 0.3, slab: 0.6, n: 120 });
+      if (out.due()) yield;
     }
     for (const s of g.sheep) yield* bharal(ctx, out, s.wx, s.y, s.d, s);
   }
@@ -2118,7 +2122,8 @@ function* scatter(ctx, out, W, dLo, dHi) {
       const y = S.y;
       if (u < 0.35) {
         const rad = 0.5 + 1.8 * sz * sz;
-        yield* blob(ctx, out, wx - ctx.x0, y + rad * 0.25, d, rad, rad * 0.6, rad * 0.85, { n: Math.round(clamp(treeSplats2(out, d, rad * 2) * 0.6, 4, 120)), color: mix3(C.rock, C.stone, sz), rng: r, kind: KIND.ROCK, inner: 0.25, amb: 0.5, clump: 0.2 });
+        facetRock(out, wx - ctx.x0, y, d, rad, rad * 0.85, rad * 0.85, { color: mix3(C.rock, C.stone, sz), rng: r, lichen: 0.3, n: 80 });   // (was a soft blob())
+        if (out.due()) yield;
       } else if (u < 0.7 && S.t === T.NEAR) {
         const w = 1 + 1.6 * sz;
         yield* blob(ctx, out, wx - ctx.x0, y + 0.25, d, w * 0.5, 0.4 + 0.2 * sz, w * 0.4, { n: Math.round(clamp(treeSplats2(out, d, w) * 0.8, 4, 80)), color: C.juniper, rng: r, kind: KIND.HEDGE, inner: 0.4, amb: 0.55 });
@@ -3151,7 +3156,8 @@ function* lakes(ctx, out, W, dLo, dHi) {
       const rr = Math.max(1.2, s * 1.3) * (0.7 + 0.6 * h2);
       const by = Math.max(W.H(bx, bd), L.y - 0.5);
       const c = mix3(C.scree, C.stoneDark, h3 * 0.6);
-      out(bx - ctx.x0, by + rr * 0.35, -bd, rr * 1.4, rr * 0.55, rr, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK);
+      // a boulder of the moraine: kit facetRock() (it was one soft splat), kept cheap: there are many
+      facetRock(out, bx - ctx.x0, by, bd, rr * 1.4, rr * 0.9, rr, { color: c, rng: makeRng(hashInts(L.seed, 44, k)), n: 40, cracks: 0, seat: false });
       if (out.due()) yield;
     }
   }
@@ -3733,7 +3739,9 @@ function* trackside(ctx0, emit) {
     const r = worldRng(ctx, 1504, i);
     if (r() > 0.3) continue;
     const wx = wx0 + 9 * r(), d = 10 + 18 * r(), rad = 0.3 + 0.8 * r() * r();
-    yield* blob(ctx, out, wx - ctx.x0, W.H(wx, d) + rad * 0.2, d, rad, rad * 0.6, rad * 0.8, { n: 14, color: mix3(C.rock, C.stone, r()), rng: r, kind: KIND.ROCK, inner: 0.25, amb: 0.5, clump: 0.2 });
+    const col = mix3(C.rock, C.stone, r());
+    facetRock(out, wx - ctx.x0, W.H(wx, d), d, rad, rad * 0.8, rad * 0.8, { color: col, rng: r, n: 60, cracks: 0 });   // (was a soft blob(); few splats: the blur takes the detail here)
+    if (out.due()) yield;
   }
   // dwarf rhododendron and juniper close by the line (low, round, blur-friendly), tussocks and flowers
   for (const { i, wx0 } of cellsAround(ctx, 11, 3)) {

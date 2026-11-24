@@ -31,7 +31,7 @@ import {
   KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, house, church,
   overheadLine, fence, lamp, floatingIsland, wires, jitter, mul3, mix3, shade, smooth, clamp, lerp,
   quatYaw, quatRoll, quatUpTo, quatXTo, quatMul, quatAxis, strut, norm3, Q_ID, SUN,
-  flightCell, flyBody, flyWing, FLY_CELL, grove,
+  flightCell, flyBody, flyWing, FLY_CELL, grove, facetRock,
 } from './kit.js';
 
 const PAL = {
@@ -793,8 +793,11 @@ function* rockCutting(ctx, out, W, c, plan) {
   // about a third of the band's splats
   let area = 0;
   for (let x = 0.5; x < ctx.length; x += 1) { const h = cutH(W, c, ctx.x0 + x); if (h > 0.3) area += h + 1.5; }
-  const k = Math.max(1 / Math.sqrt(Math.min(1.5, out.density)), Math.sqrt(area / (0.2 * 0.22 * ctx.count * 0.33)));
-  const step = 0.2 * k, vstep = 0.22 * k;
+  // Splats long along the line and short up the face: the bedding planes, ledges and the face's top
+  // stay sharp (they were round splats 0.2 m and more across, 40 px at 6 m, and the face was a grey
+  // smear), while the length along the line costs nothing that the motion blur does not take anyway.
+  const k = Math.max(1 / Math.sqrt(Math.min(1.5, out.density)), Math.sqrt(area / (0.32 * 0.14 * ctx.count * 0.33)));
+  const step = 0.32 * k, vstep = 0.14 * k;
   const salt = c.seed & 0xffff;
   for (let x = step / 2; x < ctx.length; x += step) {
     const wx = ctx.x0 + x, h = cutH(W, c, wx);
@@ -821,7 +824,7 @@ function* rockCutting(ctx, out, W, c, plan) {
       col = mix3(col, [0.24, 0.3, 0.12], smooth(0.85, 0.97, fy) * smooth(1.5, 3, y) * 0.7 * (bh > 0.4 ? 1 : 0)); // moss on ledges
       col = mix3(col, [0.14, 0.14, 0.13], smooth(0.6, 0.8, noise2(wxx / 2.5, y / 9, salt + 3)) * 0.5);        // wet streaks
       const ny = fy > 0.85 ? 0.8 : 0.3, nz = 0.95;
-      col = jitter(shade(col, -0.3 + 0.6 * bh, ny, nz, 0.62, 0.42), rng, 0.08);
+      col = jitter(shade(col, -0.3 + 0.6 * bh, ny, nz, 0.62, 0.42), rng, 0.04);
       if (d < 6 && y > 1.5) y = 1.5;
       const q = quatUpTo(...norm3(0, ny * 0.5, nz));
       out.q(xx, y, -d, step * 0.75, vstep * 0.2, vstep * 0.7, col, 1, q, KIND.ROCK);
@@ -936,12 +939,14 @@ function* sidingProps(ctx, out, W, sd) {
   }
 }
 
-// A boulder: grey, lichen-spotted, half sunk in the ground. Stands on surface().
+// A boulder: grey, lichen-spotted, mossy on top, set into the ground. Stands on surface(). Drawn as
+// kit facetRock(): flat facets with hard edges (it was a blob() of a few soft splats the size of
+// the rock, a woolly grey puff with no outline).
 function* boulder(ctx, out, W, wx, d, r, rng) {
-  const y = surfY(W, wx, d) + r * 0.2;
-  const n = Math.max(3, Math.round(coniferSplats(out, d, r * 1.4, r * 2) * 0.5));
+  const y0 = Math.min(surfY(W, wx, d), surfY(W, wx - r * 0.8, d), surfY(W, wx + r * 0.8, d), surfY(W, wx, d - r * 0.7));
   const col = mix3(C.rock, [0.5, 0.52, 0.45], 0.3 * rng());
-  yield* blob(ctx, out, wx - ctx.x0, y, d, r, r * 0.65, r * 0.85, { n, color: col, rng, kind: KIND.ROCK, inner: 0.3, amb: 0.55, clump: 0.3 });
+  facetRock(out, wx - ctx.x0, y0, d, r, r * 0.85, r * 0.85, { color: col, rng, moss: 0.45, mossColor: [0.17, 0.24, 0.09], lichen: 0.7, n: d < 30 ? 250 : undefined });   // (fewer by the line, where the blur takes the detail)
+  if (out.due()) yield;
 }
 
 // A cabin: red (falu) or dark timber, white trims, on a stone footing; maybe a jetty out over the

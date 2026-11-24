@@ -19,6 +19,7 @@ import {
   KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, groundY, fillGround, blob, stick, wires, rock,
   house, monolith, lamp, detail, jitter, mul3, mix3, shade, smooth, clamp, lerp, quatYaw, quatRoll, quatUpTo, norm3,
   strut, quatXTo, blade,
+  facetRock,
 } from './kit.js';
 
 
@@ -1611,23 +1612,15 @@ function cactus(out, x, y0, d, H, rng) {
     ell(out, ex, ay + up, ez, R * 0.8, R * 0.65, R * 0.8, 0, 1, 0, col, kind);
   }
 }
-// A boulder: a solid ellipsoid surface of splats, shaded by its normal (front and top only).
-function* boulder(out, x, y, d, rx, ry, rz, col, s, rng, kind = KIND.ROCK) {
-  const area = 2 * Math.PI * (rx * ry + ry * rz + rx * rz) / 3;
-  const n = clamp(Math.round((area * 0.7) / (s * s)), 6, 900);
-  const sz = Math.sqrt((area * 0.7) / n) * 0.85;
-  for (let i = 0; i < n; i++) {
-    const u = (i + rng()) / n, ph = i * 2.39996;
-    const ny = 1 - 1.45 * u, rr = Math.sqrt(Math.max(0, 1 - ny * ny));
-    const nx = Math.cos(ph) * rr, nz = Math.abs(Math.sin(ph) * rr) * (rng() < 0.85 ? 1 : -1);
-    if (ny < -0.45) continue;
-    const nn = norm3(nx / rx, ny / ry, nz / rz);
-    const q = quatUpTo(nn[0], nn[1], nn[2]);
-    let c = shade(col, nn[0], nn[1], nn[2], 0.5, 0.6);
-    c = jitter(mul3(c, 0.9 + 0.2 * noise2(nx * 3 + x * 0.1, ny * 3, 77)), rng, 0.06);
-    out.q(x + nx * rx, y + ny * ry, -(d - nz * rz), sz * 1.1, sz * 0.4, sz * 1.1, c, 1, q, kind);
-    if (out.due()) yield;
-  }
+// A boulder reaching from y - ry to y + ry (centre y): kit facetRock(), flat facets with hard edges,
+// one tone a facet, bare and sun-dried. It was an ellipsoid of splats each about a third of the
+// boulder across (s), which made a soft brown puff with no outline. `s` is kept in the signature
+// but the facets size their own splats from the distance.
+// stacked: a lump standing on another (a pillar), with no ground of its own to sink into or darken.
+function* boulder(out, x, y, d, rx, ry, rz, col, s, rng, kind = KIND.ROCK, stacked = false) {
+  if (stacked) facetRock(out, x, y - ry, d, rx, ry * 2, rz, { color: col, rng, kind, sink: 0, seat: false, cracks: 0 });
+  else facetRock(out, x, y - ry * 0.25, d, rx, ry * 1.25, rz, { color: col, rng, kind, sink: ry * 0.75, cracks: rx > 1 ? 1 : 0 });
+  if (out.due()) yield;
 }
 
 // A rocky island in the salt, crowned with tall columnar cacti, more of them at its foot.
@@ -1970,7 +1963,7 @@ function* tufa(ctx, out, p, r) {
     const lumps = Math.max(2, Math.round(H / (w * 0.9)));
     for (let j = 0; j < lumps; j++) {
       const t = (j + 0.5) / lumps, rw = w * (1 - 0.45 * t) * (0.85 + 0.3 * r());
-      yield* boulder(out, tx + (r() - 0.5) * w * 0.4, y0 + t * H, td, rw, (H / lumps) * 0.75, rw * 0.9, jitter(col, r, 0.06), s, r);
+      yield* boulder(out, tx + (r() - 0.5) * w * 0.4, y0 + t * H, td, rw, (H / lumps) * 0.75, rw * 0.9, jitter(col, r, 0.06), s, r, KIND.ROCK, j > 0);
     }
   }
 }
