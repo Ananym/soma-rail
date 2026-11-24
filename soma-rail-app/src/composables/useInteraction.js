@@ -103,12 +103,17 @@ export function useInteraction({ touch = null, running = null } = {}) {
   }
 
   // Scrolling is using the overlay too: the wheel over the channel list, a dragged scroll bar, the
-  // arrow keys. With a mouse the overlay otherwise stays up only while the pointer moves, so a
-  // listener reading down the channels with the wheel saw it fade under them.
+  // arrow keys. So is clicking: pressing Next several times with the pointer resting on the button.
+  // With a mouse the overlay otherwise stays up only while the pointer moves, so a listener reading
+  // down the channels with the wheel, or clicking through the sceneries, saw it fade under them.
   function handleScrollActivity() {
     if (isTouch()) { handleTouchActivity(); return; }
     if (Date.now() < gracePeriodEnd.value) return;
     if (overlayShown()) lastMouseMoveTime.value = Date.now();
+  }
+
+  function handlePressActivity() {
+    if (!isTouch()) handleScrollActivity();     // (a touch screen has its own rules: handleTap, handleTouchActivity)
   }
 
   /**
@@ -181,6 +186,8 @@ export function useInteraction({ touch = null, running = null } = {}) {
     document.addEventListener('scroll', handleScrollActivity, { capture: true, passive: true });
     document.addEventListener('wheel', handleScrollActivity, { capture: true, passive: true });
     document.addEventListener('keydown', handleScrollActivity, true);
+    document.addEventListener('pointerdown', handlePressActivity, true);
+    document.addEventListener('click', handlePressActivity, true);
     document.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('focus', handleFocus);
     window.addEventListener('blur', handleBlur);
@@ -200,6 +207,8 @@ export function useInteraction({ touch = null, running = null } = {}) {
     document.removeEventListener('scroll', handleScrollActivity, true);
     document.removeEventListener('wheel', handleScrollActivity, true);
     document.removeEventListener('keydown', handleScrollActivity, true);
+    document.removeEventListener('pointerdown', handlePressActivity, true);
+    document.removeEventListener('click', handlePressActivity, true);
     document.removeEventListener('mousemove', handleMouseMove);
     window.removeEventListener('focus', handleFocus);
     window.removeEventListener('blur', handleBlur);

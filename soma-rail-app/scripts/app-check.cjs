@@ -326,8 +326,8 @@ const outDir = process.argv[2] || '.';
       // Scrolling the channel list with the wheel, the mouse still, must keep the overlay up (it fades
       // 3 s after the last activity). On this renderer the page's timers starve (a frame takes
       // seconds), so real wheel events cannot be sent less than 3 s apart: the page's clock is held
-      // still instead and moved by hand. A mouse move, then three wheel events 2 s apart (6 s in
-      // all: without the fix the overlay is gone after the second), then 4 s of nothing.
+      // still instead and moved by hand. A mouse move, then three wheel events and two clicks, each
+      // 2 s apart (10 s in all: without the fix the overlay is gone after the second), then 4 s of nothing.
       const scroll = await page.evaluate(async () => {
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         const vc = document.querySelector('.view-controls'), list = document.querySelector('.channel-selector .channels-grid') || document.querySelector('.channel-selector');
@@ -339,9 +339,11 @@ const outDir = process.argv[2] || '.';
           document.dispatchEvent(new MouseEvent('mousemove', { clientX: 240, clientY: 220, bubbles: true }));
           for (let i = 0; i < 40 && !up(); i++) await wait(250);
           const shown = up(), held = [];
-          for (let k = 0; k < 3; k++) {
+          for (let k = 0; k < 5; k++) {
             vt += 2000;
-            list.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true }));
+            // three turns of the wheel, then two clicks on a panel (not on a button: nothing is pressed)
+            if (k < 3) list.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true }));
+            else vc.dispatchEvent(new MouseEvent('click', { bubbles: true }));
             await wait(4000);                      // long enough for the panels' own tick and a redraw
             held.push(up());
           }
