@@ -151,7 +151,9 @@ const stuckWatch = setInterval(() => {
   if (!stuck) { stuckSince = 0; if (el && el.readyState >= 2) stallTries = 0; return; }
   if (!stuckSince) { stuckSince = Date.now(); return; }
   // (more patient each time, up to a minute: a slow connection must be given the chance to deliver)
-  const patience = (el.networkState === 3 ? 4000 : 10000) + Math.min(50000, 8000 * stallTries);
+  // (a connection that is open and loading gets twenty seconds before the first retry: asking again
+  // throws away an attempt that may have been about to deliver)
+  const patience = (el.networkState === 3 ? 4000 : 20000) + Math.min(40000, 10000 * stallTries);
   if (Date.now() - stuckSince < patience) return;
   stuckSince = 0;
   const m = el.src.match(/(ice[1-6])\.somafm\.com/);
