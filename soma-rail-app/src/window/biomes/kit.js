@@ -85,6 +85,12 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             things (vehicles, boats, carts, machines, bales, crates). A swell lifts each splat
 //             by a share of its own size, so a rigid thing built from big and small pieces comes
 //             apart on every beat. (Unlike SOLID, it is still scattered at the dreamlike level.)
+//   GROVE     big things that answer the beat in turns: each splat names one of four groups (pass
+//             grove(g), below, not MOVE.GROVE itself) and on every beat one or two of the four
+//             swell and rise as BEAT things do, on the kick's pulse. For a forest, one group per
+//             kind of tree, so a wall of trees answers a species at a time and not as one mass
+//             (where everything swells a little together, nothing is seen to move). Tag every
+//             splat of a tree, trunk and crown, with its tree's group.
 //   RIDE      a rider on the ground (a cyclist): carried along the line at about a sixth of the
 //             train's speed, and brightens on the beat like FLASH. Only through rideCell() below.
 //   FALL      falls, and comes round again at the top of a 16 m column about the eye's height: a
@@ -105,7 +111,9 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             lamps, station and motorway lamps) read as a chase; a cluster at one x flares as one.
 //             Not for lit windows, signs or vehicles.
 // Leave it out and the splat stays still.
-export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11, SWAY: 12, STILL: 13, CHASE: 14 };
+export const MOVE = { NONE: 0, FLAG: 1, TRAFFIC_0: 2, TRAFFIC_1: 3, TRAFFIC_2: 4, SPIN: 2, SPIN_FAST: 3, FLY: 4, VAPOUR: 5, BEAT: 6, FALL: 7, FLASH: 8, RIDE: 9, SOLID: 10, CHORUS: 11, SWAY: 12, STILL: 13, CHASE: 14, GROVE: 15 };
+// A grove tag for group g (0..3): pass grove(g) as the motion class.
+export const grove = (g) => MOVE.GROVE | ((g & 3) << 4);
 // A chorus tag for group g (0..7): pass chorus(g) as the motion class.
 export const chorus = (g) => MOVE.CHORUS | ((g & 7) << 4);
 

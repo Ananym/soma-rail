@@ -297,12 +297,17 @@ uniform float uSway;`,
         chorus = step(fract(float((mvA >> 1) & 7) * 0.125 + uBeatSeq * 0.382), 0.4);
         rgba.a = 1.0;                                              // the group bits are not opacity
     }
-    scales *= (1.0 + uBreath + uBeatBig * (0.1 * raised + 0.42 * picked * (1.0 - isLight)) + uBeatSmall * (0.32 * isLight + 0.55 * chorus)) * chaseSz;
-    center.y += 0.3 * scales.y * (uBeatBig * picked * (1.0 - isLight) + uBeatSmall * chorus);
-    float shimmer = (1.0 + uBeatBig * 0.1 * picked * (1.0 - isLight) + uBeat * 0.42 * flashed + uBeatSmall * 0.22 * chorus) * chaseLvl;
+    // A grove (class 15: see kit.js grove()): big things in turns. A splat names one of four
+    // groups in two more bits of its opacity byte (its opacity keeps its top four bits), and on
+    // each beat one or two of the four answer, swelling and rising as the picked things do, on
+    // the big pulse: the pines of a forest on one beat, its spruces on the next.
+    float grove = (mvHi && mv == 7) ? step(fract(float((mvA >> 1) & 3) * 0.25 + uBeatSeq * 0.382), 0.4) * (1.0 - isLight) : 0.0;
+    scales *= (1.0 + uBreath + uBeatBig * (0.1 * raised + 0.42 * picked * (1.0 - isLight) + 0.42 * grove) + uBeatSmall * (0.32 * isLight + 0.55 * chorus)) * chaseSz;
+    center.y += 0.3 * scales.y * (uBeatBig * (picked * (1.0 - isLight) + grove) + uBeatSmall * chorus);
+    float shimmer = (1.0 + uBeatBig * 0.1 * (picked * (1.0 - isLight) + grove) + uBeat * 0.42 * flashed + uBeatSmall * 0.22 * chorus) * chaseLvl;
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
-        shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, max(picked, max(flashed, chorus))) + 0.6 * isLight);
+        shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, max(picked, max(flashed, max(chorus, grove)))) + 0.6 * isLight);
     }`,
   },
   {
@@ -318,7 +323,7 @@ uniform float uSway;`,
         vec3 hazeCol = mix(uHazeColor, uHazeHigh, smoothstep(0.0, 0.2588, viewCenter.y / length(viewCenter)));
         vRgba.rgb = mix(rgba.rgb * mix(uLightTint, vec3(1.0), glow) * shimmer, hazeCol, hz * (1.0 - 0.5 * glow));
         if (uMoveDebug > 0.5) {
-            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : mv == 2 ? vec3(0.55, 0.4, 1.0) : mv == 4 ? vec3(0.6, 1.0, 0.3) : mv == 5 ? vec3(0.45, 0.45, 0.5) : mv == 6 ? vec3(0.0, 0.62, 0.58) : 0.25 + 0.75 * vec3(float((mvA >> 1) & 1), float((mvA >> 2) & 1), float((mvA >> 3) & 1)))
+            vRgba.rgb = mvHi ? (mv == 0 ? vec3(1.0, 0.45, 0.75) : mv == 1 ? vec3(1.0, 0.55, 0.1) : mv == 2 ? vec3(0.55, 0.4, 1.0) : mv == 4 ? vec3(0.6, 1.0, 0.3) : mv == 5 ? vec3(0.45, 0.45, 0.5) : mv == 6 ? vec3(0.0, 0.62, 0.58) : mv == 7 ? vec3(0.95, 0.25 + 0.22 * float((mvA >> 1) & 3), 0.15 + 0.28 * float((mvA >> 1) & 3)) : 0.25 + 0.75 * vec3(float((mvA >> 1) & 1), float((mvA >> 2) & 1), float((mvA >> 3) & 1)))
                 : mv == 0 ? vRgba.rgb * 0.35 : vec3(float(mv & 1), float((mv >> 1) & 1), float((mv >> 2) & 1)) * 0.8 + 0.2;
         }
     }`,
@@ -360,9 +365,12 @@ export function buildVertexShader(defaultShader) {
 // opacity. Every splat that reaches the renderer must therefore have those bits set on purpose:
 // tagLast() after each push, clearTags() for splats loaded from a file.
 // A chorus splat (class 11) also carries its group, 0..7, in the next three bits of the opacity
-// byte, with the top three set: it is drawn opaque. The group arrives as cls >> 4.
+// byte, with the top three set: it is drawn opaque. A grove splat (class 15) carries its group,
+// 0..3, in the next two bits and keeps the top four bits of its opacity (sixteen levels). The
+// group arrives as cls >> 4.
 const tagWord = (w, cls) => {
-  const a8 = (cls & 15) === 11 ? (0xe2 | (((cls >> 4) & 7) << 2)) : (Math.min(w >>> 24, 254) & 0xfc) | (((cls >> 3) & 1) << 1);
+  const c = cls & 15, g = cls >> 4;
+  const a8 = c === 11 ? (0xe2 | ((g & 7) << 2)) : c === 15 ? ((Math.min(w >>> 24, 254) & 0xf0) | ((g & 3) << 2) | 2) : (Math.min(w >>> 24, 254) & 0xfc) | (((cls >> 3) & 1) << 1);
   return (((w & 0x00fefefe) | (cls & 1) | (((cls >> 1) & 1) << 8) | (((cls >> 2) & 1) << 16)) | (a8 << 24)) >>> 0;
 };
 export function tagLast(packed, cls = 0) {

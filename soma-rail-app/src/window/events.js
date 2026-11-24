@@ -215,9 +215,11 @@ export function createEvents({ THREE, SplatMesh, PackedSplats, scene, sky, direc
     const d0 = 60 + 50 * rng();
     const xs = ctx.tanHalfH * d0 * (0.5 + 0.2 * rng());       // ahead, to the right: the land slides left
     const y0 = ctx.terrain.height(S.travelled + xs, d0);        // (heights are above the rail, as in the scene)
-    const mag = pale ? 2.3 : 2.6;
+    // (not much over life size: at two and a half times, a flock of rooks was taken for a flock of
+    // eagles, which do not flock)
+    const mag = pale ? 1.6 : 1.5;
     const col = pale ? [0.8, 0.8, 0.77] : [0.05, 0.05, 0.06];
-    const flapHz = pale ? 2.6 : 4.2;
+    const flapHz = pale ? 2.2 : 3.2;
     // the flock's middle: a climbing turn, traced every 0.05 s for 12 s
     const DT = 0.05, path = [];
     {
