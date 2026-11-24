@@ -18,7 +18,8 @@
 // pack of three to six (about every 4 km), a brown bear, sometimes reared up or with cubs (every 7
 // to 10 km), a fox by the line (every 4 to 5 km) and a sea eagle on a dead pine (every 5 to 9 km).
 // They stand only where the train can see them, are drawn larger than life, and every splat of
-// them answers the beat.
+// them answers the beat. Birds of prey on the wing ("Birds of prey" below): about one every 4 to
+// 5 km, never two within about 1.6 km, against the sky over a lake, a bog, a clearing or the trees.
 //
 // Surreal dials (all 0 at level 0, so level 0 shows none of this):
 //   scale     spruces of impossible height among the others; far mountains that keep going up
@@ -30,6 +31,7 @@ import {
   KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, house, church,
   overheadLine, fence, lamp, floatingIsland, wires, jitter, mul3, mix3, shade, smooth, clamp, lerp,
   quatYaw, quatRoll, quatUpTo, quatXTo, quatMul, quatAxis, strut, norm3, Q_ID, SUN,
+  flightCell, flyBody, flyWing, FLY_CELL,
 } from './kit.js';
 
 const PAL = {
@@ -1657,6 +1659,290 @@ function* wildlife(ctx, out, W, dLo, dHi) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Birds of prey on the wing: one bird (now and then a pair of buzzards) in most stretches of
+// BIRD_CELL metres of line, never two within about 1.6 km of each other: a white-tailed eagle or an
+// osprey carrying a fish over a lake, a buzzard or a golden eagle over a bog, a clear-cut or the
+// forest, a goshawk dashing low over open ground before the trees, and at dusk and dawn an owl in
+// place of any of them (an eagle owl over the water, a great grey owl elsewhere).
+//
+// They fly (MOVE.FLY, through kit flyBody and flyWing): the shader carries them along the line
+// and flaps their wings in bursts. A bird heading along the line shows the window its wings end
+// on (a stroke, not a bird), so a soarer faces the train, nose a little up, as a soaring bird
+// hangs and drifts on the wind: the window sees it from below and in front, the way a field guide
+// draws it, with the wings spread across the frame in their flat plank, shallow V or crooked M,
+// the fingered hands, the pale head and the tail beyond. The goshawk, dashing past, is seen from
+// the side and in front.
+// A wing piece flaps by its lift (in the shader's second frame it drops 1.7 times that), given
+// piece by piece in proportion to its distance from the body: a soaring eagle's wings only flex,
+// a goshawk's beat. They are drawn three to four times life size.
+//
+// Where: in each world cell, the first of a few tries in the middle half of the cell where the
+// bird can fly so that, from the train level with it and as it comes and goes, it stands clear
+// of everything in front of it and above every tree top behind it (against the sky or the
+// water), and below the top of a landscape window. Soarers fly the train's way (even flight
+// cells, within 112 m of the line); the goshawk the other way, fast. The whole bird lies inside
+// one near-band chunk, so no chunk border ever splits one.
+// ---------------------------------------------------------------------------------------------
+const BIRD_CELL = 3600, NEAR_CHUNK = 200;
+// Each kind in life-size metres. wing: points out along the span [distance from the body,
+// leading edge, trailing edge (both along the body, forward +), height above the root]; arm and
+// hand: the colours of the three rows of the wing (front to back) inside and outside the middle
+// point; fingers: [count, length, sweep back of their tips, colour]; tail: [length, half width at
+// the root, at the end, wedge (longer in the middle) 0..1, colour, bar colour or null]; body:
+// [half length, radius, colour]; head: [forward of the body, radius, colour]. S: drawn scale;
+// pitch: the nose lifted (radians; owls fly level, the rest are given one each);
+// amp: the flap (lift per metre out from the body).
+const RAPTOR = {
+  seaEagle: {
+    S: 3.1, amp: 0.1,
+    wing: [[0.06, 0.2, -0.34, 0], [0.48, 0.24, -0.37, 0.04], [0.88, 0.2, -0.22, 0.08]],
+    arm: [[0.24, 0.17, 0.11], [0.18, 0.13, 0.09], [0.12, 0.09, 0.07]], hand: [[0.2, 0.15, 0.1], [0.13, 0.1, 0.08], [0.1, 0.08, 0.06]],
+    fingers: [7, 0.32, 0.02, [0.08, 0.065, 0.055]],
+    tail: [0.3, 0.07, 0.15, 1, [0.78, 0.77, 0.72], null],
+    body: [0.36, 0.13, [0.21, 0.15, 0.1]], head: [0.46, 0.095, [0.66, 0.6, 0.47]], bill: [0.6, 0.05, [0.8, 0.64, 0.15]],
+  },
+  golden: {
+    S: 3.2, amp: 0.12,
+    wing: [[0.06, 0.15, -0.26, 0], [0.42, 0.23, -0.38, 0.1], [0.84, 0.18, -0.2, 0.2]],
+    arm: [[0.22, 0.15, 0.09], [0.28, 0.23, 0.19], [0.22, 0.19, 0.16]], hand: [[0.2, 0.14, 0.09], [0.3, 0.26, 0.21], [0.2, 0.17, 0.14]],
+    fingers: [6, 0.3, 0.04, [0.07, 0.06, 0.05]],
+    tail: [0.38, 0.08, 0.16, 0.2, [0.26, 0.2, 0.15], null],
+    body: [0.36, 0.13, [0.2, 0.14, 0.09]], head: [0.42, 0.085, [0.6, 0.44, 0.2]], bill: [0.54, 0.035, [0.24, 0.22, 0.2]],
+  },
+  osprey: {
+    S: 3.6, amp: 0.22,
+    wing: [[0.05, 0.12, -0.17, 0], [0.36, 0.21, -0.11, 0.12], [0.76, 0.0, -0.15, 0.02]],
+    arm: [[0.76, 0.75, 0.72], [0.7, 0.7, 0.68], [0.5, 0.49, 0.47]], hand: [[0.7, 0.7, 0.68], [0.5, 0.49, 0.47], [0.42, 0.41, 0.4]],
+    fingers: [4, 0.16, 0.1, [0.1, 0.09, 0.08]],
+    tail: [0.24, 0.05, 0.08, 0, [0.6, 0.58, 0.55], [0.35, 0.33, 0.31]],
+    body: [0.28, 0.1, [0.78, 0.77, 0.74]], head: [0.34, 0.07, [0.78, 0.77, 0.74]], bill: [0.44, 0.03, [0.12, 0.11, 0.1]],
+    carpal: [0.1, 0.08, 0.07],
+  },
+  buzzard: {
+    S: 4.2, amp: 0.16,
+    wing: [[0.05, 0.14, -0.22, 0], [0.36, 0.17, -0.25, 0.07], [0.6, 0.13, -0.15, 0.12]],
+    arm: [[0.3, 0.2, 0.13], [0.74, 0.7, 0.62], [0.26, 0.22, 0.19]], hand: [[0.3, 0.21, 0.14], [0.74, 0.7, 0.63], [0.24, 0.2, 0.17]],
+    fingers: [5, 0.17, 0.02, [0.1, 0.08, 0.07]],
+    tail: [0.22, 0.05, 0.12, 0, [0.6, 0.54, 0.46], [0.3, 0.25, 0.2]],
+    body: [0.24, 0.085, [0.33, 0.23, 0.15]], head: [0.27, 0.065, [0.36, 0.26, 0.17]], bill: [0.34, 0.022, [0.2, 0.18, 0.16]],
+    carpal: [0.12, 0.09, 0.06], breast: [0.7, 0.64, 0.54],
+  },
+  goshawk: {
+    S: 4.2, amp: 0.5,
+    wing: [[0.05, 0.14, -0.22, 0], [0.3, 0.16, -0.24, 0.12], [0.5, 0.12, -0.12, 0.22]],
+    arm: [[0.6, 0.6, 0.58], [0.5, 0.5, 0.49], [0.36, 0.36, 0.36]], hand: [[0.52, 0.52, 0.51], [0.4, 0.4, 0.4], [0.3, 0.3, 0.31]],
+    fingers: [5, 0.11, 0.02, [0.14, 0.14, 0.15]],
+    tail: [0.34, 0.06, 0.09, 0.1, [0.5, 0.5, 0.49], [0.22, 0.22, 0.23]],
+    body: [0.27, 0.1, [0.66, 0.66, 0.64]], head: [0.3, 0.07, [0.2, 0.21, 0.23]], bill: [0.39, 0.025, [0.15, 0.15, 0.16]],
+    brow: [0.78, 0.78, 0.76],
+  },
+  greatGrey: {
+    S: 3.6, amp: 0.3, pitch: 0.1,
+    wing: [[0.05, 0.13, -0.17, 0], [0.4, 0.15, -0.2, 0.05], [0.7, 0.1, -0.11, 0.08]],
+    arm: [[0.5, 0.5, 0.48], [0.4, 0.4, 0.38], [0.24, 0.24, 0.23]], hand: [[0.46, 0.46, 0.44], [0.34, 0.34, 0.33], [0.2, 0.2, 0.19]],
+    fingers: [5, 0.13, 0.03, [0.2, 0.2, 0.19]],
+    tail: [0.2, 0.06, 0.09, 0, [0.5, 0.5, 0.48], [0.3, 0.3, 0.29]],
+    body: [0.24, 0.1, [0.5, 0.5, 0.47]], head: [0.2, 0.17, [0.36, 0.36, 0.35]], bill: [0.36, 0.025, [0.8, 0.7, 0.2]],
+    disc: [0.8, 0.8, 0.76],
+  },
+  eagleOwl: {
+    S: 3.6, amp: 0.3, pitch: 0.1,
+    wing: [[0.05, 0.14, -0.18, 0], [0.42, 0.16, -0.21, 0.05], [0.72, 0.1, -0.11, 0.08]],
+    arm: [[0.66, 0.52, 0.32], [0.54, 0.41, 0.25], [0.26, 0.19, 0.12]], hand: [[0.62, 0.48, 0.3], [0.48, 0.36, 0.22], [0.22, 0.16, 0.1]],
+    fingers: [5, 0.14, 0.03, [0.18, 0.13, 0.08]],
+    tail: [0.2, 0.06, 0.1, 0, [0.6, 0.46, 0.28], [0.28, 0.2, 0.12]],
+    body: [0.25, 0.11, [0.64, 0.5, 0.3]], head: [0.2, 0.15, [0.5, 0.38, 0.23]], bill: [0.35, 0.025, [0.2, 0.16, 0.12]],
+    disc: [0.66, 0.54, 0.36], tufts: [0.22, 0.16, 0.1],
+  },
+};
+// Further out, drawn larger still (as the animals: wildK), so a bird at 110 m reads as well as one at 50.
+const raptorK = (d) => 0.9 + 0.35 * smooth(50, 110, d);
+// How far a bird reaches from its middle, at its drawn scale: out to the wing tip.
+const raptorReach = (R, d) => (R.wing[R.wing.length - 1][0] + R.fingers[1]) * R.S * raptorK(d);
+
+// The height a point d out from the line at world x bx must stand at to be seen from the train
+// at camX clear of everything between (front) or, with behind, also above every tree top and
+// hill beyond it (the line of tops seen from the eye, 2.6 m up).
+function skyNeed(W, camX, bx, d, behind = true) {
+  const at = (pd) => camX + (bx - camX) * pd / d, over = (pd, top) => 2.6 + (top - 2.6) * d / pd;
+  let need = -Infinity;
+  const c = cuttingAt(W, at(7));
+  if (c) need = over(7, cutH(W, c, at(7)));
+  if (saplings(W, at(14)) > 0.52) need = Math.max(need, over(14, surface(W, at(14), 14).y + 5.5));
+  for (let pd = 10; pd < 2600; pd = pd < 40 ? pd + 4 : pd * 1.12) {
+    if (!behind && pd > d - 4) break;
+    const px = at(pd), s = surface(W, px, pd);
+    need = Math.max(need, over(pd, s.y + (s.t === T.FOREST ? canopyH(W, px, pd) : 0.6)));
+  }
+  return need;
+}
+// Where the train stands, and where the bird then is along the line, as it comes into view, level
+// with it and going: the shader carries a bird k of the way the train has still to come (k about
+// 0.5 flying with the train, about -0.95 against it). o: the bird's offset from the eye along the line.
+function birdViews(cx, d, dir) {
+  const k = dir > 0 ? 0.515 : -0.95, g = k / (1 - k), res = [];
+  for (const o of [-0.7 * d, 0, 0.7 * d]) { const bx = cx - o * g; res.push([bx - o, bx]); }
+  return res;
+}
+function raptorAt(W, i) {
+  const key = 'raptor' + i;
+  if (W.wild.has(key)) return W.wild.get(key);
+  const g = makeRaptor(W, i);
+  if (W.wild.size > 6000) W.wild.clear();
+  W.wild.set(key, g);
+  return g;
+}
+function makeRaptor(W, i) {
+  const r = makeRng(hashInts(W.ws, 830, i));
+  if (r() > 0.85) return null;
+  // the near lakes in the middle half of the cell: the first tries are over one of them
+  const lakes = [], c0 = (i + 0.25) * BIRD_CELL, c1 = (i + 0.75) * BIRD_CELL, LC = LAKE_FAMS[0].cell;
+  for (let li = Math.floor(c0 / LC) - 1; li <= Math.floor(c1 / LC) + 1; li++) {
+    const lk = lakeIn(W, 0, li);
+    if (lk && lk.dc - lk.rd < 90 && lk.cx + lk.rx * 0.6 > c0 && lk.cx - lk.rx * 0.6 < c1) lakes.push(lk);
+  }
+  for (let t = 0; t < 9; t++) {
+    const u0 = r(), u1 = r(), u2 = r(), u3 = r(), u4 = r(), u5 = r(), byLake = t < 4 && lakes.length > 0;
+    const dash = !byLake && u1 < 0.3;                    // a goshawk, low and the other way
+    // a flight cell going the right way, its bird well inside one near-band chunk
+    let wx = (i + 0.25 + 0.5 * u0) * BIRD_CELL;
+    if (byLake) { const lk = lakes[Math.floor(u1 * lakes.length)]; wx = clamp(lk.cx + (u0 - 0.5) * 1.2 * lk.rx, c0, c1); }
+    let fc = flightCell(wx);
+    if ((fc.dir < 0) !== dash) fc = flightCell(fc.wx + FLY_CELL);
+    const m = ((fc.wx % NEAR_CHUNK) + NEAR_CHUNK) % NEAR_CHUNK;
+    if (m < 16) fc = flightCell(fc.wx + 2 * FLY_CELL); else if (m > NEAR_CHUNK - 16) fc = flightCell(fc.wx - 2 * FLY_CELL);
+    const cx = fc.wx, c = column(W, cx), seed = hashInts(W.ws, 831, i, t);
+    if (dash) {
+      // over open ground before the trees, 6 to 9 m up, seen clear of everything in front of it
+      const run = c.open.find(([a, b]) => b - a >= 10 && b >= 42 && a <= 78);
+      if (!run) continue;
+      const d = clamp(run[0] + (run[1] - run[0]) * (0.3 + 0.4 * u2), 40, 78);
+      let ok = true;
+      for (let x = cx - 0.5 * d; ok && x <= cx + 0.5 * d; x += 8) if (surface(W, x, d).t === T.FOREST) ok = false;
+      if (!ok) continue;
+      const y = surface(W, cx, d).y + 6 + 3 * u3, ext = raptorReach(RAPTOR.goshawk, d);
+      if (birdViews(cx, d, fc.dir).some(([cam, bx]) => skyNeed(W, cam, bx, d, false) > y - ext * 0.6 - 0.8)) continue;
+      return { type: 'goshawk', at: 'low', wx: cx, d, y, dir: fc.dir, yaw: -1.2, pitch: 0.45, bank: 0, seed };
+    }
+    // over the water or the open ground, 46 to 108 m out, nearer more often than not
+    const spread = (a, b, u) => { const lo = Math.max(46, Math.min(a + 4, 90)), hi = clamp(b - 4, lo, 108); return lo + (hi - lo) * u * u; };
+    let at = 'sky', d = 55 + 50 * u2 * u2;
+    const run = c.open.find(([a, b]) => b - a >= 14 && b >= 50 && a <= 104);
+    if (c.lake && c.w1 - c.w0 >= 14 && c.w1 >= 50 && c.w0 <= 104) { at = 'lake'; d = spread(c.w0, c.w1, u2); }
+    else if (run) { at = 'open'; d = spread(run[0], run[1], u2); }
+    const type = at === 'lake' ? (u3 < 0.5 ? 'seaEagle' : 'osprey') : at === 'open' ? (u3 < 0.55 ? 'buzzard' : 'golden') : (u3 < 0.55 ? 'golden' : 'buzzard');
+    const R = RAPTOR[type], ext = raptorReach(R, d), pair = type === 'buzzard' && u5 < 0.35;
+    const below = 0.45 * ext + 1.7 * R.amp * ext + 1.2, above = 0.45 * ext + 0.8 + (pair ? 2.5 : 0);
+    let need = -Infinity;
+    for (const [cam, bx] of birdViews(cx, d, fc.dir)) need = Math.max(need, skyNeed(W, cam, bx, d) + below);
+    const top = 2.6 + 0.4 * d - above;                   // about 22 degrees up, level with it
+    if (need > top) continue;
+    // facing the train, nose a little up, so the window sees it from below and in front: the
+    // whole spread of its wings across the frame, the hand's fingers, the head and the tail beyond
+    return { type, at, wx: cx, d, y: need + Math.min(3, top - need) * u5, dir: fc.dir, yaw: -Math.PI / 2 + (u2 - 0.5) * 0.7, pitch: 0.3 + 0.12 * u3, bank: (r() - 0.5) * 0.4, pair, juv: u4 < 0.4, seed };
+  }
+  return null;
+}
+
+// One bird at (x, y, z), b from makeRaptor; type may be an owl standing in for it at dusk.
+function drawRaptor(out, x, y, z, b, type, bank = b.bank, yaw = b.yaw) {
+  const R = RAPTOR[type], S = R.S * raptorK(-z), dir = b.dir, sb = Math.sin(bank), cb = Math.cos(bank), d = -z, K = KIND.OTHER;
+  const minR = 0.0008 * d;
+  // the bird's own frame: u forward, s across (+: its right wing when it flies the train's way
+  // along the line), w up from its back. It heads yaw away from the line (-pi/2: straight at the
+  // train), lifts its nose by pitch and then rolls by bank about its own length.
+  const pitch = R.pitch != null ? R.pitch : b.pitch || 0, sy = Math.sin(yaw), cy = Math.cos(yaw), sp = Math.sin(pitch), cp = Math.cos(pitch);
+  const F0 = [dir * cy, 0, -sy], A0 = [dir * sy, 0, cy];
+  const F = [F0[0] * cp, sp, F0[2] * cp], U1 = [-F0[0] * sp, cp, -F0[2] * sp];
+  const A = [A0[0] * cb + U1[0] * sb, U1[1] * sb, A0[2] * cb + U1[2] * sb], U = [U1[0] * cb - A0[0] * sb, U1[1] * cb, U1[2] * cb - A0[2] * sb];
+  const P = (u, s, w) => [x + (u * F[0] + s * A[0] + w * U[0]) * S, y + (u * F[1] + s * A[1] + w * U[1]) * S, z + (u * F[2] + s * A[2] + w * U[2]) * S];
+  // a straight piece of wing or tail from a to e (local points), lift0..lift1 the flap along it
+  const piece = (a, e, r, col, lift0, lift1, n) => {
+    for (let i = 0; i < n; i++) {
+      const t0 = i / n, t1 = (i + 1) / n;
+      const pa = P(lerp(a[0], e[0], t0), lerp(a[1], e[1], t0), lerp(a[2], e[2], t0));
+      const pb = P(lerp(a[0], e[0], t1), lerp(a[1], e[1], t1), lerp(a[2], e[2], t1));
+      flyWing(out, pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], Math.max(r, minR), col, 1, (pa[1] + pb[1]) / 2 - Math.max(0.02, lerp(lift0, lift1, (i + 0.5) / n)), K);
+    }
+  };
+  const lift = (e) => R.amp * e * S, bodyC = (p, sx, sy, c) => flyBody(out, p[0], p[1], p[2], Math.max(sx, minR), Math.max(sy, minR), c, Q_ID, K);
+  const juv = type === 'golden' && b.juv;                // a young golden eagle: white wing patches and tail base
+  for (const sg of [1, -1]) {
+    const shade = sg > 0 ? 1 : 0.82;                     // the far wing a little darker
+    const pts = R.wing;
+    for (let j = 0; j + 1 < pts.length; j++) {
+      const A = pts[j], B = pts[j + 1], chord = (A[1] - A[2] + B[1] - B[2]) / 2, r = chord / 8 * 1.35 * S;
+      for (let k = 0; k < 4; k++) {
+        const f = (k + 0.5) / 4, ua = lerp(A[1], A[2], f), ub = lerp(B[1], B[2], f);
+        let col = (j === 0 ? R.arm : R.hand)[Math.min(2, Math.max(0, k - (k > 1 ? 1 : 0)))];
+        if (juv && k > 0 && j === 1) col = k <= 2 ? [0.74, 0.72, 0.68] : col;
+        const n = Math.max(1, Math.ceil(Math.hypot(B[0] - A[0], ub - ua) * S / (1.6 * r)));
+        piece([ua, sg * A[0], A[3]], [ub, sg * B[0], B[3]], r, mul3(col, shade), lift(A[0]), lift(B[0]), n);
+      }
+    }
+    // the fingers: the hand's primaries, spread
+    const H = pts[pts.length - 1], [nf, fl, sweep, fc] = R.fingers, mid = (H[1] + H[2]) / 2;
+    const rf = (H[1] - H[2]) / (2 * nf) * 1.2 * S;
+    for (let q = 0; q < nf; q++) {
+      const f = (q + 0.5) / nf, ub = lerp(H[1], H[2], f), len = fl * (1 - 0.45 * Math.pow(Math.abs(2 * f - 1.3) / 1.3, 1.5));
+      piece([ub, sg * (H[0] - 0.04), H[3]], [ub + (ub - mid) * 0.7 - sweep, sg * (H[0] + len), H[3] + 0.04], rf, mul3(fc, shade), lift(H[0]), lift(H[0] + len), 2);
+    }
+    if (R.carpal) { const p = P(lerp(pts[1][1], pts[1][2], 0.3), sg * pts[1][0], pts[1][3]); bodyC(p, 0.08 * S, 0.06 * S, mul3(R.carpal, shade)); }
+  }
+  // the tail: a fan of feathers behind the body, spread in the plane of the wings
+  const [tl, tw0, tw1, wedge, tc, bar] = R.tail, u0 = -R.body[0] * 0.75, rt = tw1 / 3.2 * S;
+  for (const f of [-1, -0.5, 0, 0.5, 1]) {
+    const len = tl * (1 + wedge * 0.35 * (1 - Math.abs(f)) - (1 - wedge) * 0.08 * Math.abs(f));
+    const a = [u0, f * tw0, 0], e = [u0 - len, f * tw1, 0];
+    if (juv) { piece(a, [u0 - len * 0.65, f * lerp(tw0, tw1, 0.65), 0], rt, [0.74, 0.72, 0.68], 0, 0, 2); piece([u0 - len * 0.65, f * lerp(tw0, tw1, 0.65), 0], e, rt, [0.07, 0.06, 0.05], 0, 0, 1); }
+    else if (bar) for (let k = 0; k < 4; k++) piece([lerp(a[0], e[0], k / 4), lerp(a[1], e[1], k / 4), 0], [lerp(a[0], e[0], (k + 1) / 4), lerp(a[1], e[1], (k + 1) / 4), 0], rt, k % 2 ? bar : tc, 0, 0, 1);
+    else piece(a, e, rt, tc, 0, 0, 2);
+  }
+  // body, head and bill
+  const [bl, br, bc] = R.body, [hu, hr, hc] = R.head, [bu, bR, bcol] = R.bill;
+  bodyC(P(0, 0, 0), bl * S, br * S, bc);
+  if (R.breast) bodyC(P(0.1, 0, -0.03), bl * 0.45 * S, br * 0.8 * S, R.breast);
+  const owl = !!R.disc, hw = owl ? hr * 0.6 : 0.03;   // an owl's great round head stands up out of its shoulders
+  bodyC(P(hu * 0.7, 0, 0.02), hr * 1.5 * S, br * 0.9 * S, mix3(bc, hc, 0.5));   // the neck
+  bodyC(P(hu, 0, hw), hr * 1.25 * S, hr * S, hc);
+  if (R.brow) bodyC(P(hu + 0.02, 0, 0.06), hr * 0.9 * S, hr * 0.3 * S, R.brow);
+  if (owl) {
+    bodyC(P(hu + hr * 0.8, 0, hw - 0.01), hr * 0.85 * S, hr * 0.8 * S, R.disc);                    // the pale face
+    for (const sg of [1, -1]) {
+      bodyC(P(hu + hr * 1.1, sg * hr * 0.42, hw + 0.01), 0.034 * S, 0.034 * S, R.tufts ? [0.8, 0.45, 0.08] : [0.8, 0.72, 0.15]);   // the eyes
+      if (R.tufts) bodyC(P(hu + 0.02, sg * hr * 0.55, hw + hr + 0.03), 0.025 * S, 0.06 * S, R.tufts);                          // the ear tufts
+    }
+  }
+  if (type === 'osprey') bodyC(P(hu + 0.03, 0, 0.03), hr * 1.1 * S, 0.018 * S, [0.12, 0.11, 0.1]);   // the dark stripe through the eye
+  bodyC(P(bu, 0, 0.01), bR * 1.6 * S, bR * S, bcol);
+  if (type === 'osprey') {
+    // the fish, carried head first under the body
+    bodyC(P(0.04, 0, -0.17), 0.2 * S, 0.05 * S, [0.62, 0.64, 0.62]);
+    bodyC(P(0.06, 0, -0.14), 0.15 * S, 0.025 * S, [0.3, 0.33, 0.32]);
+    bodyC(P(-0.17, 0, -0.17), 0.04 * S, 0.045 * S, [0.5, 0.52, 0.5]);
+  }
+}
+function* raptors(ctx, out, W) {
+  const log = globalThis.__pinewoodLog;
+  const h = ctx.hour != null ? ((ctx.hour % 24) + 24) % 24 : 12, dusk = h >= 18.4 || h < 7.2;
+  for (const { i } of cellsAround(ctx, BIRD_CELL, 40)) {
+    const fresh = !W.wild.has('raptor' + i);
+    const b = raptorAt(W, i);
+    if (fresh) yield;
+    if (!b) continue;
+    const x = b.wx - ctx.x0;
+    if (x < -20 || x > ctx.length + 20) continue;
+    const type = dusk ? (b.at === 'lake' ? 'eagleOwl' : 'greatGrey') : b.type;
+    if (b.pair && !dusk) {                                      // owls hunt alone
+      drawRaptor(out, x - 4 * b.dir, b.y, -b.d, b, type);
+      drawRaptor(out, x + 5 * b.dir, b.y + 2.5, -(b.d - 5), b, type, 0.3 - b.bank, b.yaw + 0.5);
+    } else drawRaptor(out, x, b.y, -b.d, b, type);
+    if (log && x >= 0 && x < ctx.length) log.push({ kind: 'raptor', type, at: b.at, wx: b.wx, d: Math.round(b.d), y: +b.y.toFixed(1), dir: b.dir, pair: !!b.pair });
+    if (out.due()) yield;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Bands
 // ---------------------------------------------------------------------------------------------
 function* trackside(ctx, emit) {
@@ -1759,6 +2045,7 @@ function* near(ctx, emit) {
   out.limit = ctx.count * 0.62;
   // the animals first, so the limit never drops them
   yield* wildlife(ctx, out, W, 30, ctx.zFar);
+  yield* raptors(ctx, out, W);
   yield* lakeProps(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* powerLines(ctx, out, W, ctx.zNear, ctx.zFar);
   // boulders in the open and at forest edges
@@ -2051,7 +2338,11 @@ export const pinewoodBiome = {
 function debugLayout(seedStr, x0, x1) {
   const terrain = makeTerrain(hashString(String(seedStr)), TERRAIN);
   const W = world({ terrain });
-  const res = { lakes: [], cabins: [], sites: [], cuttings: [], sidings: [], pylons: [], wildlife: [] };
+  const res = { lakes: [], cabins: [], sites: [], cuttings: [], sidings: [], pylons: [], wildlife: [], raptors: [] };
+  for (let i = Math.floor(x0 / BIRD_CELL); i <= Math.floor(x1 / BIRD_CELL); i++) {
+    const b = raptorAt(W, i);
+    if (b && b.wx >= x0 && b.wx <= x1) res.raptors.push({ type: b.type, at: b.at, x: b.wx, d: Math.round(b.d), y: +b.y.toFixed(1), dir: b.dir, pair: !!b.pair, juv: !!b.juv });
+  }
   for (const kind in WILD) {
     for (let i = Math.floor(x0 / WILD[kind].cell); i <= Math.floor(x1 / WILD[kind].cell); i++) {
       const g = wildGroup(W, kind, i);
