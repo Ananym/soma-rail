@@ -631,7 +631,9 @@ function* fieldContents(ctx, out, L, dLo, dHi, margin, opts = {}) {
 // Farm machinery and bales. They do not answer the beat (MOVE.STILL, which also keeps the raised
 // rule off them): a swell lifts each splat by its own size, so a rigid thing built from big and
 // small pieces (a bale's flat ends and its thin rim) came apart into spikes on every beat. The
-// only person, a tractor driver, brightens (MOVE.FLASH).
+// only person, a tractor driver, brightens (MOVE.FLASH). No face is one big splat: a splat still
+// shows at twice its scale, so a disc the size of a bale's end or a wheel stood out past the rim
+// as a halo square on and as a tall prong edge-on. Faces are tiled inside their outline (discFace).
 // ---------------------------------------------------------------------------------------------
 
 // Tone of a face from its normal in splat space, as kit house() does it: tops lit, the front a
@@ -707,14 +709,40 @@ function rig(ctx, out0, wx, d, yaw, S, base) {
         const q = quatAxis(0, 0, 1, t);
         R.p(lx - Math.sin(t) * rad * 0.9, ly + Math.cos(t) * rad * 0.9, lz, (Math.PI * rad / n) * 0.75, rad * 0.14, w * 0.5, R.tone(tyre, -Math.sin(t), Math.cos(t), 0), q);
       }
+      // each face tiled in rings that stay inside the tyre (see discFace): a dark sidewall, the hub
+      // and its cap. One disc the size of the wheel reached twice its radius: a dark halo square
+      // on and a tall line through the wheel edge-on.
       for (const sg of [-1, 1]) {
-        R.p(lx, ly, lz + sg * w * 0.45, rad * 0.86, rad * 0.86, 0.03, R.tone([0.09, 0.09, 0.09], 0, 0, sg));
-        R.p(lx, ly, lz + sg * w * 0.5, rad * 0.56, rad * 0.56, 0.03, R.tone(hub, 0, 0, sg));
-        R.p(lx, ly, lz + sg * w * 0.53, rad * 0.16, rad * 0.16, 0.03, [0.2, 0.2, 0.2]);
+        const at = (x, y, z, sx, sy, c, q) => R.p(x, y, z, sx, sy, 0.03, c, q);
+        const zf = lz + sg * w * 0.45;
+        discFace(rad * 0.84, 2, (u, v) => [lx + u, ly + v, zf], null, (i) => R.tone(i < 2 ? hub : [0.09, 0.09, 0.09], 0, 0, sg), at);
+        R.p(lx, ly, lz + sg * w * 0.53, rad * 0.08, rad * 0.08, 0.03, [0.2, 0.2, 0.2]);
       }
     },
   };
   return R;
+}
+
+// A flat round face (a bale's end, a wheel's side) tiled in rings of small splats, in the plane
+// whose normal is local z, so that no splat reaches past radius `rad`. A splat's scale is one
+// standard deviation and it still shows at twice that, so the outermost centres sit 2 sigma in
+// from the rim and neighbouring rings are no more than 1.4 sigma apart. `m` rings round a centre
+// splat; colour(i) gives ring i's colour (0 is the centre). P(u, v) places a point of the face
+// (u, v in its plane) in the frame, `rot` is the face's own turn (a quaternion or null), and
+// at(x, y, z, sx, sy, c, q) emits one splat (sx along the ring, sy across it).
+function discFace(rad, m, P, rot, colour, at) {
+  const step = rad / (m + 1.43), sr = step / 1.4;
+  at(...P(0, 0), sr, sr, colour(0), rot);
+  for (let i = 1; i <= m; i++) {
+    const r = i * step, n = Math.max(6, Math.round((2 * Math.PI * r) / (sr * 1.3)));
+    const st = Math.min(sr * 1.15, ((2 * Math.PI * r) / n) / 1.3);
+    const c = colour(i);
+    for (let k = 0; k < n; k++) {
+      const t = ((k + (i % 2) * 0.5) / n) * Math.PI * 2;
+      const q = quatAxis(0, 0, 1, t);
+      at(...P(-Math.sin(t) * r, Math.cos(t) * r), st, sr, c, rot ? quatMul(rot, q) : q);
+    }
+  }
 }
 
 function* flush(out, ...rigs) {
@@ -768,32 +796,37 @@ function roundBale(R, lx, ly, lz, kind, ax = 0) {
   const b = BALE[kind], rad = 0.75, hw = 0.6;
   const ca = Math.cos(ax), sa = Math.sin(ax), qa = quatYaw(ax);
   const P = (x, y, z) => [lx + ca * x + sa * z, ly + y, lz - sa * x + ca * z];
+  // Nothing may reach past the bale's outline: a splat still shows at twice its scale, so pieces
+  // are inset by two of their own sizes from every edge. The ends were once single discs nearly
+  // the bale's radius: they reached twice as far, and wherever a bale was seen edge-on (its axis
+  // across the view) each end stood up out of it as a thin vertical prong.
   const n = Math.max(10, Math.round((2 * Math.PI * rad) / (R.s * 1.4)));
   const na = Math.max(1, Math.round((2 * hw) / (R.s * 1.6)));
+  const dz = (2 * hw) / (na + 1.86), sz = dz / 1.4;          // centres along the axis, inset 2 sz from each end
   for (let i = 0; i < n; i++) {
     const t = (i / n) * Math.PI * 2, nx = -Math.sin(t), ny = Math.cos(t);
     const q = quatMul(qa, quatAxis(0, 0, 1, t));
     const c = R.tone(b.side, ca * nx, ny, -sa * nx);
     for (let a = 0; a < na; a++) {
-      const [x, y, z] = P(nx * rad * 0.92, ny * rad * 0.92, ((a + 0.5) / na * 2 - 1) * hw);
-      R.p(x, y, z, (Math.PI * rad / n) * 0.8, rad * 0.12, (hw / na) * 0.95, c, q);
+      const [x, y, z] = P(nx * rad * 0.92, ny * rad * 0.92, (a - (na - 1) / 2) * dz);
+      R.p(x, y, z, (Math.PI * rad / n) * 1.25, rad * 0.12, sz, c, q);
     }
   }
   if (kind === 'black' || kind === 'green') {
-    const [x, y, z] = P(0, rad * 0.75, 0);
-    R.p(x, y + 0.02, z, rad * 0.3, 0.05, hw * 0.7, mix3(b.side, [0.8, 0.8, 0.8], 0.35), qa);     // a sheen on the wrap
+    // a sheen on the wrap, in three pieces along the top that stop short of the ends
+    const sheen = mix3(b.side, [0.8, 0.8, 0.8], 0.35);
+    for (let a = -1; a <= 1; a++) {
+      const [x, y, z] = P(0, rad * 0.75, a * hw * 0.4);
+      R.p(x, y + 0.02, z, rad * 0.3, 0.05, hw * 0.28, sheen, qa);
+    }
   }
+  // the flat ends: rings of small splats (the roll's spiral as bands of the end and ring colours),
+  // as many rings as the frame's spacing allows, the outermost reaching the rim and no further
+  const m = clamp(Math.round(rad / (R.s * 1.6)), 1, 3);
   for (const sg of [-1, 1]) {
-    const nz = sg;
-    const tone = (c) => R.tone(c, sa * nz, 0, ca * nz);
-    let [x, y, z] = P(0, 0, sg * hw);
-    R.p(x, y, z, rad * 0.97, rad * 0.97, 0.04, tone(b.end), qa);
-    [x, y, z] = P(0, 0, sg * (hw + 0.015));
-    R.p(x, y, z, rad * 0.68, rad * 0.68, 0.03, tone(b.ring), qa);
-    [x, y, z] = P(0, 0, sg * (hw + 0.03));
-    R.p(x, y, z, rad * 0.5, rad * 0.5, 0.03, tone(b.end), qa);
-    [x, y, z] = P(0, 0, sg * (hw + 0.045));
-    R.p(x, y, z, rad * 0.22, rad * 0.22, 0.03, tone(b.ring), qa);
+    const cEnd = R.tone(b.end, sa * sg, 0, ca * sg), cRing = R.tone(b.ring, sa * sg, 0, ca * sg);
+    discFace(rad * 0.98, m, (u, v) => P(u, v, sg * hw), qa, (i) => (i === 0 || (m - i) % 2 === 1 ? cRing : cEnd),
+      (x, y, z, sx, sy, c, q) => R.p(x, y, z, sx, sy, 0.03, c, q));
   }
 }
 // A small square bale (0.9 x 0.45 x 0.35 m; fieldBales draws them 2.3 times life size, or they
@@ -801,11 +834,12 @@ function roundBale(R, lx, ly, lz, kind, ax = 0) {
 function squareBale(R, lx, lz, ax) {
   // sides a darker gold than the stubble, a pale top, and its shadow on the stubble behind it
   const ca = Math.cos(ax), sa = Math.sin(ax), qa = quatYaw(ax), c = [0.62, 0.5, 0.26], top = [0.8, 0.72, 0.45];
+  // (pieces sized so that twice their scale, where a splat still shows, ends at the bale's edges)
   R.p(lx - 0.1, 0.02, lz - 0.3, 0.55, 0.02, 0.25, [0.3, 0.26, 0.16], qa);
-  for (let i = -1; i <= 1; i++) {
-    const x = lx + ca * i * 0.3, z = lz - sa * i * 0.3;
-    R.p(x, 0.2, z, 0.19, 0.15, 0.2, R.tone(c, 0, 0, 1), qa);
-    R.p(x, 0.36, z, 0.19, 0.03, 0.19, R.tone(top, 0, 1, 0), qa);
+  for (let i = -1.5; i <= 1.5; i++) {
+    const x = lx + ca * i * 0.22, z = lz - sa * i * 0.22;
+    R.p(x, 0.18, z, 0.12, 0.09, 0.12, R.tone(c, 0, 0, 1), qa);
+    R.p(x, 0.34, z, 0.12, 0.025, 0.11, R.tone(top, 0, 1, 0), qa);
   }
 }
 
@@ -836,8 +870,11 @@ function plough(R) {
     const t = (i + 0.5) / 4, x = lerp(-1.9, -5.6, t), z = lerp(-0.2, -1.8, t);
     R.bar(x, 0.9, z, x - 0.2, 0.1, z, 0.06, frame);
     R.bar(x, 0.9, z, x - 0.2, 1.7, z, 0.06, frame);
-    R.p(x - 0.35, 0.25, z + 0.2, 0.4, 0.22, 0.05, R.tone(steel, 0, 0, 1), quatYaw(0.6));      // mouldboard in the soil
-    R.p(x - 0.35, 1.55, z + 0.2, 0.4, 0.22, 0.05, R.tone(steel, 0, 0, 1), quatYaw(0.6));      // its twin, turned up
+    // mouldboard in the soil and its twin turned up, each two pieces sized so they end at its edges
+    const ux = Math.cos(0.6) * 0.2, uz = -Math.sin(0.6) * 0.2;
+    for (const y of [0.25, 1.55]) for (const sg of [-1, 1]) {
+      R.p(x - 0.35 + sg * ux, y, z + 0.2 + sg * uz, 0.2, 0.15, 0.04, R.tone(steel, 0, 0, 1), quatYaw(0.6));
+    }
   }
   R.wheel(-5.9, 0.4, -1.7, 0.4, 0.25, [0.5, 0.5, 0.5]);
 }
@@ -892,7 +929,11 @@ function combine(R, liv, rng) {
   }
   R.bar(3.9, 1.65, -3.6, 3.9, 1.65, 3.6, 0.14, mul3(reel, 0.7), 12);              // the reel's shaft
   for (const sg of [-1, 1]) {
-    R.p(3.9, 1.65, sg * 3.6, 0.6, 0.6, 0.05, R.tone(reel, 0, 0, sg));
+    // the reel's end: spokes from the shaft to each bat (a disc there reached twice the reel's size)
+    for (let i = 0; i < 6; i++) {
+      const t = (i / 6) * Math.PI * 2;
+      R.bar(3.9, 1.65, sg * 3.6, 3.9 + 0.55 * Math.cos(t), 1.65 + 0.55 * Math.sin(t), sg * 3.6, 0.05, reel, 2);
+    }
     R.bar(3.0, 1.1, sg * 3.6, 3.9, 1.65, sg * 3.6, 0.06, trim === COMBINE[2].trim ? body : trim, 2);
   }
   // cab at the front of the roof
