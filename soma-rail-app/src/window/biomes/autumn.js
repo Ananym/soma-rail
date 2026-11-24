@@ -228,7 +228,9 @@ function farRaw(W, wx) {
 // Everything that depends on world x alone, tabulated per metre in blocks of 256 m.
 // (cw: the viaduct's weight, inl: the close woods', cl: the cliff's, sh: the shelf's, sl: the
 // slope's; then the profile's measures, as profileAt)
-const XFIELDS = ['nd', 'fd', 'fb', 'cw', 'inl', 'wind', 'leaf', 'cl', 'sh', 'sl', 'rim', 'talus', 'ndC', 'ndS', 'yb', 'bs', 'be', 'ndH', 'edge', 'ndW', 'bay'];
+// (and the hills' measures that depend on x alone, as farHills uses them: tabulated, as the profile
+// is, because a far splat asks for three heights or more)
+const XFIELDS = ['nd', 'fd', 'fb', 'cw', 'inl', 'wind', 'leaf', 'cl', 'sh', 'sl', 'rim', 'talus', 'ndC', 'ndS', 'yb', 'bs', 'be', 'ndH', 'edge', 'ndW', 'bay', 'face', 'c1', 'A1', 'c2', 'A2', 'c3', 'A3', 'bank'];
 const XB = 256, XF = XFIELDS.length;
 const XR = new Float64Array(XF);
 function xRaw(W, wx) {
@@ -241,22 +243,61 @@ function xRaw(W, wx) {
   XR[6] = smooth(0.25, 0.75, noise1(wx / 1300, W.ws + 42));     // how thick the leaves fall
   XR[7] = w.cliff; XR[8] = w.shelf; XR[9] = w.slope;
   XR[10] = p.rim; XR[11] = p.talus; XR[12] = p.ndC; XR[13] = p.ndS; XR[14] = p.yb; XR[15] = p.bs; XR[16] = p.be; XR[17] = p.ndH; XR[18] = p.edge; XR[19] = p.ndW;
-  XR[20] = bayAt(W, wx);
+  const bay = bayAt(W, wx), sd = W.ws;
+  XR[20] = bay;
+  XR[21] = smooth(0.72, 0.82, noise1(wx / 430, sd + 68));                 // a granite face on the first ridge
+  XR[22] = 300 + 220 * noise1(wx / 900, sd + 60);
+  XR[23] = (50 + 105 * noise1(wx / 640, sd + 61) + 60 * Math.pow(noise1(wx / 250, sd + 67), 3)) * (1 - 0.82 * bay);
+  XR[24] = 1300 + 700 * noise1(wx / 1500, sd + 62);
+  XR[25] = (140 + 140 * noise1(wx / 1150, sd + 63) + 70 * Math.pow(noise1(wx / 430, sd + 69), 3)) * (1 - 0.35 * bay);
+  XR[26] = 3300 + 1800 * noise1(wx / 2600, sd + 64);
+  XR[27] = 240 + 150 * noise1(wx / 2000, sd + 65) + 80 * Math.pow(noise1(wx / 700, sd + 70), 3);
+  XR[28] = 1.2 + 3 * noise1(wx / 170, sd + 64);                             // the far shore's bank
   return XR;
 }
 const newX = () => Object.fromEntries(XFIELDS.map((f) => [f, 0]));
 const X = newX();
 function xAt(W, wx, o = X) {
   const b = Math.floor(wx / XB);
-  let t = W.xb.get(b);
+  let t = W.lb === b ? W.lt : W.xb.get(b);
   if (!t) {
     t = new Float32Array((XB + 1) * XF);
     for (let k = 0; k <= XB; k++) { const v = xRaw(W, b * XB + k); for (let f = 0; f < XF; f++) t[k * XF + f] = v[f]; }
     if (W.xb.size > 3000) W.xb.clear();
     W.xb.set(b, t);
   }
-  const u = wx - b * XB, k = Math.min(XB - 1, Math.floor(u)), a = u - k, i0 = k * XF, i1 = i0 + XF;
-  for (let f = 0; f < XF; f++) o[XFIELDS[f]] = t[i0 + f] + (t[i1 + f] - t[i0 + f]) * a;
+  W.lb = b; W.lt = t;
+  const u = wx - b * XB, k = Math.min(XB - 1, Math.floor(u)), a = u - k, i = k * XF, j = i + XF;
+  // (field by field, written out: the hottest few lines of the biome)
+  o.nd = t[i + 0] + (t[j + 0] - t[i + 0]) * a;
+  o.fd = t[i + 1] + (t[j + 1] - t[i + 1]) * a;
+  o.fb = t[i + 2] + (t[j + 2] - t[i + 2]) * a;
+  o.cw = t[i + 3] + (t[j + 3] - t[i + 3]) * a;
+  o.inl = t[i + 4] + (t[j + 4] - t[i + 4]) * a;
+  o.wind = t[i + 5] + (t[j + 5] - t[i + 5]) * a;
+  o.leaf = t[i + 6] + (t[j + 6] - t[i + 6]) * a;
+  o.cl = t[i + 7] + (t[j + 7] - t[i + 7]) * a;
+  o.sh = t[i + 8] + (t[j + 8] - t[i + 8]) * a;
+  o.sl = t[i + 9] + (t[j + 9] - t[i + 9]) * a;
+  o.rim = t[i + 10] + (t[j + 10] - t[i + 10]) * a;
+  o.talus = t[i + 11] + (t[j + 11] - t[i + 11]) * a;
+  o.ndC = t[i + 12] + (t[j + 12] - t[i + 12]) * a;
+  o.ndS = t[i + 13] + (t[j + 13] - t[i + 13]) * a;
+  o.yb = t[i + 14] + (t[j + 14] - t[i + 14]) * a;
+  o.bs = t[i + 15] + (t[j + 15] - t[i + 15]) * a;
+  o.be = t[i + 16] + (t[j + 16] - t[i + 16]) * a;
+  o.ndH = t[i + 17] + (t[j + 17] - t[i + 17]) * a;
+  o.edge = t[i + 18] + (t[j + 18] - t[i + 18]) * a;
+  o.ndW = t[i + 19] + (t[j + 19] - t[i + 19]) * a;
+  o.bay = t[i + 20] + (t[j + 20] - t[i + 20]) * a;
+  o.face = t[i + 21] + (t[j + 21] - t[i + 21]) * a;
+  o.c1 = t[i + 22] + (t[j + 22] - t[i + 22]) * a;
+  o.A1 = t[i + 23] + (t[j + 23] - t[i + 23]) * a;
+  o.c2 = t[i + 24] + (t[j + 24] - t[i + 24]) * a;
+  o.A2 = t[i + 25] + (t[j + 25] - t[i + 25]) * a;
+  o.c3 = t[i + 26] + (t[j + 26] - t[i + 26]) * a;
+  o.A3 = t[i + 27] + (t[j + 27] - t[i + 27]) * a;
+  o.bank = t[i + 28] + (t[j + 28] - t[i + 28]) * a;
   return o;
 }
 const XT = newX();   // a second one, for lookups made while X is in use
@@ -326,17 +367,12 @@ function ridge(t, c, w, front) {
   return t < c ? smooth(c - front, c, t) : Math.exp(-((t - c) / w) * ((t - c) / w));
 }
 function smax(a, b, k) { const h = clamp(0.5 + 0.5 * (a - b) / k, 0, 1); return b + (a - b) * h + k * h * (1 - h); }
-function farHills(W, wx, t, bay) {
+// (x: the table at wx, xAt: the ridges' crests c1..c3 and heights A1..A3, and the face, by world x)
+function farHills(W, wx, t, x) {
   const s = W.ws;
-  const face = smooth(0.72, 0.82, noise1(wx / 430, s + 68));                 // a granite face on the first ridge
-  const c1 = 300 + 220 * noise1(wx / 900, s + 60);
-  const A1 = (50 + 105 * noise1(wx / 640, s + 61) + 60 * Math.pow(noise1(wx / 250, s + 67), 3)) * (1 - 0.82 * bay);
+  const face = x.face, c1 = x.c1, A1 = x.A1, c2 = x.c2, A2 = x.A2, c3 = x.c3, A3 = x.A3;
   const h1 = A1 * ridge(t, c1, 520, c1 * (1 - 0.55 * face) + 20);
-  const c2 = 1300 + 700 * noise1(wx / 1500, s + 62);
-  const A2 = (140 + 140 * noise1(wx / 1150, s + 63) + 70 * Math.pow(noise1(wx / 430, s + 69), 3)) * (1 - 0.35 * bay);
   const h2 = A2 * ridge(t, c2, 900, 900);
-  const c3 = 3300 + 1800 * noise1(wx / 2600, s + 64);
-  const A3 = 240 + 150 * noise1(wx / 2000, s + 65) + 80 * Math.pow(noise1(wx / 700, s + 70), 3);
   const h3 = A3 * ridge(t, c3, 2600, 2200);
   let H = smax(smax(h1, h2, 30), h3, 40);
   // the canopy's own rolling and the knobs of the Shield, scaled with the hill
@@ -401,8 +437,8 @@ function heightAt(W, wx, d) {
     return y;
   }
   const t = d - x.fd, tb = d - x.fb;
-  const bank = (1.2 + 3 * noise1(wx / 170, W.ws + 64)) * smooth(0, 26, t);
-  return LV + 0.15 + bank + farHills(W, wx, tb + 30, x.bay) * smooth(-60, 40, tb) + 0.01 * Math.max(0, tb);
+  const bank = x.bank * smooth(0, 26, t);
+  return LV + 0.15 + bank + farHills(W, wx, tb + 30, x) * smooth(-60, 40, tb) + 0.01 * Math.max(0, tb);
 }
 // How far out from an island a point of open water lies, in island radii (1 at its shore; large
 // when no island is near).
@@ -446,7 +482,7 @@ function surface(W, wx, d) {
     // the shelf: rock at its steps, the bench a barren of rock, blueberry and straw grass with
     // stands of trees on it
     if (x.sh > 0.5 && (d < x.bs + 2 || d > x.be)) { s.t = d < x.rim ? T.GRASS : T.ROCK; return s; }
-    if (d > 9 && woodsVal(W, wx, d, x) > 0.5) { s.t = T.WOODS; return s; }
+    if ((d > 9 || (x.inl > 0.5 && d < x.edge)) && woodsVal(W, wx, d, x) > (x.inl > 0.5 && d < 12 ? -9 : 0.5)) { s.t = T.WOODS; return s; }
     const rock = noise2(wx / 23, d / 17, W.ws + 75) + 0.3 * (1 - x.inl);
     s.t = rock > 0.78 ? T.ROCK : T.GRASS;
     return s;
@@ -853,10 +889,112 @@ function treeSplats(out, d, H, Wd) {
 const baseY = (ctx, x, d, opts) => (opts.y != null ? opts.y : ctx.terrain.height(ctx.x0 + x, d) - 0.15);
 const BARK = [0.2, 0.17, 0.14], BARK_PINE = [0.24, 0.2, 0.17], BIRCH_BARK = [0.72, 0.71, 0.66], ASPEN_BARK = [0.6, 0.63, 0.55];
 
+// A broadleaf tree near the window (within NEAR_D): out of focus if built like a distant one, as a
+// volume of round blobs sized to close the gaps (at 12 m a 0.6 m blob is a 30 px smear). Here the
+// crown is surface, not volume: each lump of it only the shell the window sees, built of leaf
+// sprays sized from distance (a spray at 10 to 25 m a clear shape: three times longer than wide,
+// thin, tilted every way), lit on top and shaded beneath, an eighth of them set deeper and darker
+// so the crown's depths show through the gaps, and real gaps between them where the limbs and the
+// sky show. The trunk and the limbs are struts; a birch's or an aspen's carries its dark marks.
+// The sprays' number follows the crown's area; given fewer (a lower budget), they grow to cover.
+const NEAR_D = 45;
+const sprayLen = (d, birchy) => clamp(0.019 * d, 0.15, 1.0) * (birchy ? 0.8 : 1);
+function crownLumps(rng, x, y0, d, H, Wc, cb, kind) {
+  // the lumps: [cx, cy, cd, rx, ry, rz, f (0 low .. 1 high)]
+  const L = [];
+  if (kind === 'birch' || kind === 'aspen') {
+    const K = 4 + Math.floor(rng() * 3), lean = (rng() - 0.5) * 0.08;
+    for (let k = 0; k < K; k++) {
+      const f = (k + 0.5) / K, cy = y0 + cb + (H - cb) * (0.15 + 0.75 * f);
+      const w = Wc * 0.5 * (1 - 0.6 * f * f) * (0.8 + 0.4 * rng());
+      L.push([x + lean * (cy - y0) + (rng() - 0.5) * w * 0.4, cy, d + (rng() - 0.5) * w * 0.3, w, w * 0.75, w * 0.6, f]);
+    }
+    return L;
+  }
+  const oak = kind === 'oak', cy = y0 + cb + (H - cb) * 0.5, ry = (H - cb) * 0.5, rx = Wc * 0.5;
+  const K = oak ? 10 : 8;
+  for (let k = 0; k < K; k++) {
+    let ux, uy, uz;
+    if (k === 0) { ux = (rng() - 0.5) * 0.2; uy = 0.55; uz = 0; }
+    else { const a = (k / K) * Math.PI * 2 + rng() * 0.8; uy = (oak ? 0.1 : -0.05) + (rng() - 0.5) * 0.7; ux = Math.cos(a) * (0.62 + 0.15 * rng()); uz = Math.sin(a) * 0.5; }
+    const lr = (oak ? 0.4 : 0.46) + 0.12 * rng();
+    L.push([x + ux * rx, cy + uy * ry, d - uz * rx, lr * rx, lr * ry * (oak ? 0.8 : 0.95), lr * rx * 0.85, clamp(0.5 + uy * 0.9, 0, 1)]);
+  }
+  return L;
+}
+// The splats a near broadleaf wants for its crown at full detail (and its trunk and limbs).
+function nearCount(H, Wd, d, birchy) {
+  const L = sprayLen(d, birchy), area = 0.8 * H * Wd * (birchy ? 0.7 : 0.75);
+  return Math.round((birchy ? 1.2 : 1.5) * area / (2.4 * L * L) * 1.12) + 30;
+}
+function* nearBroadleaf(ctx, out, x, d, opts, kind) {
+  const rng = opts.rng || ctx.rng, birchy = kind === 'birch' || kind === 'aspen';
+  const H = opts.height, Wc = opts.width, y0 = baseY(ctx, x, d, opts);
+  const tk = opts.kind != null ? opts.kind : KIND.TREE;
+  const [top, low] = opts.crown || CROWN[SP.MAPLE][0];
+  const n = Math.max(40, Math.round(opts.n || nearCount(H, Wc, d, birchy)));
+  const cb = H * (birchy ? (kind === 'aspen' ? 0.4 : 0.3) + 0.12 * rng() + (opts.tall ? 0.12 : 0) : (opts.tall ? 0.46 : kind === 'oak' ? 0.3 : 0.24) * (0.85 + 0.3 * rng()));
+  const lumps = crownLumps(rng, x, y0, d, H, Wc, cb, kind);
+  // trunk and limbs, struts sized from distance
+  const tr = Math.max(birchy ? 0.07 : 0.12, H * (birchy ? 0.014 : 0.025), 0.0007 * d);
+  const bark = birchy ? (kind === 'aspen' ? ASPEN_BARK : BIRCH_BARK) : BARK;
+  const th = birchy ? H * 0.86 : cb * 1.1;
+  const segs = Math.max(3, Math.round(th / Math.max(0.35, tr * 2.5)));
+  for (let i = 0; i < segs; i++) {
+    const t0 = i / segs, t1 = (i + 1) / segs, c = mul3(bark, (birchy ? 0.92 : 0.75) + 0.3 * t0);
+    bar(out, [x, y0 + th * t0, -d], [x, y0 + th * t1, -d], tr * (1.15 - 0.35 * t0), c, 1, tk);
+  }
+  if (birchy) {
+    // the dark marks of the bark, laid on the trunk's near side
+    const nm = Math.round(th / 0.45);
+    for (let i = 0; i < nm; i++) {
+      const yy = y0 + 0.2 + rng() * (th - 0.3), w = tr * (0.7 + 0.6 * rng());
+      out(x + (rng() - 0.5) * tr * 0.6, yy, -(d - tr * 0.85), w, Math.max(0.025, tr * 0.28), tr * 0.2, 0.11, 0.1, 0.09, 1, 0, 0, 0, 1, tk);
+    }
+  }
+  const fork = [x, y0 + (birchy ? cb * 0.9 : cb), -d];
+  for (const l of lumps) {
+    if (!birchy || rng() < 0.6) bar(out, fork, [l[0], l[1] - l[4] * 0.2, -(l[2] - l[5] * 0.25)], tr * (birchy ? 0.4 : 0.55), mul3(bark, 0.8), 3, tk);
+    if (out.due()) yield;
+  }
+  // the sprays: on the shells of the lumps, the side the window sees (and the tops seen from above)
+  const used = segs + lumps.length * 3 + (birchy ? Math.round(th / 0.45) : 0);
+  const ns = Math.max(20, n - used);
+  const full = Math.max(1, nearCount(H, Wc, d, birchy) - 30);
+  const Ls = sprayLen(d, birchy) * Math.sqrt(Math.max(1, full / ns));
+  let area = 0;
+  for (const l of lumps) area += l[3] * l[4];
+  const cy0 = lumps.reduce((s, l) => s + l[1], 0) / lumps.length;
+  const vy = clamp((CAMY - cy0) / Math.max(4, d), -0.6, 1.5), vl = Math.hypot(vy, 1), Vy = vy / vl, Vz = 1 / vl;
+  for (const l of lumps) {
+    const [lx, ly, ld, lrx, lry, lrz, f] = l;
+    const m = Math.max(3, Math.round(ns * (l[3] * l[4]) / area));
+    let lc = mix3(low, top, f * f * (3 - 2 * f));
+    if (rng() < 0.3) lc = mix3(lc, rng() < 0.5 ? top : low, 0.45);
+    for (let i = 0; i < m; i++) {
+      let ux = rng() * 2 - 1, uy = rng() * 2 - 1, uz = rng() * 2 - 1;
+      const ll = Math.hypot(ux, uy, uz) || 1; ux /= ll; uy /= ll; uz /= ll;
+      const dv = uy * Vy + uz * Vz;
+      if (dv < -0.15) { uy -= 2 * dv * Vy; uz -= 2 * dv * Vz; }       // turned to the side the window sees
+      const deep = rng() < 0.13, rad = deep ? 0.45 + 0.25 * rng() : 0.84 + 0.18 * rng();
+      // a tangent to the shell, and the spray along it, turned about itself at random
+      let tx = -uy, ty = ux, tz = rng() - 0.5;
+      const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+      const q = quatMul(quatXTo(tx, ty, tz), quatAxis(1, 0, 0, rng() * Math.PI));
+      let c = shade(lc, ux * 0.8 + (lx - x) / Math.max(1, Wc) * 0.4, uy, uz, 0.5, 0.62);
+      c = mul3(c, (deep ? 0.42 : 0.78 + 0.32 * rng()) * (uy < -0.25 ? 0.72 : 1));
+      c = jitter(c, rng, 0.07);
+      const s = Ls * (0.7 + 0.6 * rng());
+      out(lx + ux * lrx * rad, ly + uy * lry * rad, -(ld - uz * lrz * rad), s, s * 0.42, s * 0.16, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], tk);
+      if (out.due()) yield;
+    }
+  }
+}
 // Maple (and oak): a short trunk forking into a few limbs, and a crown of overlapping lumps on a
 // dome, each lump shaded from its own surface, the colour running from the crown's top colour to
 // its lower one, a lump here and there shifted toward its neighbour colour.
 function* maple(ctx, out, x, d, opts = {}) {
+  if (d < NEAR_D && opts.height && opts.width && (opts.n || 0) >= 40) { yield* nearBroadleaf(ctx, out, x, d, opts, opts.oak ? 'oak' : 'maple'); return; }
   const rng = opts.rng || ctx.rng;
   const oak = !!opts.oak;
   const H = opts.height || 15, Wc = opts.width || H * (oak ? 0.85 : 0.78) * (opts.tall ? 0.75 : 1);
@@ -952,7 +1090,8 @@ function* spruce(ctx, out, x, d, opts = {}) {
   const Tn = clamp(Math.round(Math.sqrt(n) * 0.8), 3, Math.max(3, Math.round(span / 0.55)));
   const tierJ = [], tierS = [];
   for (let k = 0; k < Tn; k++) { tierJ.push(0.8 + 0.4 * rng()); tierS.push(0.85 + 0.3 * rng()); }
-  const s0 = Math.sqrt((H * Wd * 0.5) / n);
+  // (near the window the boughs are sized from distance, as a broadleaf's sprays: thin strokes)
+  const s0 = d < NEAR_D ? Math.min(Math.sqrt((H * Wd * 0.5) / n), sprayLen(d, false) * 0.55) : Math.sqrt((H * Wd * 0.5) / n);
   const trunkN = n >= 30 ? Math.max(2, Math.round(n * (larch ? 0.05 : 0.025))) : 0;
   if (trunkN) {
     const tr = Math.max(0.06, H * 0.012, 0.0005 * d), th = cb + H * (larch ? 0.5 : 0.12);
@@ -987,8 +1126,9 @@ function* spruce(ctx, out, x, d, opts = {}) {
     const droop = (larch ? 0.15 : 0.3) + 0.55 * (1 - tTop) + 0.25 * rng();
     const by = yk - droop * rr - tierH * 0.25 * rng();
     const q = quatXTo(ca, -droop, sa);
-    const len = Math.min(Rk * 0.55, Math.max(s0 * 1.5, rr * 0.4));
-    const th = Math.max(s0 * (n < 120 ? 0.62 : 0.45), len * 0.28);
+    let len = Math.min(Rk * 0.55, Math.max(s0 * 1.5, rr * 0.4));
+    let th = Math.max(s0 * (n < 120 ? 0.62 : 0.45), len * 0.28);
+    if (d < NEAR_D) { len = Math.min(len, sprayLen(d, false) * 1.8); th = Math.min(th, len * 0.22); }   // (near: a bough a clear stroke)
     const lit = Math.max(0, ca * SUN[0] + 0.45 * SUN[1] + sa * SUN[2]);
     let c = mix3(col, tip, f * f * (0.25 + 0.75 * lit) + (larch ? 0.25 : 0));
     c = mul3(c, (0.55 + 0.5 * f) * (0.72 + 0.5 * lit) * tierS[k]);
@@ -1061,9 +1201,11 @@ function* whitePine(ctx, out, x, d, opts = {}) {
         let c = shade(mix3(col, hi, 0.25 + 0.5 * Math.max(0, uy)), ux, uy * 1.4, uz, 0.5, 0.7);
         c = mul3(c, 0.6 + 0.4 * rad);
         c = jitter(c, rng, 0.12);
-        const s = ss * (0.6 + 0.6 * rng());
-        if (i === 0 && m >= 6) { const cc = mul3(col, 0.5); out(cx, cyy, -cd, lrx * 0.6, lry * 0.6, lrx * 0.45, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, kind); continue; }
-        out(cx + ux * lrx * rad, cyy + uy * lry * rad, -(cd - uz * lrx * 0.6 * rad), s * 1.25, s * 0.8, s, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+        const near = d < NEAR_D, s = (near ? Math.min(ss, sprayLen(d, false)) : ss) * (0.6 + 0.6 * rng());
+        if (i === 0 && m >= 6) { const cc = mul3(col, 0.5); out(cx, cyy, -cd, lrx * (near ? 0.4 : 0.6), lry * (near ? 0.4 : 0.6), lrx * 0.45, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, kind); continue; }
+        // (near the window a plume of needles is a long flat stroke, swept along the branch)
+        if (near) out(cx + ux * lrx * rad, cyy + uy * lry * rad, -(cd - uz * lrx * 0.6 * rad), s * 1.9, s * 0.42, s * 0.9, c[0], c[1], c[2], 1, 0, 0, Math.sin((rng() - 0.5) * 0.25), Math.cos((rng() - 0.5) * 0.25), kind);
+        else out(cx + ux * lrx * rad, cyy + uy * lry * rad, -(cd - uz * lrx * 0.6 * rad), s * 1.25, s * 0.8, s, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
         if (out.due()) yield;
       }
     }
@@ -1072,6 +1214,7 @@ function* whitePine(ctx, out, x, d, opts = {}) {
 
 // Birch and aspen (pinewood.js's birch): a slender pale trunk with dark marks and an airy crown.
 function* birch(ctx, out, x, d, opts = {}) {
+  if (d < NEAR_D && opts.height && opts.width && (opts.n || 0) >= 40) { yield* nearBroadleaf(ctx, out, x, d, opts, opts.aspen ? 'aspen' : 'birch'); return; }
   const rng = opts.rng || ctx.rng;
   const aspen = !!opts.aspen;
   const H = opts.height || 14, Wc = opts.width || H * (aspen ? 0.3 + 0.08 * rng() : 0.4 + 0.12 * rng());
@@ -1155,7 +1298,11 @@ function planTree(ctx, out, sp, wx, d, y, r, opts = {}) {
   let H = (K.h[0] + (K.h[1] - K.h[0]) * r()) * (opts.hk || 1);
   if (opts.hmax != null) H = Math.min(H, opts.hmax);
   const Wd = H * K.w * (0.85 + 0.3 * r()) * (opts.wk || 1);
-  const nMax = Math.max(1, Math.round(treeSplats(out, d, H, Wd) * (opts.detail || 1)));
+  // (a broadleaf near the window is built of sprays whose number follows its crown's area: see
+  // nearBroadleaf; everything else as treeSplats allows)
+  const near = d < NEAR_D && (opts.detail || 1) >= 1;
+  const broad = sp <= SP.OAK && sp !== SP.TAMARACK;
+  const nMax = near ? Math.round(nearCount(H, opts.tall ? Wd * 0.75 : Wd, d, sp === SP.BIRCH || sp === SP.ASPEN) * (broad ? 1 : sp === SP.PINE ? 0.8 : 1.1)) : Math.max(1, Math.round(treeSplats(out, d, H, Wd) * (opts.detail || 1)));
   const alt = opts.alt != null ? opts.alt : hashInts(Math.round(wx * 2), Math.round(d * 2), 977) & 1;
   return {
     fn: K.fn, sp, x: wx - ctx.x0, d, w: (H * Wd) / (d * d), nMax: opts.cap ? Math.min(opts.cap, nMax) : nMax, refl: !!opts.refl,
@@ -1180,7 +1327,9 @@ function* drawPlan(ctx, out, plan, budget) {
   for (const t of plan) {
     const mv = t.move != null ? t.move : t.d > GROVE_FAR ? STILL : grove(t.group);
     const o = t.refl ? mirrorOut(out, mv) : withMove(out, mv);
+    const n0 = out.n;
     yield* t.fn(ctx, o, t.x, t.d, { ...t.opts, n: t.n });
+    if (t.d < 40) note('tree', ctx.x0 + t.x, t.d, { sp: t.sp, n: out.n - n0, plan: t.n, nMax: t.nMax, H: Math.round(t.opts.height) });
     if (out.due()) yield;
     if (out.n > out.limit) break;
   }
@@ -1238,12 +1387,14 @@ function woodsPlan(ctx, out, W, plan, dLo, dHi, sp, keep = 0.5) {
       const r = worldRng(ctx, 511, gx, gk);
       const wx = (gx + r()) * sp, d = (gk + r()) * sp;
       if (d < dLo || d >= dHi || d < 7) continue;
+      // (each tree planned by the one chunk it stands in: a chunk drops splats far outside itself)
+      if (wx < ctx.x0 || wx >= ctx.x0 + ctx.length) continue;
       const s = surface(W, wx, d);
       if (s.far || s.t === T.WATER) continue;
       const alt = (gx + gk) & 1;
       const u = r();
       const x = xAt(W, wx, XT), close = x.inl > 0.5 && d < x.edge;
-      if (s.t === T.WOODS) { if (u > keep * (close ? 1.25 * smooth(10, 16, d) : smooth(8, 13, d))) continue; }
+      if (s.t === T.WOODS) { if (u > keep * (close ? 1.25 * smooth(10, 16, d) * (d > 22 ? 0.5 : 1) : smooth(8, 13, d))) continue; }
       else if (s.t === T.GRASS) { if (u > (x.sh > 0.5 ? 0.12 : 0.04)) continue; }
       else if (s.t === T.ROCK) { if (u > 0.03) continue; }
       else continue;
@@ -1300,8 +1451,57 @@ function* boulder(ctx, out, wx, d, y, r, rng) {
   const col = mix3(C.granite, mix3(C.graniteDark, C.lichen, rng()), 0.25 + 0.4 * rng());
   yield* blob(ctx, out, wx - ctx.x0, y + r * 0.2, d, r, r * 0.55, r * 0.85, { n, color: col, rng, kind: KIND.ROCK, inner: 0.3, amb: 0.55, clump: 0.3 });
 }
+// Within 40 m a shrub has form: bracken is a ring of arching fronds, each a chain of thin leafy
+// strokes drooping at its tip; a bush is a few thin stems fanning up from the ground with sprays of
+// leaves along their upper parts, gaps between, lit on top. Sprays are sized from distance (as the
+// near trees'), so a bush near the line is a few dozen clear shapes and not a soft cushion.
+function* formShrub(out, x, y, d, w, h, cs, type, rng, cap) {
+  const L = clamp(0.022 * d, 0.07, 0.6), K = KIND.HEDGE;
+  if (type === 'bracken') {
+    const nf = 5 + Math.floor(rng() * 5);
+    for (let f = 0; f < nf; f++) {
+      const a = (f / nf) * Math.PI * 2 + rng() * 0.6, reach = w * (0.35 + 0.2 * rng()), up = h * (0.8 + 0.4 * rng());
+      const c0 = jitter(cs[Math.floor(rng() * cs.length)], rng, 0.08);
+      let px = x, py = y + 0.02, pz = -d;
+      const seg = 4;
+      for (let k = 1; k <= seg; k++) {
+        const t = k / seg, rr = reach * t, hh = up * Math.sin(Math.PI * 0.78 * t) * (1.1 - 0.25 * t);
+        const nx = x + Math.cos(a) * rr, ny = y + hh, nz = -(d + Math.sin(a) * rr * 0.8);
+        const dx = nx - px, dy = ny - py, dz = nz - pz, l = Math.hypot(dx, dy, dz) || 1e-6;
+        const q = quatXTo(dx / l, dy / l, dz / l), c = mul3(c0, 0.7 + 0.4 * t);
+        out((px + nx) / 2, (py + ny) / 2, (pz + nz) / 2, l * 0.55, Math.max(0.03, w * 0.07 * (1.2 - 0.6 * t)), 0.02, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], K);
+        px = nx; py = ny; pz = nz;
+      }
+    }
+    return;
+  }
+  const area = 0.7 * w * h, n = Math.max(8, Math.min(cap, Math.round(1.3 * area / (2.4 * L * L))));
+  const ns = 3 + Math.floor(rng() * 4), tips = [];
+  const sc = mul3(type === 'sapling' ? BARK : [0.32, 0.26, 0.2], 1.1);
+  for (let k = 0; k < ns; k++) {
+    // (nothing of it nearer the track than 6.1 m: only trees, masts and wires stand tall within 6 m)
+    const a = rng() * Math.PI * 2, tip = [x + Math.cos(a) * w * (0.2 + 0.25 * rng()), y + h * (0.75 + 0.25 * rng()), Math.min(-6.1, -(d + Math.sin(a) * w * 0.3))];
+    bar(out, [x + (rng() - 0.5) * 0.15, y, -d], tip, Math.max(0.018, 0.0006 * d), sc, 2, K);
+    tips.push(tip);
+  }
+  const Ls = L * Math.sqrt(Math.max(1, (1.3 * area / (2.4 * L * L)) / n));
+  for (let i = 0; i < n; i++) {
+    // along a stem's upper part, out from it, the window's side favoured
+    const tp = tips[i % ns], t = 0.35 + 0.65 * Math.sqrt(rng());
+    let ux = rng() * 2 - 1, uy = rng() * 1.6 - 0.5, uz = Math.abs(rng() * 2 - 1) * 0.9;
+    const ll = Math.hypot(ux, uy, uz) || 1; ux /= ll; uy /= ll; uz /= ll;
+    const off = w * (0.12 + 0.2 * rng());
+    const px = x + (tp[0] - x) * t + ux * off, py = y + (tp[1] - y) * t + uy * off * 0.8, pz = Math.min(-6.1, -d + (tp[2] + d) * t + uz * off * 0.6);
+    const q = quatMul(quatXTo(-uy + 0.3 * (rng() - 0.5), ux, rng() - 0.5), quatAxis(1, 0, 0, rng() * Math.PI));
+    let c = shade(cs[Math.floor(rng() * cs.length)], ux, uy, uz, 0.5, 0.62);
+    c = jitter(mul3(c, (0.75 + 0.35 * t) * (uy < -0.2 ? 0.75 : 1)), rng, 0.07);
+    const s = Ls * (0.7 + 0.6 * rng());
+    out(px, py, pz, s, s * 0.45, s * 0.16, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], K);
+  }
+}
 function* shrub(ctx, out, wx, d, y, w, h, type, rng, cap = Infinity) {
   const cs = SHRUB[type];
+  if (d < 40) { yield* formShrub(out, wx - ctx.x0, y, d, w, h, cs, type, rng, Math.min(cap, 400)); if (out.due()) yield; return; }
   const n = Math.max(3, Math.min(cap, Math.round(treeSplats(out, d, h, w) * 0.6)));
   yield* blob(ctx, out, wx - ctx.x0, y + h * 0.35, d, w / 2, h * 0.6, w * 0.4, { n, color: jitter(cs[Math.floor(rng() * cs.length)], rng, 0.1), rng, kind: KIND.HEDGE, inner: 0.4, clump: 0.6 });
 }
@@ -1332,8 +1532,7 @@ function* groundDetail(ctx, out, W, dLo, dHi, cell, per) {
       } else if (t === T.WOODS || t === T.FOREST || t === T.ISLE_WOOD) {
         const close = t === T.WOODS && xAt(W, wx, XT).inl > 0.5;
         if (close && u < 0.5) {
-          // the close woods' understory at the eye: hazel, striped maple and young maples in colour
-          yield* shrub(ctx, mirrorIf(out, s, wx, d, 1.2 + 1.8 * v), wx, d, y, 1.8 + 2 * v, 1.2 + 1.8 * v, r() < 0.45 ? 'hazel' : 'sapling', r);
+          // (the close woods' understory is drawn by understory(), with form)
         } else if (u < (close ? 0.75 : 0.3)) yield* shrub(ctx, mirrorIf(out, s, wx, d, 0.5 + 0.5 * v), wx, d, y, 1.2 + 1.2 * v, 0.5 + 0.5 * v, 'bracken', r);
         else if (u < (close ? 0.8 : 0.38)) yield* boulder(ctx, o, wx, d, y, 0.5 + v, r);
       }
@@ -2434,6 +2633,23 @@ function* eagles(ctx, out, W) {
 // shore, thickest in calm coves; and lily pads, green and yellowing, in the calm shallows.
 // ---------------------------------------------------------------------------------------------
 const LEAF_COLS = [[0.72, 0.1, 0.05], [0.8, 0.32, 0.04], [0.8, 0.56, 0.07], [0.62, 0.06, 0.06], [0.5, 0.26, 0.08], [0.78, 0.66, 0.14]];
+// The floor of the close woods in the first 15 m: fallen leaves you can make out, flat leaf-sized
+// splats lying every way on the ground in scarlet, gold and russet over the darker litter (the fill
+// under them gives only a wash at this range). STILL: the floor does not answer the beat.
+function* leafFloor(ctx, out, W, n) {
+  const r = makeRng(hashInts(W.ws, 731, ctx.index)), o = withMove(out, STILL);
+  for (let i = 0; i < n; i++) {
+    const x = r() * ctx.length, wx = ctx.x0 + x, d = 5.6 + 10 * Math.pow(r(), 1.4);
+    const xx = xAt(W, wx, XT);
+    if (xx.inl < 0.5) continue;
+    const y = W.H(wx, d);
+    const L = clamp(0.02 * d, 0.12, 0.3) * (0.7 + 0.6 * r());
+    const c = jitter(r() < 0.75 ? LEAF_COLS[Math.floor(r() * LEAF_COLS.length)] : mix3(C.floor, C.bracken, r()), r, 0.08);
+    const a = r() * Math.PI, ca = Math.cos(a / 2), sa = Math.sin(a / 2);
+    o(x, y + 0.03, -d, L, 0.012, L * 0.6, c[0] * 0.92, c[1] * 0.92, c[2] * 0.92, 1, 0, sa, 0, ca, KIND.GROUND);
+    if (out.due()) yield;
+  }
+}
 function* fallingLeaves(ctx, out, W, dLo, dHi, cell, per) {
   for (const { i, wx0 } of cellsAround(ctx, cell, 0)) {
     const x0 = xAt(W, wx0 + cell / 2, XT);
@@ -2844,7 +3060,9 @@ function* trackside(ctx0, emit) {
   const [ctx, W] = local(ctx0);
   const out = makeOut(ctx, emit, { zMargin: 1 });
   dreamSeason(ctx, out, W);
-  out.limit = ctx.count * 0.5;
+  // (in the close woods the trees that fill the frame take most of the band: the ground under them
+  // is mostly hidden by them and by the understory)
+  out.limit = ctx.count * (xAt(W, ctx.x0 + ctx.length / 2, XT).inl > 0.5 ? 0.7 : 0.5);
   yield* telegraph(ctx, out, W);
   yield* trackEdge(ctx, out, W);
   const night = lightsOn(ctx);
@@ -2859,6 +3077,7 @@ function* trackside(ctx0, emit) {
   yield* drawPlan(ctx, out, plan, Math.max(0, out.limit - out.n));
   out.limit = Infinity;
   yield* understory(ctx, out, W, 6.5, ctx.zFar, 0.4 * out.left());
+  if (xAt(W, ctx.x0 + ctx.length / 2, XT).inl > 0.2) yield* leafFloor(ctx, out, W, Math.round(0.55 * out.left()));
   const rest = out.left();
   yield* fillStrip(ctx, out, W, Math.round(rest * 0.06), 2.5, 3.6, (wx, d, rng) => jitter(C.ballast, rng, 0.25), 0, 0.15);
   yield* fillLake(ctx, out, W, { dNear: 3.6, power: 1.2, cover: 4, mirror: 0.8 });
