@@ -46,7 +46,8 @@ const outDir = process.argv[2] || '.';
   // prints what the music signals did (director.state: beatBig, beatSmall, mid, weather, chaseOn,
   // events). The detectors behind them are tested on synthetic signals; this is the one look at
   // real music. Nothing is asserted beyond the usual start-up checks.
-  if (process.env.ONLY === 'signals') cases.push({ name: 'signals', query: '?budget=60000&seed=check', wait: 20000, expect: 'window', tap: true, signals: Number(process.env.SIGNAL_SECONDS || 200) });
+  if (process.env.ONLY === 'signals') cases.push({ name: 'signals', query: '?budget=60000&seed=check', wait: 20000, expect: 'window', tap: true, signals: Number(process.env.SIGNAL_SECONDS || 200),
+    context: { viewport: { width: 480, height: 270 } } });   // a small picture: the analysis runs once per drawn frame, and this renderer is slow
   for (const c of cases.filter((k) => !process.env.ONLY || k.name === process.env.ONLY)) {
     const name = c.name;
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...(c.context || {}), userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' });

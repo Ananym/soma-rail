@@ -371,15 +371,22 @@ export function createMusicFeatures({
  * Used for the mid band (vocals, melody): the auto-gained band value cannot show an entry, since
  * its peak simply follows it up.
  */
-export function createLift({ envUp = 0.15, envDown = 0.05, riseTau = 6, fallTau = 6, marginDb = 4, rangeDb = 8 } = {}) {
-  let env = 0, slow = 0, started = false;
+export function createLift({ envUp = 0.15, envDown = 0.05, riseTau = 6, fallTau = 6, marginDb = 4, rangeDb = 8, floorDb = -80, settle = 3 } = {}) {
+  let env = 0, slow = 0, started = false, age = 0;
   return {
     push(db, dt) {
-      if (!(db > -140)) db = -140;
-      if (!started) { env = slow = db; started = true; return 0; }
+      // Silence is not a low level to lift from: the music starting (at the stream's start, after a
+      // pause, between tracks) is a rise of tens of dB, which pinned the lift at 1 for ten seconds
+      // or more while the average caught up. So silence restarts the measure, the first `settle`
+      // seconds after a start only learn the level (the average follows closely, the lift is 0),
+      // and a rise far beyond the full range is taken as a change of level, not as an entry.
+      if (!(db > floorDb)) { started = false; return 0; }
+      if (!started) { env = slow = db; started = true; age = 0; return 0; }
+      age += dt;
       env += (db - env) * smoothing(dt, db > env ? envUp : envDown);
-      slow += (env - slow) * smoothing(dt, env > slow ? riseTau : fallTau);
-      return clamp01((env - slow - marginDb) / rangeDb);
+      const learning = age < settle, jump = env - slow > marginDb + rangeDb + 8;
+      slow += (env - slow) * smoothing(dt, learning ? 0.4 : jump ? 0.5 : env > slow ? riseTau : fallTau);
+      return learning ? 0 : clamp01((env - slow - marginDb) / rangeDb);
     },
     reset() { started = false; },
   };

@@ -865,5 +865,18 @@ window.ready = true;
 
 console.log('\nResults');
 console.table(table);
+{
+  // The mid lift must not mistake the music starting for a voice entering: from silence (the
+  // stream's start, a pause, the gap between tracks) the level rises by tens of dB at once.
+  const lift = createLift(), dt = 1 / 60;
+  let worst = 0, t = 0;
+  for (; t < 1; t += dt) worst = Math.max(worst, lift.push(-120, dt));          // silence
+  for (; t < 21; t += dt) worst = Math.max(worst, lift.push(-30, dt));          // the music starts and holds
+  for (; t < 22; t += dt) lift.push(-120, dt);                                    // a gap between tracks
+  for (; t < 42; t += dt) worst = Math.max(worst, lift.push(-24, dt));          // the next one, louder
+  let entry = 0;
+  for (; t < 44; t += dt) entry = Math.max(entry, lift.push(-13, dt));          // and then a lead enters, 11 dB up
+  check(worst < 0.05 && entry > 0.5, `mid lift from silence: at most ${worst.toFixed(2)} while music starts and holds (twice); a lead entering afterwards still lifts it to ${entry.toFixed(2)}`);
+}
 console.log(`${checks - failures.length}/${checks} checks passed`);
 if (failures.length) { console.log('FAILED:\n  ' + failures.join('\n  ')); process.exit(1); }
