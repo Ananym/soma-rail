@@ -325,6 +325,10 @@ const outDir = process.argv[2] || '.';
       const D = () => page.evaluate(() => { const d = window.__trainWindow.director.state; const p = d.queued || (d.tunnel && d.tunnel.phase === 'approach' ? d.tunnel.next : d); return { biome: d.biome, level: d.level, wantBiome: p.biome, wantLevel: p.level, rate: d.rate, fpsCap: window.__trainWindow.stats().fpsCap }; });
       // Scrolling the channel list with the wheel, the mouse still, must keep the overlay up (it fades
       // 3 s after the last activity): 6 s of wheel events over the list, then it is left alone.
+      // (Done in a small window: at full size this renderer takes seconds over each frame and the
+      // page's timers starve, so the wheel events themselves would come more than 3 s apart.)
+      await page.setViewportSize({ width: 420, height: 260 });
+      await page.waitForTimeout(4000);
       const scroll = await page.evaluate(async () => {
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         const vc = document.querySelector('.view-controls'), list = document.querySelector('.channel-selector .channels-grid') || document.querySelector('.channel-selector');
@@ -338,6 +342,8 @@ const outDir = process.argv[2] || '.';
         for (let i = 0; i < 60 && !faded; i++) { await wait(250); faded = !up(); }
         return { shown, held, faded, ok: shown && held && faded };
       });
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.waitForTimeout(3000);
       // (no real change of track may re-aim the tunnel between two presses: see the re-aim scenario below)
       await page.evaluate(() => { const d = window.__trainWindow.director; d.__onTrack = d.onTrack; d.onTrack = () => {}; });
       const c0 = await D();
