@@ -88,10 +88,12 @@ export const KIND = { GROUND: 0, MAST: 1, WIRE: 2, TREE: 3, BUILDING: 4, HEDGE: 
 //             apart on every beat. (Unlike SOLID, it is still scattered at the dreamlike level.)
 //   GROVE     big things that answer the beat in turns: each splat names one of four groups (pass
 //             grove(g), below, not MOVE.GROVE itself) and on every beat one or two of the four
-//             swell and rise as BEAT things do, on the kick's pulse. For a forest, one group per
-//             kind of tree, so a wall of trees answers a species at a time and not as one mass
-//             (where everything swells a little together, nothing is seen to move). Tag every
-//             splat of a tree, trunk and crown, with its tree's group.
+//             swell as BEAT things do, hop a third of a metre and light up (dark things by
+//             half, bright ones a little), on the kick's pulse. What shows is the contrast
+//             between neighbours: a stand that answers all together shows nothing. So for a
+//             forest, give each kind of tree a pair of groups two apart (never on together) and
+//             let a tree take one or the other from its place, so that neighbours of one kind
+//             alternate. Tag every splat of a tree, trunk and crown, with its tree's one group.
 //   RIDE      a rider on the ground (a cyclist): carried along the line at about a sixth of the
 //             train's speed, and brightens on the beat like FLASH. Only through rideCell() below.
 //   FALL      falls, and comes round again at the top of a 16 m column about the eye's height: a

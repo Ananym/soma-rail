@@ -319,11 +319,16 @@ uniform float uSway;`,
     // A grove (class 15: see kit.js grove()): big things in turns. A splat names one of four
     // groups in two more bits of its opacity byte (its opacity keeps its top four bits), and on
     // each beat one or two of the four answer, swelling and rising as the picked things do, on
-    // the big pulse: the pines of a forest on one beat, its spruces on the next.
+    // the big pulse: the pines of a forest on one beat, its spruces on the next. A swell alone
+    // shows only at a tree's outline, and in a close stand of trees there is no outline to see
+    // (measured: a tenth of the frame changed), so a grove also hops, the whole tree by the same
+    // third of a metre, and lights up: by half as much again where it is dark, a seventh where
+    // it is already bright, so a dark spruce shows it and a scarlet maple does not bleach.
     float grove = (mvHi && mv == 7) ? step(fract(float((mvA >> 1) & 3) * 0.25 + uBeatSeq * 0.382), 0.4) * (1.0 - isLight) : 0.0;
     scales *= (1.0 + uBreath + uBeatBig * (0.1 * raised + 0.42 * picked * (1.0 - isLight) + 0.42 * grove) + uBeatSmall * (0.32 * isLight + 0.55 * chorus)) * chaseSz;
-    center.y += 0.3 * scales.y * (uBeatBig * (picked * (1.0 - isLight) + grove) + uBeatSmall * chorus);
-    float shimmer = (1.0 + uBeatBig * 0.1 * (picked * (1.0 - isLight) + grove) + uBeat * 0.42 * flashed + uBeatSmall * 0.22 * chorus) * chaseLvl;
+    center.y += 0.3 * scales.y * (uBeatBig * (picked * (1.0 - isLight) + grove) + uBeatSmall * chorus) + 0.32 * uBeatBig * grove;
+    float groveGlow = grove * mix(0.5, 0.14, smoothstep(0.1, 0.7, max(rgba.r, max(rgba.g, rgba.b))));
+    float shimmer = (1.0 + uBeatBig * (0.1 * picked * (1.0 - isLight) + groveGlow) + uBeat * 0.42 * flashed + uBeatSmall * 0.22 * chorus) * chaseLvl;
     if (uSparkle > 0.0) {
         float tw = fract(sin(float(splatIndex) * 12.9898 + floor(uClock * 9.0) * 78.233) * 43758.5453);
         shimmer *= 1.0 + uSparkle * (tw - 0.5) * (0.2 * max(raised, max(picked, max(flashed, max(chorus, grove)))) + 0.6 * isLight);
