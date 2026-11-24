@@ -324,26 +324,33 @@ const outDir = process.argv[2] || '.';
       };
       const D = () => page.evaluate(() => { const d = window.__trainWindow.director.state; const p = d.queued || (d.tunnel && d.tunnel.phase === 'approach' ? d.tunnel.next : d); return { biome: d.biome, level: d.level, wantBiome: p.biome, wantLevel: p.level, rate: d.rate, fpsCap: window.__trainWindow.stats().fpsCap }; });
       // Scrolling the channel list with the wheel, the mouse still, must keep the overlay up (it fades
-      // 3 s after the last activity): 6 s of wheel events over the list, then it is left alone.
-      // (Done in a small window: at full size this renderer takes seconds over each frame and the
-      // page's timers starve, so the wheel events themselves would come more than 3 s apart.)
-      await page.setViewportSize({ width: 420, height: 260 });
-      await page.waitForTimeout(4000);
+      // 3 s after the last activity). On this renderer the page's timers starve (a frame takes
+      // seconds), so real wheel events cannot be sent less than 3 s apart: the page's clock is held
+      // still instead and moved by hand. A mouse move, then three wheel events 2 s apart (6 s in
+      // all: without the fix the overlay is gone after the second), then 4 s of nothing.
       const scroll = await page.evaluate(async () => {
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         const vc = document.querySelector('.view-controls'), list = document.querySelector('.channel-selector .channels-grid') || document.querySelector('.channel-selector');
         const up = () => !vc.classList.contains('fade-out');
-        // (the panels answer a moment after the mouse on this renderer: keep moving it for up to 12 s)
-        for (let i = 0; i < 24 && !up(); i++) { document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200 + (i % 8) * 40, clientY: 200 + (i % 3) * 30, bubbles: true })); await wait(500); }
-        const shown = up(), t0 = Date.now();
-        while (Date.now() - t0 < 6000) { list.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true })); await wait(250); }
-        const held = up();
-        let faded = false;
-        for (let i = 0; i < 60 && !faded; i++) { await wait(250); faded = !up(); }
-        return { shown, held, faded, ok: shown && held && faded };
+        const realNow = Date.now;
+        let vt = realNow.call(Date) + 60000;      // well clear of any grace period
+        Date.now = () => vt;
+        try {
+          document.dispatchEvent(new MouseEvent('mousemove', { clientX: 240, clientY: 220, bubbles: true }));
+          for (let i = 0; i < 40 && !up(); i++) await wait(250);
+          const shown = up(), held = [];
+          for (let k = 0; k < 3; k++) {
+            vt += 2000;
+            list.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true }));
+            await wait(4000);                      // long enough for the panels' own tick and a redraw
+            held.push(up());
+          }
+          vt += 4000;
+          let faded = false;
+          for (let i = 0; i < 60 && !faded; i++) { await wait(250); faded = !up(); }
+          return { shown, held, faded, ok: shown && held.every(Boolean) && faded };
+        } finally { Date.now = realNow; }
       });
-      await page.setViewportSize({ width: 1280, height: 720 });
-      await page.waitForTimeout(3000);
       // (no real change of track may re-aim the tunnel between two presses: see the re-aim scenario below)
       await page.evaluate(() => { const d = window.__trainWindow.director; d.__onTrack = d.onTrack; d.onTrack = () => {}; });
       const c0 = await D();
