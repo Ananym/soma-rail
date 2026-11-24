@@ -193,6 +193,20 @@ export function blade(out, hx, hy, z, len, angle, r0, r1, c, n = 3, kind = KIND.
 // it) and `dir`, the way everything in that cell flies and so must face: +1 with the train, -1
 // against it. The shader then carries the cell's splats along the line at about a third of the
 // train's speed, so they pass more slowly than the land (or faster, flying the other way).
+// How a bird beats its wings: FLIGHT.x as the last argument of flyBody and flyWing, the same one
+// for every piece of a bird.
+//   BURST   (the default) small birds: quick beats in bursts, every wing in the cell snapping
+//           between two frames together (drawn with the wings UP: the beat drops each piece
+//           1.7 times its lift, so below the root, and brings it back).
+//   STEADY  geese, swans, herons, cranes: one smooth beat that never stops (drawn with the wings
+//           UP, carried down by 1.7 times the lift and back, twice a second), running down a
+//           skein as a wave (each bird a little after the one ahead of it), and a slow bob.
+//   SOAR    eagles, buzzards, vultures, storks on a thermal: the wings held as drawn (draw them
+//           in the glide), and every twelve seconds or so two slow beats that swing each piece
+//           up and down by its lift. Give the pieces lift in proportion to their distance out
+//           from the body (through rootY: the piece's own height less the lift you want), none
+//           to the body and tail.
+export const FLIGHT = { BURST: 0, STEADY: 1, SOAR: 2 };
 export const FLY_CELL = 24;
 export function flightCell(wx) {
   const c = Math.round(wx / FLY_CELL);
@@ -206,18 +220,18 @@ export function flightCell(wx) {
 // the cell's middle. Tag every splat of the rider and the machine with MOVE.RIDE.
 export const rideCell = flightCell;
 // A piece of a flying thing's body: an ellipsoid sx long (along x) and sy high. Keep colours natural.
-export function flyBody(out, x, y, z, sx, sy, c, q = Q_ID, kind = KIND.OTHER) {
-  out(x, y, z, sx, sy, 0.0004, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.FLY);
+export function flyBody(out, x, y, z, sx, sy, c, q = Q_ID, kind = KIND.OTHER, flight = 0) {
+  out(x, y, z, sx, sy, 0.0004, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.FLY | ((flight & 3) << 4));
 }
 // A piece of wing from a to b, r thick, drawn with the wings UP: rootY is the height of the wing
 // root on the body. In bursts the shader drops each piece as far below the root as it stands above
 // it (the second frame of the flap) and brings it back.
-export function flyWing(out, ax, ay, az, bx, by, bz, r, c, n, rootY, kind = KIND.OTHER) {
+export function flyWing(out, ax, ay, az, bx, by, bz, r, c, n, rootY, kind = KIND.OTHER, flight = 0) {
   const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 1e-6;
   const q = quatXTo(dx / len, dy / len, dz / len), sl = (len / n) * 0.5;
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n, y = ay + dy * t;
-    out(ax + dx * t, y, az + dz * t, sl, r, Math.max(0.02, y - rootY) / 50, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.FLY);
+    out(ax + dx * t, y, az + dz * t, sl, r, Math.max(0.02, y - rootY) / 50, Math.min(c[0], 0.82), Math.min(c[1], 0.82), Math.min(c[2], 0.82), 1, q[0], q[1], q[2], q[3], kind, MOVE.FLY | ((flight & 3) << 4));
   }
 }
 // Things that sway (MOVE.SWAY): standing corn, tall grass, reeds. rootY is the height of the ground

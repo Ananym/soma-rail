@@ -146,11 +146,18 @@ uniform float uSway;`,
             // carried a fraction k of the way the train has still to come or has gone, which is
             // exactly a bird flying at k times the train's speed. So it slides back through the
             // window more slowly than the land (or faster, flying the other way), never jumps, and
-            // stops when the train does. Its wings have two frames: a wing piece carries its height
-            // above the wing root in its thin axis (a fiftieth of it), and in bursts the pieces drop
-            // below the root and come back.
+            // stops when the train does. A wing piece carries its height above the wing root in its
+            // thin axis (a fiftieth of it): its lift. How the wings beat is the bird's kind (kit.js
+            // FLIGHT, two bits of the opacity byte, stored upside down so that a splat nobody gave a
+            // kind reads as 0):
+            //   0  small birds: two frames, in bursts, the pieces dropping below the root and back
+            //   1  geese, herons, cranes: one steady smooth beat that never stops, running down a
+            //      skein as a wave (each bird a little after the one ahead), and a slow bob
+            //   2  soaring birds: wings held as drawn, and every twelve seconds or so two slow
+            //      beats that swing each piece up and down by its lift
             float cellI = floor((center.x + uFly) / 24.0 + 0.5);
             float home = cellI * 24.0 - uFly;                           // the cell's middle, from the eye
+            float along = center.x - home;                              // where the piece stands in its cell
             float hf = fract(sin(mod(cellI, 2048.0) * 12.9898) * 43758.5453);   // the same cell either side of uFly's wrap
             // with the train: 0.45 to 0.58 of its speed, so the bird drifts back at about half the land's
             // rate; against it: 0.7 to 1.2, so it whips past at about twice. (A bird going the train's way
@@ -162,8 +169,18 @@ uniform float uSway;`,
             float lift = scales.z * 50.0;
             scales.z = scales.y;
             float ph = 6.2832 * hf;
-            float flap = step(0.15, sin(0.9 * uMoveT + ph)) * step(0.0, sin(11.0 * uMoveT + 3.0 * ph));
-            center.y -= 1.7 * lift * flap * min(uMove, 1.0);
+            int wingKind = 3 - ((mvA >> 1) & 3);
+            float going = min(uMove, 1.0);
+            if (wingKind == 1) {
+                center.y -= 0.85 * lift * (1.0 - cos(13.0 * uMoveT + ph + 0.8 * along * (mod(cellI, 2.0) < 0.5 ? 1.0 : -1.0))) * going;
+                center.y += 0.22 * sin(1.3 * uMoveT + ph + 0.3 * along) * going;
+            } else if (wingKind == 2) {
+                float beats = smoothstep(0.78, 0.9, sin(0.5 * uMoveT + ph));
+                center.y += lift * beats * sin(5.5 * uMoveT + 2.0 * ph) * going;
+            } else {
+                float flap = step(0.15, sin(0.9 * uMoveT + ph)) * step(0.0, sin(11.0 * uMoveT + 3.0 * ph));
+                center.y -= 1.7 * lift * flap * going;
+            }
         } else if (mv <= 4 && max(rgba.r, max(rgba.g, rgba.b)) < 0.86) {
             // Spin (classes 2 and 3 on a splat that is not a light: see kit.js blade()). The splat is a
             // piece of a blade on a rotor that faces the track. Its long axis points away from the
@@ -367,10 +384,12 @@ export function buildVertexShader(defaultShader) {
 // A chorus splat (class 11) also carries its group, 0..7, in the next three bits of the opacity
 // byte, with the top three set: it is drawn opaque. A grove splat (class 15) carries its group,
 // 0..3, in the next two bits and keeps the top four bits of its opacity (sixteen levels). The
-// group arrives as cls >> 4.
+// group arrives as cls >> 4. Class 4 (traffic, or flight on a splat that is not a light) carries
+// the way a bird beats its wings (kit.js FLIGHT, 0..2) in the same two bits, upside down: 0 is
+// stored as 3, so an opaque splat given no kind keeps the byte it always had.
 const tagWord = (w, cls) => {
   const c = cls & 15, g = cls >> 4;
-  const a8 = c === 11 ? (0xe2 | ((g & 7) << 2)) : c === 15 ? ((Math.min(w >>> 24, 254) & 0xf0) | ((g & 3) << 2) | 2) : (Math.min(w >>> 24, 254) & 0xfc) | (((cls >> 3) & 1) << 1);
+  const a8 = c === 11 ? (0xe2 | ((g & 7) << 2)) : c === 15 ? ((Math.min(w >>> 24, 254) & 0xf0) | ((g & 3) << 2) | 2) : c === 4 ? ((Math.min(w >>> 24, 254) & 0xf0) | ((3 - (g & 3)) << 2)) : (Math.min(w >>> 24, 254) & 0xfc) | (((cls >> 3) & 1) << 1);
   return (((w & 0x00fefefe) | (cls & 1) | (((cls >> 1) & 1) << 8) | (((cls >> 2) & 1) << 16)) | (a8 << 24)) >>> 0;
 };
 export function tagLast(packed, cls = 0) {
