@@ -59,7 +59,7 @@ import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, makeOut, worldSeed, worldRng, cellsAround, detail, shade, jitter, mul3, mix3, smooth,
   clamp, lerp, quatYaw, quatRoll, quatMul, quatXTo, rotY, SUN,
-  overheadLine, flightCell, flyBody, flyWing, Q_ID, broadleaf, floatingIsland, chorus,
+  overheadLine, flightCell, flyBody, flyWing, FLIGHT, Q_ID, broadleaf, floatingIsland, chorus,
   facetRock,
 } from './kit.js';
 
@@ -2543,6 +2543,7 @@ function* deer(ctx, out, W, dLo, dHi) {
 }
 // A golden eagle soaring, or a flock of choughs (black, yellow bills), over the meadows near the
 // line. They fly (MOVE.FLY): everything in one flight cell goes the same way, wings drawn up.
+// The eagle soars (FLIGHT.SOAR: wings held, two slow beats now and then); the choughs flap in bursts.
 function* birds(ctx, out, W, dLo, dHi) {
   for (const { i, wx0 } of cellsAround(ctx, BIRDCELL, 30)) {
     const r = worldRng(ctx, 661, i);
@@ -2553,13 +2554,13 @@ function* birds(ctx, out, W, dLo, dHi) {
     note(eagle ? 'eagle' : 'choughs', fc.wx, d, y0);
     if (eagle) {
       const S = 2.0, x = fc.wx - ctx.x0, z = -d, c = [0.24, 0.17, 0.1], cl = [0.4, 0.3, 0.17];
-      flyBody(out, x, y0, z, 0.5 * S, 0.14 * S, c, Q_ID, K_);
-      flyBody(out, x + dir * 0.5 * S, y0 + 0.03, z, 0.16 * S, 0.1 * S, [0.6, 0.5, 0.3], Q_ID, K_);          // the golden nape
-      flyBody(out, x + dir * 0.7 * S, y0 - 0.02, z, 0.08 * S, 0.04 * S, [0.8, 0.66, 0.2], Q_ID, K_);        // bill
-      flyBody(out, x - dir * 0.62 * S, y0 - 0.02, z, 0.26 * S, 0.1 * S, c, Q_ID, K_);                       // tail
+      flyBody(out, x, y0, z, 0.5 * S, 0.14 * S, c, Q_ID, K_, FLIGHT.SOAR);
+      flyBody(out, x + dir * 0.5 * S, y0 + 0.03, z, 0.16 * S, 0.1 * S, [0.6, 0.5, 0.3], Q_ID, K_, FLIGHT.SOAR);          // the golden nape
+      flyBody(out, x + dir * 0.7 * S, y0 - 0.02, z, 0.08 * S, 0.04 * S, [0.8, 0.66, 0.2], Q_ID, K_, FLIGHT.SOAR);        // bill
+      flyBody(out, x - dir * 0.62 * S, y0 - 0.02, z, 0.26 * S, 0.1 * S, c, Q_ID, K_, FLIGHT.SOAR);                       // tail
       for (const sg of [-1, 1]) {
-        flyWing(out, x, y0 + 0.02, z, x - dir * 0.05 * S, y0 + 0.3 * S, z + sg * 0.75 * S, limb(0.17 * S, d), cl, 3, y0, K_);
-        flyWing(out, x - dir * 0.05 * S, y0 + 0.3 * S, z + sg * 0.75 * S, x - dir * 0.2 * S, y0 + 0.42 * S, z + sg * 1.6 * S, limb(0.13 * S, d), c, 3, y0, K_);
+        flyWing(out, x, y0 + 0.02, z, x - dir * 0.05 * S, y0 + 0.3 * S, z + sg * 0.75 * S, limb(0.17 * S, d), cl, 3, y0, K_, FLIGHT.SOAR);
+        flyWing(out, x - dir * 0.05 * S, y0 + 0.3 * S, z + sg * 0.75 * S, x - dir * 0.2 * S, y0 + 0.42 * S, z + sg * 1.6 * S, limb(0.13 * S, d), c, 3, y0, K_, FLIGHT.SOAR);
       }
     } else {
       const n = 6 + Math.floor(r() * 6), S = 1.5;

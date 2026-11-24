@@ -34,7 +34,7 @@ import { makeRng } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
 import {
   KIND, MOVE, strut, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, wires, lamp, detail, treeSplats,
-  flightCell, flyBody, flyWing, facetRock,
+  flightCell, flyBody, flyWing, FLIGHT, facetRock,
   jitter, mul3, mix3, shade, smooth, clamp, lerp, quatYaw, quatRoll, quatPitch, quatMul, quatUpTo, norm3, rotY, Q_ID, SUN,
 } from './kit.js';
 import { telegraphPole } from './saltflat.js';
@@ -2622,17 +2622,17 @@ function vulture(o, x, y0, d, dir, r) {
   part(o, X(0.25), y0 + 0.89, z, 0.075, 0.055, 0.055, dir, -0.25, 0, bare, K);
   strut(o, X(0.3), y0 + 0.88, z, X(0.37), y0 + 0.8, z, limb(0.018, d), [0.15, 0.13, 0.12], 1, 1, K);   // bill
 }
-// A vulture soaring: broad wings held in a shallow V (drawn up; the shader flaps them now and
-// then), fan tail, pale head. S is its scale; MOVE.FLY, so it only goes through flyBody / flyWing.
+// A vulture soaring: broad wings held in a shallow V (FLIGHT.SOAR: the shader holds them and
+// now and then makes two slow beats), fan tail, pale head. S is its scale; MOVE.FLY, so it only goes through flyBody / flyWing.
 function soarer(out, x, y, d, dir, S) {
   const z = -d, c = [0.14, 0.11, 0.1], K = KIND.OTHER;
-  flyBody(out, x, y, z, 0.42 * S, 0.13 * S, c, Q_ID, K);
-  flyBody(out, x + dir * 0.45 * S, y + 0.02 * S, z, 0.1 * S, 0.07 * S, [0.7, 0.62, 0.55], Q_ID, K);
-  flyBody(out, x - dir * 0.5 * S, y, z, 0.22 * S, 0.1 * S, c, Q_ID, K);
+  flyBody(out, x, y, z, 0.42 * S, 0.13 * S, c, Q_ID, K, FLIGHT.SOAR);
+  flyBody(out, x + dir * 0.45 * S, y + 0.02 * S, z, 0.1 * S, 0.07 * S, [0.7, 0.62, 0.55], Q_ID, K, FLIGHT.SOAR);
+  flyBody(out, x - dir * 0.5 * S, y, z, 0.22 * S, 0.1 * S, c, Q_ID, K, FLIGHT.SOAR);
   for (const sg of [-1, 1]) {
     const mx = x - dir * 0.05 * S, my = y + 0.24 * S, mz = z + sg * 0.7 * S;
-    flyWing(out, x, y, z + sg * 0.08 * S, mx, my, mz, limb(0.15 * S, d), c, 2, y, K);
-    flyWing(out, mx, my, mz, x - dir * 0.12 * S, y + 0.55 * S, z + sg * 1.35 * S, limb(0.12 * S, d), mul3(c, 1.3), 2, y, K);
+    flyWing(out, x, y, z + sg * 0.08 * S, mx, my, mz, limb(0.15 * S, d), c, 2, y, K, FLIGHT.SOAR);
+    flyWing(out, mx, my, mz, x - dir * 0.12 * S, y + 0.55 * S, z + sg * 1.35 * S, limb(0.12 * S, d), mul3(c, 1.3), 2, y, K, FLIGHT.SOAR);
   }
 }
 // A dead tree: a pale leaning trunk forking into a few bare crooked boughs. Returns the bough ends.
