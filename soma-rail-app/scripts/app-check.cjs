@@ -323,6 +323,20 @@ const outDir = process.argv[2] || '.';
         await page.waitForTimeout(600);
       };
       const D = () => page.evaluate(() => { const d = window.__trainWindow.director.state; const p = d.queued || (d.tunnel && d.tunnel.phase === 'approach' ? d.tunnel.next : d); return { biome: d.biome, level: d.level, wantBiome: p.biome, wantLevel: p.level, rate: d.rate, fpsCap: window.__trainWindow.stats().fpsCap }; });
+      // Scrolling the channel list with the wheel, the mouse still, must keep the overlay up (it fades
+      // 3 s after the last activity): 6 s of wheel events over the list, then it is left alone.
+      const scroll = await page.evaluate(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const vc = document.querySelector('.view-controls'), list = document.querySelector('.channel-selector .channels-grid') || document.querySelector('.channel-selector');
+        const up = () => !vc.classList.contains('fade-out');
+        for (let i = 0; i < 4 && !up(); i++) { document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200 + i * 40, clientY: 200, bubbles: true })); await wait(400); }
+        const shown = up(), t0 = Date.now();
+        while (Date.now() - t0 < 6000) { list.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true })); await wait(250); }
+        const held = up();
+        let faded = false;
+        for (let i = 0; i < 60 && !faded; i++) { await wait(250); faded = !up(); }
+        return { shown, held, faded, ok: shown && held && faded };
+      });
       // (no real change of track may re-aim the tunnel between two presses: see the re-aim scenario below)
       await page.evaluate(() => { const d = window.__trainWindow.director; d.__onTrack = d.onTrack; d.onTrack = () => {}; });
       const c0 = await D();
@@ -345,7 +359,7 @@ const outDir = process.argv[2] || '.';
       await press('.credits .close');
       const creditsClosed = await page.evaluate(() => !document.querySelector('.credits'));
       const controls = { before: c0, nextBiome: c1.wantBiome, dreamlike: c2.wantLevel, fpsCap: c3.fpsCap, rateWhileCheating: c4.rate,
-        ok: c1.wantBiome !== c0.wantBiome && c2.wantLevel === 1 - c1.wantLevel && c0.fpsCap === 60 && c3.fpsCap === 30 && c4.rate === 1 && credits.open && credits.items >= 8 && credits.soma && creditsClosed, credits };
+        ok: c1.wantBiome !== c0.wantBiome && c2.wantLevel === 1 - c1.wantLevel && c0.fpsCap === 60 && c3.fpsCap === 30 && c4.rate === 1 && credits.open && credits.items >= 8 && credits.soma && creditsClosed && scroll.ok, credits, scroll };
       brake.controls = controls; brake.ok = brake.ok && controls.ok;
       // Next, pressed again while a change is on its way, changes the destination: before the swap by
       // re-aiming the tunnel, after it (still inside) by building the world again, and only when the
