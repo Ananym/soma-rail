@@ -202,8 +202,9 @@ export function blade(out, hx, hy, z, len, angle, r0, r1, c, n = 3, kind = KIND.
 //           UP, carried down by 1.7 times the lift and back, twice a second), running down a
 //           skein as a wave (each bird a little after the one ahead of it), and a slow bob.
 //   SOAR    eagles, buzzards, vultures, storks on a thermal: the wings held as drawn (draw them
-//           in the glide), and every twelve seconds or so two slow beats that swing each piece
-//           up and down by its lift. Give the pieces lift in proportion to their distance out
+//           in the glide), and every twelve seconds or so two slow beats that carry each piece
+//           from a third of its lift above where it is drawn to a little more than its lift
+//           below. Give the pieces lift in proportion to their distance out
 //           from the body (through rootY: the piece's own height less the lift you want), none
 //           to the body and tail.
 export const FLIGHT = { BURST: 0, STEADY: 1, SOAR: 2 };

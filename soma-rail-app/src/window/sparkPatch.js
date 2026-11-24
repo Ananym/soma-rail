@@ -154,7 +154,9 @@ uniform float uSway;`,
             //   1  geese, herons, cranes: one steady smooth beat that never stops, running down a
             //      skein as a wave (each bird a little after the one ahead), and a slow bob
             //   2  soaring birds: wings held as drawn, and every twelve seconds or so two slow
-            //      beats that swing each piece up and down by its lift
+            //      beats that carry each piece from a third of its lift above where it is drawn to
+            //      a little more than its lift below (a deeper swing up pulls a wing drawn in a V
+            //      apart into beads)
             float cellI = floor((center.x + uFly) / 24.0 + 0.5);
             float home = cellI * 24.0 - uFly;                           // the cell's middle, from the eye
             float along = center.x - home;                              // where the piece stands in its cell
@@ -176,7 +178,7 @@ uniform float uSway;`,
                 center.y += 0.22 * sin(1.3 * uMoveT + ph + 0.3 * along) * going;
             } else if (wingKind == 2) {
                 float beats = smoothstep(0.78, 0.9, sin(0.5 * uMoveT + ph));
-                center.y += lift * beats * sin(5.5 * uMoveT + 2.0 * ph) * going;
+                center.y += lift * beats * (0.75 * sin(5.5 * uMoveT + 2.0 * ph) - 0.4) * going;
             } else {
                 float flap = step(0.15, sin(0.9 * uMoveT + ph)) * step(0.0, sin(11.0 * uMoveT + 3.0 * ph));
                 center.y -= 1.7 * lift * flap * going;
