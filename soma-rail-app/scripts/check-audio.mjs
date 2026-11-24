@@ -15,7 +15,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import {
   createOnsetDetector, createTempoEstimator, createAutoGain, createBandMeter, DEFAULT_BANDS,
-  createMusicFeatures, createLift, createDynamics, createBeatClock,
+  createMusicFeatures, createLift, createDynamics, createBeatClock, createSoftCues,
 } from '../src/window/audioAnalysis.js';
 import { createDirector } from '../src/window/director.js';
 
@@ -551,33 +551,40 @@ function danceTrack(sr, secs = 110, gain = 1, seed = 21) {
     `dance track weather: ${full.toFixed(2)} at least in the full part, ${at58.toFixed(2)} 8 s into the breakdown, ${deep.toFixed(2)} at its lowest, ${back.toFixed(2)} 14 s and ${back2.toFixed(2)} 26 s after the drop`);
 }
 {
-  // through the director, with every guard: the start of the stream, the 45 s gap between events of a kind
+  // through the director, with every guard and the schedule: the real breakdown and drop fire as
+  // themselves, and nothing scheduled doubles them
   const sr = 44100, fps = 30, { buf } = danceTrack(sr);
   const dir = createDirector({ params: DIRECTOR_PARAMS }), events = [];
   let last = 0;
-  features(buf, sr, fps, (t, f, dt) => { dir.setAudio(f); dir.update(dt); const e = dir.state.event; if (e && e.seq !== last) { last = e.seq; events.push({ t: +t.toFixed(2), kind: e.kind }); } });
-  check(events.length === 2 && events[0].kind === 'breakdown' && events[1].kind === 'drop' && events[1].t - events[0].t > 8,
-    `dance track (director): ${JSON.stringify(events)} (a drop may follow the breakdown that set it up; the 45 s gap is between events of a kind)`);
+  features(buf, sr, fps, (t, f, dt) => { dir.setAudio(f); dir.update(dt); const e = dir.state.event; if (e && e.seq !== last) { last = e.seq; events.push({ t: +t.toFixed(2), kind: e.kind, how: e.how }); } });
+  check(events.length === 2 && events[0].kind === 'breakdown' && events[1].kind === 'drop' && events.every((e) => e.how === 'detected') && events[1].t - events[0].t > 8,
+    `dance track (director): ${JSON.stringify(events)} (a detected drop may follow its detected breakdown; nothing scheduled near them)`);
   const dir2 = createDirector({ params: { ...DIRECTOR_PARAMS, events: 0 } });
   let any = false;
   features(buf, sr, fps, (t, f, dt) => { dir2.setAudio(f); dir2.update(dt); if (dir2.state.event) any = true; });
   check(!any, 'dance track with events=0: no events');
 }
 {
-  // steady music for five minutes (the lead comes and goes, as do the hats): no events, full weather
+  // steady music for five minutes (the lead comes and goes, as do the hats): nothing detected, full
+  // weather, and the schedule's two or three events: the first 50 to 100 s in, 80 s or more apart
   const sr = 44100, fps = 30, secs = 300;
   const { buf } = song(sr, secs, { bpm: 122, seed: 5, parts: { kick: 1, snare: 1, bass: 1, pad: 1, hat: (t) => (Math.floor(t / 16) % 3 ? 1 : 0), lead: (t) => (Math.floor(t / 24) % 2 ? 1 : 0) } });
   const dyn = createDynamics(), dir = createDirector({ params: DIRECTOR_PARAMS });
-  let ev = 0, minW = 1, dirEv = 0, minDirW = 1;
+  let ev = 0, minW = 1, dirEv = 0, minDirW = 1, seq = 0;
+  const sched = [];
   features(buf, sr, fps, (t, f, dt) => {
     const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt);
     if (r.event) ev++;
     if (t > 10) minW = Math.min(minW, r.weather);
     dir.setAudio(f); dir.update(dt);
-    if (dir.state.event) dirEv++;
+    const e = dir.state.event;
+    if (e && e.seq !== seq) { seq = e.seq; if (e.scheduled) sched.push({ t: +t.toFixed(1), kind: e.kind, how: e.how }); else dirEv++; }
     minDirW = Math.min(minDirW, dir.state.weather);
   });
-  check(ev === 0 && dirEv === 0 && minW > 0.85 && minDirW > 0.85, `five minutes of steady music: ${ev} detector events, ${dirEv} director events, weather never under ${Math.min(minW, minDirW).toFixed(2)}`);
+  check(ev === 0 && dirEv === 0 && minW > 0.85 && minDirW > 0.85, `five minutes of steady music: ${ev} detector events, ${dirEv} detected director events, weather never under ${Math.min(minW, minDirW).toFixed(2)}`);
+  const g = sched.slice(1).map((e, i) => e.t - sched[i].t);
+  check(sched.length >= 2 && sched.length <= 3 && sched[0].t >= 50 && sched[0].t <= 100 && g.every((x) => x >= 80),
+    `five minutes of steady music: ${sched.length} scheduled events, ${sched.map((e) => `${e.kind}@${e.t}(${e.how})`).join(' ')}, gaps ${g.map((x) => x.toFixed(0)).join(' ')} s`);
 }
 {
   // a change of track: a loud track ends, a second of silence, a quieter one starts 9 dB down
@@ -596,12 +603,12 @@ function danceTrack(sr, secs = 110, gain = 1, seed = 21) {
     if (!sent && t >= 57.5) { dir.onTrack({ artist: 'b', title: 'b' }); sent = true; }
     const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt); if (r.event) rawEv.push(`${r.event}@${t.toFixed(1)}`);
     dir.setAudio(f); dir.update(dt);
-    const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; dirEv++; }
+    const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; if (e.how === 'detected') dirEv++; }
     if (t > 50) { minW = Math.min(minW, dir.state.weather); maxJump = Math.max(maxJump, Math.abs(dir.state.weather - prevW)); }
     prevW = dir.state.weather;
   });
   check(dirEv === 0 && minW > 0.9 && maxJump < 0.02,
-    `change of track to one 9 dB quieter: ${dirEv} director events (the detector alone, not told of the track change: ${rawEv.join(' ') || 'none'}), weather never under ${minW.toFixed(2)} around it, largest step ${maxJump.toFixed(3)} per frame`);
+    `change of track to one 9 dB quieter: ${dirEv} detected director events (the detector alone, not told of the track change: ${rawEv.join(' ') || 'none'}), weather never under ${minW.toFixed(2)} around it, largest step ${maxJump.toFixed(3)} per frame`);
   // the start of a stream: the first seconds of analysis hold weather at exactly 1
   const d3 = createDirector({ params: DIRECTOR_PARAMS });
   let exact = true;
@@ -622,9 +629,9 @@ function danceTrack(sr, secs = 110, gain = 1, seed = 21) {
     features(buf, sr, fps, (t, f, dt) => {
       const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt); if (r.event) raw.push(`${r.event}@${t.toFixed(1)}`);
       dir.setAudio(f); dir.update(dt);
-      const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; dirEv++; }
+      const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; if (e.how === 'detected') dirEv++; }
     });
-    check(raw.length === 0 && dirEv === 0, `end of a track, ${label}: ${raw.join(' ') || 'no'} detector events, ${dirEv} director events`);
+    check(raw.length === 0 && dirEv === 0, `end of a track, ${label}: ${raw.join(' ') || 'no'} detector events, ${dirEv} detected director events`);
   }
 }
 {
@@ -639,9 +646,30 @@ function danceTrack(sr, secs = 110, gain = 1, seed = 21) {
   features(buf, sr, fps, (t, f, dt) => {
     const r = dyn.push(f.loudDb, f.bassDb, f.onset, dt); if (r.event) raw.push(`${r.event}@${t.toFixed(1)}`);
     dir.setAudio(f); dir.update(dt);
-    const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; dirEv++; }
+    const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; if (e.how === 'detected') dirEv++; }
   });
-  check(raw.length === 0 && dirEv === 0, `four minutes of music that breathes (swells, drums out 4 s in every 30): ${raw.join(' ') || 'no'} detector events, ${dirEv} director events`);
+  check(raw.length === 0 && dirEv === 0, `four minutes of music that breathes (swells, drums out 4 s in every 30): ${raw.join(' ') || 'no'} detector events, ${dirEv} detected director events`);
+}
+{
+  // gentle phrasing: a lead and hats come in every 30 s for 15 s over a pad, a bass and a plucked
+  // line. Scheduled events should land on those turns: a soft drop just after an entry, a soft
+  // breakdown just after a drop-out (plus the 0.6 s the drop-out must hold).
+  const sr = 44100, fps = 30, secs = 300;
+  const part = (t) => (t % 30 >= 10 && t % 30 < 25 ? 1 : 0);
+  const { buf } = song(sr, secs, { bpm: 100, seed: 31, parts: { pad: 1, bass: 1, pluck: 1, lead: (t) => 2.5 * part(t), hat: part } });
+  const dir = createDirector({ params: DIRECTOR_PARAMS }), sched = [];
+  let seq = 0;
+  features(buf, sr, fps, (t, f, dt) => {
+    dir.setAudio(f); dir.update(dt);
+    const e = dir.state.event; if (e && e.seq !== seq) { seq = e.seq; sched.push({ t, kind: e.kind, how: e.how }); }
+  });
+  const off = (e) => {   // seconds after the turn it belongs to (an entry for a drop, a drop-out for a breakdown)
+    const turn = e.kind === 'drop' ? 10 : 25, x = ((e.t - turn) % 30 + 30) % 30;
+    return x > 15 ? x - 30 : x;
+  };
+  const placed = sched.filter((e) => e.how === 'soft' && off(e) >= -0.1 && off(e) <= (e.kind === 'drop' ? 0.6 : 1.2));
+  check(sched.length >= 2 && placed.length === sched.length,
+    `gentle phrasing, 5 min: ${sched.map((e) => `${e.kind}@${e.t.toFixed(1)}(${e.how}, ${off(e) >= 0 ? '+' : ''}${off(e).toFixed(2)} s from its turn)`).join(' ')}; ${placed.length}/${sched.length} on a turn`);
 }
 
 console.log('\nBeat clock');
@@ -696,6 +724,57 @@ console.log('\nBeat clock');
     void bpmRows;
     check(onFirst && onFirst.t < 15 && worst1 <= 60 && worst2 <= 60 && onDuring < 0.5 && back && worstStep <= 0.3,
       `120 -> 140 BPM @ ${fps} fps: whole numbers within ${worst1.toFixed(1)} ms of the kicks at 120 and ${worst2.toFixed(1)} ms at 140 (after relock); chaseOn fell to ${onDuring.toFixed(2)} in the change; steps never more than ${(worstStep * 100).toFixed(0)} % off the tempo while on`);
+  }
+}
+
+console.log('\nEvent schedule (the director alone, no analysis)');
+{
+  // Step a director with no setAudio at all (Safari, iOS, no CORS), as the engine does: the world
+  // is "built" at once whenever a tunnel asks. hooks[t] runs at t seconds.
+  const SP = { seed: 'sched', kmh: 100, hour: 12, level: 0, biome: '', slot: '', beat: 1, sparkle: 1, events: 1 };
+  const runS = (d, secs, hooks = {}) => {
+    const out = [], keys = Object.keys(hooks).map(Number).sort((a, b) => a - b);
+    let seq = 0, k = 0;
+    for (let i = 0; i < secs * 60; i++) {
+      const t = i / 60;
+      while (k < keys.length && t >= keys[k]) hooks[keys[k++]](d);
+      d.update(1 / 60); d.worldReady();
+      const e = d.state.event;
+      if (e && e.seq !== seq) { seq = e.seq; out.push({ t: +t.toFixed(1), kind: e.kind, how: e.how, s: e.strength }); }
+    }
+    return out;
+  };
+  const gaps = (ev) => ev.slice(1).map((e, i) => e.t - ev[i].t);
+  const show = (ev) => ev.map((e) => `${e.kind}@${e.t}(${e.how})`).join(' ') || 'none';
+  {
+    const ev = runS(createDirector({ params: SP }), 600), g = gaps(ev);
+    const alternate = ev.every((e, i) => i === 0 || e.kind !== ev[i - 1].kind);
+    check(ev.length >= 5 && ev.length <= 7 && ev[0].t >= 50 && ev[0].t <= 80 && g.every((x) => x >= 80 && x <= 121) && ev.every((e) => e.how === 'clock' && e.s > 0.4 && e.s <= 0.7) && alternate,
+      `no analysis, ten minutes: ${ev.length} events on the clock, first at ${ev[0]?.t} s, gaps ${g.map((x) => x.toFixed(0)).join(' ')} s, kinds alternating: ${show(ev)}`);
+    const ev2 = runS(createDirector({ params: { ...SP, seed: 'another' } }), 600);
+    check(ev2.length >= 5 && ev2[0].t !== ev[0].t, `another seed jitters the times: first at ${ev2[0]?.t} s (${ev[0]?.t} s before)`);
+  }
+  {
+    // a change of track while the first event waits restarts the clock (and its tunnel holds it)
+    const ev = runS(createDirector({ params: SP }), 300, { 45: (d) => d.onTrack({ artist: 'a', title: 'b' }) });
+    check(ev.length >= 1 && ev[0].t >= 95, `track change at 45 s: first event at ${ev[0]?.t} s (at least 50 s after it): ${show(ev)}`);
+  }
+  {
+    const base = runS(createDirector({ params: SP }), 120)[0].t;
+    // a tunnel over the due time: held back, fired after it (20 s after the scenery changed)
+    const d = createDirector({ params: SP }); let tunnelEnd = null;
+    const ev = runS(d, 200, { [base - 3]: (x) => x.queueTransition({ seed: 9, biome: x.state.biome, level: 0 }) });
+    void tunnelEnd;
+    check(ev.length >= 1 && ev[0].t > base + 15, `a tunnel from ${(base - 3).toFixed(0)} s over the due time (${base} s): held back, fired at ${ev[0]?.t} s: ${show(ev)}`);
+    // a stop over the due time: fired as soon as the train moves again
+    const ev2 = runS(createDirector({ params: SP }), 200, { [base - 20]: (x) => x.setRate(0), [base + 30]: (x) => x.setRate(1) });
+    check(ev2.length >= 1 && ev2[0].t >= base + 30 && ev2[0].t < base + 31, `stopped from ${(base - 20).toFixed(0)} s to ${(base + 30).toFixed(0)} s over the due time: fired at ${ev2[0]?.t} s`);
+    const ev3 = runS(createDirector({ params: SP, reducedMotion: true }), 600);
+    const ev4 = runS(createDirector({ params: { ...SP, events: 0 } }), 600);
+    check(ev3.length === 0 && ev4.length === 0, `reduced motion: ${show(ev3)}; events=0: ${show(ev4)}`);
+    // an event by hand counts: the next is due 80 to 120 s after it
+    const ev5 = runS(createDirector({ params: SP }), 300, { 30: (x) => x.fireEvent('drop', 1) });
+    check(ev5[0].how === 'hand' && ev5[1] && ev5[1].t - 30 >= 80 && ev5[1].t - 30 <= 121, `a hand-fired event at 30 s: the next at ${ev5[1]?.t} s: ${show(ev5)}`);
   }
 }
 

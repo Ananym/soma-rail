@@ -514,6 +514,58 @@ export function createDynamics({
 }
 
 /**
+ * Soft cues: the small turns of phrasing that suit a scheduled event when the music offers no
+ * real drop or breakdown (see the director's event schedule). push(loudDb, bassDb, onset, dt)
+ * returns `res`, with res.cue set on the one frame a cue is seen:
+ *   'drop'       the phrase level (loudness smoothed over fastTau, slow enough to ride over the
+ *                beat) rises more than riseDb above its own average of the last few seconds
+ *                (avgTau), on an onset (within onsetWindow): a part or a phrase coming in.
+ *                res.bassUp says the bass rose bassDb with it.
+ *   'breakdown'  the phrase level falls more than fallDb under that average and stays there for
+ *                fallHold seconds: a part dropping out, a held chord.
+ * Each re-arms once the level is back within half its threshold of the average. res.excess is how
+ * far past the threshold (dB), for the event's strength. Nothing is reported for warmup seconds.
+ * `scale` (per push) multiplies both thresholds: the director lowers it the longer an event waits.
+ */
+export function createSoftCues({
+  fastTau = 0.4, avgTau = 4, riseDb: rise = 3, fallDb: fall = 3, fallHold = 0.6, bassDb = 3, onsetWindow = 0.4, warmup = 4,
+} = {}) {
+  let started = false, fast = 0, avg = 0, bFast = 0, bAvg = 0, sinceOnset = Infinity, below = 0, warm = 0;
+  let armedRise = true, armedFall = true;
+  const res = { cue: null, excess: 0, bassUp: false, fast: 0, avg: 0 };
+  return {
+    res,
+    push(loud, bass, onset, dt, scale = 1) {
+      res.cue = null; res.excess = 0; res.bassUp = false;
+      if (!(loud > -140)) loud = -140;
+      if (!(bass > -140)) bass = -140;
+      const riseDb = rise * scale, fallDb = fall * scale;
+      if (!started) { started = true; fast = avg = loud; bFast = bAvg = bass; warm = 0; }
+      fast += (loud - fast) * smoothing(dt, fastTau);
+      avg += (fast - avg) * smoothing(dt, avgTau);
+      bFast += (bass - bFast) * smoothing(dt, fastTau);
+      bAvg += (bFast - bAvg) * smoothing(dt, avgTau);
+      sinceOnset = onset ? 0 : sinceOnset + dt;
+      warm += dt;
+      const d = fast - avg;
+      if (d < riseDb / 2) armedRise = true;
+      if (d > -fallDb / 2) armedFall = true;
+      below = d < -fallDb ? below + dt : 0;
+      if (warm >= warmup) {
+        if (armedRise && d > riseDb && sinceOnset <= onsetWindow) {
+          res.cue = 'drop'; res.excess = d - riseDb; res.bassUp = bFast - bAvg > bassDb; armedRise = false;
+        } else if (armedFall && below >= fallHold) {
+          res.cue = 'breakdown'; res.excess = -d - fallDb; armedFall = false;
+        }
+      }
+      res.fast = fast; res.avg = avg;
+      return res;
+    },
+    reset() { started = false; armedRise = true; armedFall = true; below = 0; sinceOnset = Infinity; },
+  };
+}
+
+/**
  * A beat clock: `value` advances one unit per beat at the trusted tempo, and a phase-locked loop
  * pulls it so whole numbers fall on onsets. `on` (0..1) says whether to believe it.
  *

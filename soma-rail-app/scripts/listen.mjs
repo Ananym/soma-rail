@@ -55,7 +55,7 @@ for (let i = 1; i / FPS <= dur; i++) {
   for (const a of [all, part]) { a.n++; a.mid += S.mid; if (S.mid > 0.3) a.midHi++; a.weather += S.weather; if (S.weather < 0.95) a.wLow++; a.wMin = Math.min(a.wMin, S.weather); if (S.chaseOn > 0.5) a.chase++; }
   edge('beat', S.beat, [all, part]); edge('big', S.beatBig, [all, part]); edge('small', S.beatSmall, [all, part]);
   const on = S.chaseOn > 0.5; if (on !== wasOn) { flips++; wasOn = on; }
-  if (S.event && S.event.seq !== lastSeq) { lastSeq = S.event.seq; events.push(`${S.event.kind}@${t.toFixed(0)}s`); }
+  if (S.event && S.event.seq !== lastSeq) { lastSeq = S.event.seq; events.push(`${S.event.kind}@${t.toFixed(0)}s(${S.event.how})`); }
   if (i % (FPS * 30) === 0) { rows.push({ t, ...part, bpm: Math.round(S.bpm) }); part = blank(); }
 }
 const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0), avg = (a, b) => (b ? (a / b).toFixed(2) : '-');

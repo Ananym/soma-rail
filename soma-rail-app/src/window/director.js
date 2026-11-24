@@ -3,7 +3,7 @@
 // music (audio features, track and channel) and the seed. It never touches the renderer.
 import { hashString, hashInts, makeRng } from './rng.js';
 import { BIOMES, DEFAULT_BIOME } from './biomes/index.js';
-import { createDynamics, createLift, createBeatClock, smoothing } from './audioAnalysis.js';
+import { createDynamics, createLift, createBeatClock, createSoftCues, smoothing } from './audioAnalysis.js';
 
 // Surreal levels: each is one setting of all five dials, tuned as a whole.
 export const LEVELS = [
@@ -31,8 +31,14 @@ const TUNNEL_MIN_SECONDS = 5;  // shortest time spent inside one
 const PULSE_TAU = 0.17;        // the band pulses decay as the full-band beat does
 const PULSE_FLOOR = 0.45;      // big and small things always follow at least this much of the full beat
 const MID_RISE = 0.15, MID_FALL = 0.5;   // seconds: how the mid lift follows the band
-const EVENT_QUIET = 20;        // no automatic events this long after a change of track or scenery, or the start of analysis
-const EVENT_GAP = 45;          // nor this long after the last event
+const EVENT_QUIET = 20;        // no automatic events this long after a change of track or scenery (nor detected ones after the start of analysis)
+const EVENT_GAP = 25;          // nor this soon after the last event of any kind (a detected drop may follow its detected breakdown)
+// The event schedule: every track gets events whatever it is. The first falls due EVENT_FIRST
+// seconds into a track, each next one EVENT_NEXT seconds after the last event of any kind (both
+// jittered from the track's seed). A due event waits up to EVENT_WINDOW seconds for a moment that
+// suits it (a real drop or breakdown, else a soft cue), and is then forced onto the next onset.
+const EVENT_FIRST = [50, 80], EVENT_NEXT = [80, 120], EVENT_WINDOW = 20;
+const FORCE_WAIT = 2;          // seconds a forced event waits for an onset before it fires anyway
 const WEATHER_SETTLE = 8;      // seconds of analysis before the weather may move off 1
 const CLOCK_LATENCY = 0;       // the onset detector's own delay, taken off by the beat clock (see check-audio.mjs)
 
@@ -92,6 +98,10 @@ export function createDirector({ params, reducedMotion = false }) {
   let weatherWeight = 0;          // 0..1: how far the measured weather is let through
   let trackAt = -Infinity;        // state.time of the last change of track or channel
   let guardAt = -Infinity;        // ... or of scenery (a swap, any frame with a tunnel)
+  // The event schedule (see EVENT_FIRST): the track's clock, what is due and how it is waiting.
+  const cues = createSoftCues();
+  let trackSeed = baseSeed >>> 0, trackEvents = 0, dueAt = 0, waitFrom = -1, heldBack = false, forceFrom = -1;
+  let forcedKind = 'drop', lastEventAt = -Infinity, listenedEver = false, lastOnsetAt = -Infinity;
 
   // Each change of scenery arrives at a time of day drawn from these slots, so journeys spend real
   // time in the low light of dawn and dusk and not only at midday. A biome can ask for its own
@@ -198,30 +208,74 @@ export function createDirector({ params, reducedMotion = false }) {
   }
 
   // Raise a music event. By hand (debug, the fire= URL parameter, tests) it is never refused.
-  function fireEvent(kind, strength = 1) {
-    state.event = { seq: (state.event ? state.event.seq : 0) + 1, kind, strength, at: state.time };
+  // `how` says where it came from: 'hand', 'detected' (a real drop or breakdown), 'soft' (a
+  // scheduled event placed on a soft cue), 'forced' (scheduled, placed on the next onset) or
+  // 'clock' (scheduled, with no analysis). Every event, whatever its source, restarts the schedule.
+  function fireEvent(kind, strength = 1, how = 'hand') {
+    state.event = { seq: (state.event ? state.event.seq : 0) + 1, kind, strength, at: state.time, how, scheduled: how === 'soft' || how === 'forced' || how === 'clock' };
+    lastEventAt = state.time;
+    trackEvents++;
+    dueAt = state.time + jitter(EVENT_NEXT);
+    waitFrom = -1; heldBack = false; forceFrom = -1;
   }
 
+  // A time in [from, to] from the track's seed and how many events it has had.
+  function jitter([from, to]) { return from + (to - from) * (((hashInts(trackSeed, 7919 + trackEvents) >>> 0) % 1000) / 1000); }
+  // A track's clock starts: at a new song, a new channel, and when listening first starts.
+  function startTrack(seed) {
+    trackSeed = seed >>> 0; trackEvents = 0;
+    dueAt = state.time + jitter(EVENT_FIRST);
+    waitFrom = -1; heldBack = false; forceFrom = -1;
+  }
+  startTrack(baseSeed);
+
   // New music (a change of track or of channel): the loudness is learnt afresh, the weather eases
-  // back to full, and no event may follow for a while.
-  function newMusic() {
+  // back to full, no event may follow for a while, and the event schedule starts again.
+  function newMusic(seed) {
     trackAt = state.time; guardAt = state.time;
     dynamics.relearn(EVENT_QUIET);
+    startTrack(seed);
+  }
+
+  // May an automatic event fire now? (Not in a tunnel, nor with the train stopped, nor under
+  // reduced motion or events=0, nor soon after a change of track or scenery or another event.)
+  function allowed(still, gapOk = false) {
+    if ((params.events ?? 1) <= 0 || reducedMotion || still || state.tunnel) return false;
+    if (state.time - guardAt < EVENT_QUIET) return false;
+    return gapOk || state.time - lastEventAt >= EVENT_GAP;
+  }
+
+  // The schedule, once per frame. When an event is due it waits for a moment that suits it, up to
+  // EVENT_WINDOW seconds: a real drop or breakdown (musicEvent, which also restarts the schedule),
+  // else a soft cue (a part coming in: 'drop'; one dropping out: 'breakdown'); after that it goes on
+  // the next onset, alternating the kind. With no analysis it fires on the clock alone. An event a
+  // guard held back fires at the first moment the guard allows (on the next onset if listening).
+  function schedule(still, listening, cue) {
+    if ((params.events ?? 1) <= 0 || reducedMotion || state.time < dueAt) return;
+    if (!allowed(still)) { heldBack = true; waitFrom = -1; return; }
+    const forced = () => { const k = forcedKind; forcedKind = k === 'drop' ? 'breakdown' : 'drop'; return k; };
+    if (!listening) { fireEvent(forced(), 0.6, 'clock'); return; }
+    if (waitFrom < 0) waitFrom = state.time;
+    if (cue.cue && !heldBack) {
+      fireEvent(cue.cue, Math.min(0.7, 0.55 + 0.03 * cue.excess + (cue.bassUp ? 0.05 : 0)), 'soft');
+      return;
+    }
+    if (heldBack || state.time - waitFrom >= EVENT_WINDOW) {
+      if (forceFrom < 0) forceFrom = state.time;
+      // on the next onset (so it lands on a beat), or at once if the music has none
+      if (heard.onset || state.time - lastOnsetAt > FORCE_WAIT || state.time - forceFrom >= FORCE_WAIT) fireEvent(forced(), 0.5, 'forced');
+    }
   }
 
   // An event the music raised: only where it cannot be mistaken for the scenery changing, the
   // stream starting or the train standing, and never one hard on the heels of another.
-  let lastDropAt = -1e9;
   function musicEvent(kind, strength, still) {
-    if ((params.events ?? 1) <= 0 || reducedMotion || still || state.tunnel) return;
-    if (state.time - guardAt < EVENT_QUIET || listenedFor < EVENT_QUIET) return;
-    // The gap is between events of a kind, and a drop may always follow the breakdown that set it
-    // up (they come about a quarter of a minute apart: one gap for both would cancel every drop).
+    if (listenedFor < EVENT_QUIET) return;
+    // A detected drop may always follow the detected breakdown that set it up.
     const last = state.event;
-    if (last && state.time - last.at < EVENT_GAP && !(kind === 'drop' && last.kind === 'breakdown')) return;
-    if (kind === 'drop' && state.time - lastDropAt < EVENT_GAP) return;
-    if (kind === 'drop') lastDropAt = state.time;
-    fireEvent(kind, strength);
+    const follows = kind === 'drop' && last && last.how === 'detected' && last.kind === 'breakdown';
+    if (!allowed(still, follows)) return;
+    fireEvent(kind, strength, 'detected');
   }
 
   // The music signals, once per frame (see the state fields). Everything here is neutral unless
@@ -229,6 +283,7 @@ export function createDirector({ params, reducedMotion = false }) {
   function music(dt, still) {
     const listening = heard.fresh && heard.active;
     heard.fresh = false;
+    if (listening && !listenedEver) { listenedEver = true; startTrack(trackSeed); }   // the clock starts with the listening
     if (listening) { listenedFor += dt; deafFor = 0; } else {
       deafFor += dt;
       if (deafFor > 3 && listenedFor > 0) { listenedFor = 0; dynamics.reset(); midLift.reset(); }   // analysis stopped: start afresh when it returns
@@ -246,9 +301,13 @@ export function createDirector({ params, reducedMotion = false }) {
     if (!listening && state.mid < 0.002) state.mid = 0;
     // weather and events, from the loudness over seconds and minutes
     if (listening) {
+      if (heard.onset) lastOnsetAt = state.time;
       const d = dynamics.push(heard.loudDb, heard.bassDb, heard.onset, dt);
       if (d.event) musicEvent(d.event, d.strength, still);
-    }
+      // (the longer a due event has waited, the smaller a turn of phrase will do for it)
+      cues.push(heard.loudDb, heard.bassDb, heard.onset, dt, waitFrom < 0 ? 1 : 1 - 0.5 * Math.min(1, (state.time - waitFrom) / EVENT_WINDOW));
+    } else cues.res.cue = null;
+    schedule(still, listening, cues.res);
     // (a stopped train holds it, as it holds everything: idle frames come without setAudio)
     if (!still) {
       const settled = listening && listenedFor > WEATHER_SETTLE && state.time - trackAt > EVENT_QUIET;
@@ -269,9 +328,9 @@ export function createDirector({ params, reducedMotion = false }) {
 
     // A channel profile: { biomes: [...], level: 0 | 1 }. See profiles.json.
     setProfile(profile, { immediate = false } = {}) {
-      newMusic();
       state.profile = profile || null;
       const seed = hashInts(baseSeed, hashString(JSON.stringify(profile || {})));
+      newMusic(seed);
       const next = { seed, biome: chooseBiome(seed, !immediate), level: params.levelFixed ? pendingLevel() : (profile && profile.level != null ? profile.level : state.level) };
       if (immediate) { state.seed = next.seed; state.biome = next.biome; state.level = next.level; state.dials = { ...LEVELS[next.level] }; placeHour(); recent.length = 0; seen(state.biome); } else queueTransition(next);
     },
@@ -280,8 +339,8 @@ export function createDirector({ params, reducedMotion = false }) {
     // has that many to offer.
     onTrack(song) {
       if (!song || (!song.title && !song.artist)) return;
-      newMusic();
       const seed = hashInts(baseSeed & 0xffff, hashString(`${song.artist}|${song.title}`));
+      newMusic(seed);
       // (the level that is on its way, if the listener has just asked for one: a new track must
       // not undo a press of Dreamlike that has not yet reached its tunnel)
       queueTransition({ seed, biome: chooseBiome(seed, true), level: pendingLevel() });
@@ -319,7 +378,7 @@ export function createDirector({ params, reducedMotion = false }) {
     },
 
     // Raise a music event by hand (debug, the fire= URL parameter, tests).
-    fireEvent,
+    fireEvent: (kind, strength = 1) => fireEvent(kind, strength, 'hand'),
 
     // The engine calls this when the world has been rebuilt behind the tunnel wall.
     worldReady() { if (state.tunnel) state.tunnel.ready = true; },
