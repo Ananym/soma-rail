@@ -224,6 +224,9 @@ uniform float uSunDisc, uMoonDisc, uMoonRadius, uSun2Disc, uStars;
 uniform float uStarThresh, uDeep, uMilky;
 uniform float uTwinkle, uTwT, uStarBeat, uBeatSeq;          // scintillation and the beat pulse (see update)
 uniform vec3 uMeteorA, uMeteorB;
+uniform vec3 uShowerA0, uShowerB0, uShowerA1, uShowerB1, uShowerA2, uShowerB2;   // a meteor shower's three slots
+uniform vec3 uShowerT;                                      // each slot's place along its path, < 0 for none
+uniform float uShowerGain;                                  // their brightness
 uniform float uMeteorT;                                     // 0..1 along the meteor's path, < 0 for none                   // a biome's night-sky hint (see update)
 uniform vec2 uCloudOffLo, uCloudOffHi;
 uniform float uCoverLo, uCoverHi, uCloudGain;
@@ -337,6 +340,17 @@ ${conGLSL}
 vec3 aces(vec3 x) { return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 
 // A body disc: 1 inside radius r (radians), anti-aliased over one pixel.
+// A meteor's streak from a to b at t (0..1 along the path): the head brightest, the tail 0.4 of it.
+float meteor(vec3 dir, vec3 a, vec3 b, float t, float px, float wide) {
+  if (t >= 1.0) return 0.0;
+  vec3 hd = normalize(mix(a, b, t));
+  vec3 tl = normalize(mix(a, b, max(0.0, t - 0.4)));
+  vec3 ab = hd - tl;
+  float tt = clamp(dot(dir - tl, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
+  float dist = length(dir - (tl + ab * tt));
+  float w = max(px * wide, 0.0007);
+  return exp(-dist * dist / (w * w)) * tt * tt * sin(3.14159 * t);
+}
 float disc(vec3 d, vec3 c, float r, float px) {
   float ang = acos(clamp(dot(d, c), -1.0, 1.0));
   return 1.0 - smoothstep(r - px, r + px, ang);
@@ -465,15 +479,11 @@ void main() {
     }
 
     // ---- a meteor: a short bright streak along a path the CPU picks now and then, head brightest
-    if (uMeteorT >= 0.0 && uMeteorT < 1.0 && uStars > 0.003) {
-      vec3 hd = normalize(mix(uMeteorA, uMeteorB, uMeteorT));
-      vec3 tl = normalize(mix(uMeteorA, uMeteorB, max(0.0, uMeteorT - 0.4)));
-      vec3 ab = hd - tl;
-      float tt = clamp(dot(dir - tl, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
-      float dist = length(dir - (tl + ab * tt));
-      float w = max(px * 1.3, 0.0007);
-      col += vec3(0.9, 0.95, 1.0) * exp(-dist * dist / (w * w)) * tt * tt * sin(3.14159 * uMeteorT) * 1.8 * uStars * ext.g;
-    }
+    if (uMeteorT >= 0.0 && uMeteorT < 1.0 && uStars > 0.003) col += vec3(0.9, 0.95, 1.0) * meteor(dir, uMeteorA, uMeteorB, uMeteorT, px, 1.3) * 1.8 * uStars * ext.g;
+    // ... and in a shower (events.js), up to three more at once, brighter, from one radiant
+    if (uShowerT.x >= 0.0 && uStars > 0.003) col += vec3(0.85, 1.0, 0.92) * meteor(dir, uShowerA0, uShowerB0, uShowerT.x, px, 2.4) * uShowerGain * ext.g;
+    if (uShowerT.y >= 0.0 && uStars > 0.003) col += vec3(0.9, 0.95, 1.0) * meteor(dir, uShowerA1, uShowerB1, uShowerT.y, px, 2.4) * uShowerGain * ext.g;
+    if (uShowerT.z >= 0.0 && uStars > 0.003) col += vec3(1.0, 0.95, 0.85) * meteor(dir, uShowerA2, uShowerB2, uShowerT.z, px, 2.4) * uShowerGain * ext.g;
 
     // ---- aurora (level 1, topology dial, night): curtains with a sharp lower edge and rays
     if (uAurora > 0.003 && dir.y > 0.02) {
@@ -593,6 +603,8 @@ export function createSky(THREE) {
     uStarThresh: { value: 0.86 }, uDeep: { value: 0 }, uMilky: { value: 0 },
     uTwinkle: { value: 0 }, uTwT: { value: 0 }, uStarBeat: { value: 0 }, uBeatSeq: { value: 0 },
     uMeteorA: { value: new THREE.Vector3(0, 0.3, -1) }, uMeteorB: { value: new THREE.Vector3(0.2, 0.2, -1) }, uMeteorT: { value: -1 },
+    uShowerA0: { value: V3() }, uShowerB0: { value: V3() }, uShowerA1: { value: V3() }, uShowerB1: { value: V3() }, uShowerA2: { value: V3() }, uShowerB2: { value: V3() },
+    uShowerT: { value: new THREE.Vector3(-1, -1, -1) }, uShowerGain: { value: 0 },
     uCloudOffLo: { value: new THREE.Vector2(17.3, 5.1) }, uCloudOffHi: { value: new THREE.Vector2(3.7, 40.2) },
     uCoverLo: { value: 0.52 }, uCoverHi: { value: 0.58 }, uCloudGain: { value: 1 },
     uTopo: { value: 0 }, uAurora: { value: 0 }, uLandOff: { value: 0 }, uLandCol: { value: C3() },
@@ -656,6 +668,44 @@ export function createSky(THREE) {
     U.uMeteorA.value.copy(dirOf(u0, v0));
     U.uMeteorB.value.copy(dirOf(u0 + Math.sin(ang) * len / aspect, v0 - Math.cos(ang) * len));
     meteorT = 0; meteorWait = 8;
+  }
+  // A meteor shower (events.js, on a breakdown at night): n meteors in `seconds`, all from one
+  // radiant above the window, up to three at once in their own slots beside the ordinary one.
+  // The schedule is fixed by `seed` and played by showerAt(t), so a still can hold any moment.
+  let showerList = null;
+  function shower(n, seconds, seed = 1) {
+    let s = (seed * 2654435761) >>> 0;
+    const r = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+    const th = U.uTanHalf.value, aspect = U.uAspect.value, shift = U.uShift.value;
+    const dirOf = (u, v) => new THREE.Vector3(u * th * aspect, (v + shift) * th, -1).normalize();
+    const ru = -0.45 + 0.9 * r(), rv = 1.1 + 0.3 * r();           // the radiant, just above the top
+    const starts = Array.from({ length: n }, (_, i) => (i === 0 ? 0.1 : 0.1 + r() * Math.max(0.5, seconds - 1))).sort((a, b) => a - b);
+    const free = [0, 0, 0];
+    showerList = [];
+    for (const t0 of starts) {
+      const dur = 0.7 + 0.5 * r();
+      let k = 0; for (let j = 1; j < 3; j++) if (free[j] < free[k]) k = j;
+      const at = Math.max(t0, free[k] + 0.05);
+      free[k] = at + dur;
+      // away from the radiant, mostly downward, fanned up to 55 degrees either side
+      const phi = (r() - 0.5) * 1.9, du = Math.sin(phi) / aspect, dv = -Math.cos(phi);   // (u is aspect times longer than v)
+      const d0 = 0.35 + 0.6 * r(), len = 0.25 + 0.35 * r();
+      showerList.push({ at, dur, slot: k, a: dirOf(ru + du * d0, rv + dv * d0), b: dirOf(ru + du * (d0 + len), rv + dv * (d0 + len)) });
+    }
+    return Math.max(...free);
+  }
+  const SLOT_A = ['uShowerA0', 'uShowerA1', 'uShowerA2'], SLOT_B = ['uShowerB0', 'uShowerB1', 'uShowerB2'];
+  function showerAt(t) {
+    const T = U.uShowerT.value; T.set(-1, -1, -1);
+    // brighter than the stray meteor, and bright enough to see over a city's glow wherever stars are
+    U.uShowerGain.value = 4.5 * Math.min(1, 0.3 + 2.5 * U.uStars.value);
+    if (!showerList || t == null || t < 0) { if (t == null) showerList = null; return; }
+    for (const m of showerList) {
+      const f = (t - m.at) / m.dur;
+      if (f < 0 || f >= 1) continue;
+      T.setComponent(m.slot, f);
+      U[SLOT_A[m.slot]].value.copy(m.a); U[SLOT_B[m.slot]].value.copy(m.b);
+    }
   }
 
   // Constellations: each figure has its own envelope, started by the beat that chose it. Stars
@@ -949,8 +999,10 @@ export function createSky(THREE) {
 
   update({ hour: 12, level: 0, dials: {}, time: 0, dt: 0, aspect: 16 / 9, fovDeg: 50, travelled: 0, energy: 0 });
   // sunDir: the sun as the land's grade should see it (the true sun, except under overcast)
-  const sky = { object3d, update, horizonColor, hazeHighColor, lightTint, sunDir: sunDirOut };
-  // for scripts/check-sky.mjs only; not enumerable, so the interface stays the five fields above
+  const sky = { object3d, update, horizonColor, hazeHighColor, lightTint, sunDir: sunDirOut,
+    // for events.js: a meteor shower, and how far the stars are out (0 by day or under a deck)
+    shower, showerAt, stars: () => U.uStars.value };
+  // for scripts/check-sky.mjs only; not enumerable, so the interface stays the fields above
   // _debug.meteor(t) starts a meteor and holds it at t (0..1) for a screenshot
   // _debug.constellations([indices], age) holds those figures at `age` seconds into their
   //   envelope, past the gates (train stopped, reduced motion, hint off); null releases them

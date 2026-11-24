@@ -12,6 +12,7 @@ import { createDirector, LEVELS, SLOTS } from './director.js';
 import { buildVertexShader, PATCH_UNIFORMS, tagLast } from './sparkPatch.js';
 import { hashInts, makeRng } from './rng.js';
 import { createKit } from './kitPieces.js';
+import { createEvents } from './events.js';
 
 const LEAD = 60;           // metres of track generated beyond the edge of view
 const TUNNEL_Z = -2.2;     // the tunnel wall sits this far from the eye
@@ -240,10 +241,14 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     setUnderlay(biome); setHorizon(biome);
     worldBeat = S.beatMetres;
     if (kit) kit.reset();
+    events.clear();
     rebuilding = true;
   }
   let rebuilding = false;
   director.on('swap', rebuildWorld);
+
+  // --- music events: what a drop or a breakdown sets off (events.js) ---------------------------------
+  const events = createEvents({ THREE, SplatMesh, PackedSplats, scene, sky, director, params, reducedMotion });
 
   // --- photo pieces ---------------------------------------------------------------------------------
   const kit = params.kit ? createKit({ THREE, SplatMesh, PackedSplats, scene, baseUrl: import.meta.env.BASE_URL }) : null;
@@ -371,7 +376,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     // A hidden tab gets no frames at all: the browser stops calling us.
     const stopped = running && S.speed === 0 && S.rate === 0;
     if (stopped) { if (!idleSince) idleSince = now; } else idleSince = 0;
-    isIdle = stopped && !rebuilding && lastAllDone && now - idleSince > 600;
+    isIdle = stopped && !rebuilding && lastAllDone && now - idleSince > 600 && !events.busy();   // a show finishes before the view rests
     if (isIdle && now - lastDraw < IDLE_FRAME_MS) {
       director.update(dt);
       return;
@@ -461,6 +466,7 @@ uniforms.uFly.value = ((S.travelled % 49152) + 49152) % 49152;
     for (const ch of chunks.values()) if (ch.mesh) place(ch);
     if (kit) kit.update({ travelled: S.travelled, biomeName: biome.name, terrain, seed: S.seed, tanHalfHfov, lead: LEAD });
     updateTunnel();
+    events.update({ dt, running, stopped, biome, terrain, tanHalfH: tanHalfHfov, tanHalfV: Math.tan((fovNow * Math.PI) / 360), shift: horizonShift });
     sky.object3d.visible = !inTunnel;
     underlay.visible = !inTunnel;
 
@@ -504,7 +510,7 @@ uniforms.uFly.value = ((S.travelled % 49152) + 49152) % 49152;
       return { fps: Math.round(fps), at: Math.round(S.travelled), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres), photos: kit ? kit.stats().pieces : 0,
         levelName: LEVELS[S.level].name, slot: S.slot, beat: +S.beat.toFixed(2), sparkle: +S.sparkle.toFixed(2), tint: uniforms.uLightTint.value.toArray().map((v) => +v.toFixed(2)), dissolve: +S.dissolve.toFixed(2),
         next: S.tunnel ? { biome: S.tunnel.next.biome, levelName: LEVELS[S.tunnel.next.level].name, phase: S.tunnel.phase } : null,
-        audio: !!audioProvider,
+        audio: !!audioProvider, show: events.stats(),
         // the slowest frame of the last few seconds, and what the frame before it spent its time on
         worst: { ms: Math.round(worst.ms), gen: Math.round(worst.gen), render: Math.round(worst.render), cpu: Math.round(worst.cpu), note: worst.note },
         hitches: hitchTimes.length, idle: isIdle, moveT: +moveT.toFixed(2), fpsCap,
@@ -520,6 +526,7 @@ uniforms.uFly.value = ((S.travelled % 49152) + 49152) % 49152;
       document.removeEventListener('visibilitychange', onVisible);
       for (const key of [...chunks.keys()]) dropChunk(key);
       if (kit) kit.dispose();
+      events.dispose();
       renderer.dispose();
     },
   };
