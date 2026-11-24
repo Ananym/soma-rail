@@ -29,8 +29,11 @@
 // clouds billow (MOVE.VAPOUR). Near hills are kept low in front of a Fuji's best view and rise in
 // the stretches between, where they and the cloud hide it.
 //
-// The beat: the mountain stays still. Houses, the pagoda, the torii, lanterns and the viaduct
-// (BUILDING) and lights answer it; people and birds tag their own splats MOVE.FLASH (they brighten
+// The beat: the mountain stays still. Every tree swells on it (KIND.TREE: cherries, pines, cedars,
+// bamboo, persimmons, broadleaves, roadside, field and shrine trees; the hills' emergent broadleaves
+// and the plain's groves are KIND.HEDGE blobs tagged MOVE.BEAT by hand; tea rows and hedges stay
+// still). Houses, the pagoda, the torii, lanterns and the viaduct
+// (BUILDING) and lights answer it too; the greenhouse tunnels are rigid (MOVE.STILL); people and birds tag their own splats MOVE.FLASH (they brighten
 // without swelling); the carts, the portable shrine, the picnic boxes and the angler's bucket are
 // rigid and MOVE.STILL (nothing on the beat).
 //
@@ -2047,7 +2050,7 @@ function* hills(ctx, out, W, dLo, dHi) {
       if (h.tea && hl.hh < h.Hh * 0.8) continue;
       const y = W.H(tx, td) + 4;
       if (kind < 0.5) yield* conifer(ctx, out, tx - ctx.x0, td, { rng: r, height: 16 + 8 * r(), width: 4.5 + 2 * r(), color: C.cedar, y });
-      else yield* blob(ctx, out, tx - ctx.x0, y + 7, td, 6 + 3 * r(), 4 + 2 * r(), 5, { n: Math.max(6, Math.round(treeSplats(out, td, 12) * 0.8)), color: jitter(C.wood, r, 0.15), rng: r, kind: KIND.HEDGE, inner: 0.35 });
+      else yield* blob(ctx, moveOut(out, MOVE.BEAT), tx - ctx.x0, y + 7, td, 6 + 3 * r(), 4 + 2 * r(), 5, { n: Math.max(6, Math.round(treeSplats(out, td, 12) * 0.8)), color: jitter(C.wood, r, 0.15), rng: r, kind: KIND.HEDGE, inner: 0.35 });
     }
     // bamboo groves at the foot, facing the line
     const nb = Math.round(h.rx / 50);
@@ -2089,7 +2092,7 @@ function* teaRows(ctx, out, W, h, dLo, dHi) {
 }
 
 // Greenhouse lots: tunnels of milky plastic running away from the line, side by side, with their
-// arched end walls.
+// arched end walls. Rigid: every splat is MOVE.STILL (KIND.BUILDING would swell them on the beat).
 function* greenhouses(ctx, out, W, dLo, dHi) {
   for (let k = 0; k < W.rows.length; k++) {
     const q = W.rows[k];
@@ -2125,7 +2128,7 @@ function* tunnel(ctx, out, x, y0, dc, len, rng) {
       const rib = Math.abs(((dd / 2.2) % 1 + 1) % 1 - 0.5) < 0.08;
       let c = shade([0.76, 0.78, 0.76], nx, ny, 0.15, 0.6, 0.45);
       if (rib) c = mul3(c, 0.82);
-      out(x + nx * ra, y0 + ny * ra * 1.05, -dd, sl, sa, 0.06, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], kind);
+      out(x + nx * ra, y0 + ny * ra * 1.05, -dd, sl, sa, 0.06, c[0], c[1], c[2], 1, qq[0], qq[1], qq[2], qq[3], kind, MOVE.STILL);
     }
     if (out.due()) yield;
   }
@@ -2138,7 +2141,7 @@ function* tunnel(ctx, out, x, y0, dc, len, rng) {
       if (u * u + v * v > 1) continue;
       const door = Math.abs(u) < 0.25 && v < 0.65;
       const c = door ? [0.35, 0.37, 0.35] : mul3([0.74, 0.76, 0.74], sg < 0 ? 0.95 : 0.72);
-      out(x + u * ra, y0 + v * ra * 1.05, -dd, ra / ne * 0.72, ra / ne * 0.72, 0.05, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+      out(x + u * ra, y0 + v * ra * 1.05, -dd, ra / ne * 0.72, ra / ne * 0.72, 0.05, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind, MOVE.STILL);
     }
   }
 }
@@ -2752,6 +2755,8 @@ function* groves(ctx, out, W, dLo, dHi) {
       if (S.t !== T.PADDY && S.t !== T.FUJI) { r(); continue; }
       const y = S.y, Wd = 15 + 35 * r(), gh = 7 + 5 * r();
       const gs = detail(out, d, 0.9);
+      // (a grove is one mass 15 to 50 m across: it keeps still. Swelling, it would heave like a hill;
+      // the trees that answer the beat are the ones drawn as trees.)
       yield* blob(ctx, out, wx - ctx.x0, y + gh * 0.8, d, Wd, gh, Wd * 0.35, { n: Math.round(clamp(Wd * gh * 3 / (gs * gs), 24, 500)), color: r() < 0.5 ? C.cedar : C.wood, rng: r, kind: KIND.HEDGE, inner: 0.3, amb: 0.55 });
     }
   }
@@ -3045,10 +3050,12 @@ export const fujiBiome = {
   shares: { trackside: 0.13, near: 0.35, mid: 0.24, far: 0.17 },
   // the mountain itself: one mesh that stays with the journey
   backdrop: { share: 0.11, ...BD, generate: backdrop, pose: backdropPose },
-  // Fuji stays still on the beat: buildings (houses, pagoda, torii, lanterns, viaduct) and lights
-  // answer it; carts, the portable shrine, picnic boxes and the angler's bucket are rigid (MOVE.STILL); people and birds flash on it
+  // Fuji stays still on the beat: trees (KIND.TREE), buildings (houses, pagoda, torii, lanterns,
+  // viaduct) and lights answer it, as do the hills' emergent broadleaves and the groves (KIND.HEDGE
+  // blobs tagged MOVE.BEAT); tea rows and hedges do not. The greenhouse tunnels, carts, the portable
+  // shrine, picnic boxes and the angler's bucket are rigid (MOVE.STILL); people and birds flash on it
   // (MOVE.FLASH) and cyclists ride (MOVE.RIDE)
-  beatKinds: [KIND.BUILDING, KIND.LIGHT],
+  beatKinds: [KIND.TREE, KIND.BUILDING, KIND.LIGHT],
   sky: { clear: 0.55 },
   generators: { trackside, near, mid, far },
 };
