@@ -329,7 +329,8 @@ const outDir = process.argv[2] || '.';
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         const vc = document.querySelector('.view-controls'), list = document.querySelector('.channel-selector .channels-grid') || document.querySelector('.channel-selector');
         const up = () => !vc.classList.contains('fade-out');
-        for (let i = 0; i < 4 && !up(); i++) { document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200 + i * 40, clientY: 200, bubbles: true })); await wait(400); }
+        // (the panels answer a moment after the mouse on this renderer: keep moving it for up to 12 s)
+        for (let i = 0; i < 24 && !up(); i++) { document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200 + (i % 8) * 40, clientY: 200 + (i % 3) * 30, bubbles: true })); await wait(500); }
         const shown = up(), t0 = Date.now();
         while (Date.now() - t0 < 6000) { list.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true })); await wait(250); }
         const held = up();
