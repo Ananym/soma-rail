@@ -12,6 +12,8 @@
 //     dark splat between the forest floor and the canopy top instead of a ground disc;
 //   - full trees (spruce, Scots pine, birch) only along the edges that face the camera, plus
 //     a cheap spire here and there inside, so the canopy line is serrated.
+// On the beat only the individual trees out to 500 m swell, tree by tree (each kind split over a
+// pair of beat groups, neighbours alternating: see "Trees on the beat"); the mass keeps still.
 //
 // Wildlife (see "Wildlife" below): red deer in small groups (a group about every 500 m of line),
 // moose (about every 3 km; one in five in the shallows of a lake, most on open ground), a wolf
@@ -31,7 +33,7 @@ import {
   KIND, MOVE, makeOut, worldSeed, worldRng, worldHash, cellsAround, stick, blob, house, church,
   overheadLine, fence, lamp, floatingIsland, wires, jitter, mul3, mix3, shade, smooth, clamp, lerp,
   quatYaw, quatRoll, quatUpTo, quatXTo, quatMul, quatAxis, strut, norm3, Q_ID, SUN,
-  flightCell, flyBody, flyWing, FLY_CELL, grove, facetRock,
+  flightCell, flyBody, flyWing, FLY_CELL, FLIGHT, grove, facetRock,
 } from './kit.js';
 
 const PAL = {
@@ -356,30 +358,32 @@ function groundColor(W, s, wx, d, rng) {
 //   opts: n, dNear, dFar, power, cover, minR, maxR, mass (draw the forest mass), massFrom (only this
 //   far inside the forest), shadeK, colorHook(s, wx, d, c) -> c
 // ---------------------------------------------------------------------------------------------
-// Trees on the beat, a kind at a time (MOVE.GROVE through kit grove(g)): every splat of a tree,
-// trunk and crown, carries its kind's group, and on each beat one or two of the four groups swell
-// and rise. 0: Scots pine; 1: spruce; 2: birch (the only broadleaf here); 3: the larches (about
-// one in five of the grown spruce-shaped trees, lighter green) and the undergrowth, whatever its
-// species (the young spruce and birch at the forest's foot and on the rock cuttings' rims). The
-// young trees that crowd the line, and those standing alone out in clearings and on the bog, keep
-// their own kind's group (they are the biggest trees on screen there). Only individual trees in
-// the near and middle distance do this: trees beyond GROVE_FAR, and the forest mass (the fill's
-// tall dark splats inside the forest, which is the treeline) beyond MASS_NEAR, are MOVE.STILL.
-// Within MASS_NEAR the mass still takes groups in world patches a few trees across, so a dense
-// forest close to the line has something to move. (The whole mass used to ripple; the owner found
-// a distant treeline moving on the beat distracting.)
+// Trees on the beat, tree by tree (MOVE.GROVE through kit grove(g)): every splat of a tree, trunk
+// and crown, carries that tree's one group, and on each beat the shader swells and raises the
+// groups g with fract(g / 4 + beat * 0.382) <= 0.4. Two groups two apart are never on together,
+// and one of such a pair is on four beats in five, so each kind owns a PAIR and its trees are split
+// between the two halves of it: a stand of one kind (which is what a pine forest mostly is) then
+// shows swollen trees beside trees that are not, on every beat, where a whole wall of one kind
+// swelling together showed almost nothing.
+//   pair 1 (groups 1 and 3): Norway spruce, young and grown;
+//   pair 0 (groups 0 and 2): Scots pine, birch and larch, the kinds that stand among the spruces
+//     (larch about one in five of the grown spruce-shaped trees, birch at the spruce forest's
+//     edge), so a mixed stand mixes the two pairs as well.
+// Which half a tree takes (its `side`, 0 or 1) is a matter of its place on the world grid it was
+// planted on, a checkerboard of grid cells: the same tree in every chunk and band, and the trees
+// next to each other in a row, and one row behind the next, alternate. The undergrowth tree at the
+// foot of an edge tree takes the other side from the tree it stands under.
+// Only individual trees in the near and middle distance answer the beat: trees beyond GROVE_FAR
+// are MOVE.STILL, and so is ALL of the forest mass (the fill's tall dark splats inside the forest,
+// drawn as one surface: the treeline, and the depth of a dense forest behind its first trees). The
+// owner found a distant treeline moving on the beat distracting, and a mass swelling as one lump
+// reads as nothing; the forest's front ranks are real trees (forestPlan), with crowns at eye level.
 // The sea eagle's dead pine (part of the animal) and the dreamlike level's trees stay as they were.
-const G_YOUNG = 3;
 const GROVE_FAR = 500;            // metres from the track: trees further off than this keep still
-const MASS_NEAR = 110;            // ... and so does the forest mass (the treeline) beyond this
-const GROVE_OF = new Map();       // filled in below the tree functions: scotsPine 0, spruce 1, birch 2
-function massGroup(W, wx, d) {
-  const cs = 12 * Math.pow(2, Math.max(0, Math.floor(Math.log2(d / 150))));   // a few trees' width, wider far off
-  const h = hashInts(W.ws, 507, Math.floor(wx / cs), Math.floor(d / cs)) / 4294967296;
-  if (h < 0.12) return 2;
-  if (h < 0.24) return G_YOUNG;
-  return (h - 0.24) / 0.76 < pineMix(W, wx, d) ? 0 : 1;
-}
+const PAIR_OF = new Map();        // filled in below the tree functions: spruce 1; scotsPine, birch 0 (larch 0: see forestTree)
+const groveFor = (fn, side, larch = false) => (larch ? 0 : PAIR_OF.get(fn)) + 2 * (side & 1);
+// a tree's side from its world grid cell (gx along the line, gk out from it)
+const sideOf = (gx, gk) => (gx + gk) & 1;
 
 function* fillSurface(ctx, out, W, opts = {}) {
   out.limit = Infinity;
@@ -415,9 +419,9 @@ function* fillSurface(ctx, out, W, opts = {}) {
       c = mix3(c, mix3(C.spruce, C.pineCrown, pineMix(W, wx, d)), 0.4 * v);
       c = jitter(c, rng, 0.18);
       if (opts.colorHook) c = opts.colorHook(s, wx, d, c, true);
-      // The forest as a mass keeps still (a treeline rippling on the beat drew the eye from the trees
-      // in front of it), except close to the line, where the mass is the forest one is looking into.
-      const gm = d < MASS_NEAR ? grove(massGroup(W, wx, d)) : MOVE.STILL;
+      // The forest as a mass keeps still, near and far: a treeline rippling on the beat drew the eye
+      // from the trees in front of it, and a mass swelling as one lump shows nothing.
+      const gm = MOVE.STILL;
       if (v > 0.82) out(x, s.y + H * (0.72 + 0.2 * v), -d, r * 0.55 * ax, H * 0.17, r * 0.55, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, gm);
       else out(x, s.y + H * (0.12 + 0.7 * v), -d, r * 1.1 * ax, Math.max(r * 0.8, H * 0.2 * (1 - 0.4 * v)), r * 1.1, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, gm);
     } else {
@@ -446,6 +450,8 @@ export function coniferSplats(out, d, H, W) {
   const r = Math.max(0.03, 0.0032 * d * out.detailK / Math.sqrt(out.density)) * 1.25;
   return clamp(Math.round((H * W * 0.55) / (r * r * 1.5)), 1, 650 * Math.min(2, out.density));
 }
+// Turns a splat's y axis onto its x axis: quatMul(quatXTo(v), Q_YX) lays the splat's y axis along v.
+const Q_YX = quatRoll(-Math.PI / 2);
 const baseY = (ctx, x, d, opts) => (opts.y != null ? opts.y : ctx.terrain.height(ctx.x0 + x, d) - 0.15);
 
 // Norway spruce: a narrow, tapering spire built from many small elongated splats that hang down
@@ -511,14 +517,16 @@ export function* spruce(ctx, out, x, d, opts = {}) {
     const rr = Rk * f;
     const droop = 0.3 + 0.55 * (1 - tTop) + 0.25 * rng();
     const by = yk - droop * rr - tierH * 0.25 * rng();
-    const q = quatXTo(ca, -droop, sa);
+    // (the branch's length is its splat's y axis, turned out along the branch: a swell on the beat
+    // lifts each splat by a share of its y size, so the tiers lift visibly instead of by a hair)
+    const q = quatMul(quatXTo(ca, -droop, sa), Q_YX);
     const len = Math.min(Rk * 0.55, Math.max(s0 * 1.5, rr * 0.4));
     const th = Math.max(s0 * (n < 120 ? 0.62 : 0.45), len * 0.28);   // few splats: fatter, so the tiers still close up
     const lit = Math.max(0, ca * SUN[0] + 0.45 * SUN[1] + sa * SUN[2]);
-    let c = mix3(col, tip, f * f * (0.25 + 0.75 * lit));
-    c = mul3(c, (0.55 + 0.5 * f) * (0.72 + 0.5 * lit) * tierS[k]);
+    let c = mix3(col, tip, f * f * (0.45 + 0.55 * lit));
+    c = mul3(c, (0.4 + 0.7 * f) * (0.72 + 0.5 * lit) * tierS[k]);
     c = jitter(c, rng, 0.1);
-    out(x + lean * (by - y0) + ca * rr, by, -(d - sa * rr), len, th, th * 0.85, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind);
+    out(x + lean * (by - y0) + ca * rr, by, -(d - sa * rr), th, len, th * 0.85, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], kind);
     if (out.due()) yield;
   }
   // the leader at the very top
@@ -537,7 +545,9 @@ export function* scotsPine(ctx, out, x, d, opts = {}) {
   const col = opts.color || C.pineCrown;
   const n = Math.max(1, Math.round(opts.n || coniferSplats(out, d, H, Wc * 0.8)));
   // crown base: high on a forest pine, low on a young or stunted one out on the bog
-  const cb = H * (H < 9 || opts.open ? 0.15 + 0.2 * rng() : 0.5 + 0.14 * rng());
+  // (and on a pine at the forest's edge close to the line, which keeps its lower boughs in the light,
+  // so the window sees its crown and not a bare trunk)
+  const cb = H * (H < 9 || opts.open ? 0.15 + 0.2 * rng() : opts.edge ? 0.2 + 0.14 * rng() : 0.5 + 0.14 * rng());
   const lx = (rng() - 0.5) * 0.06, lx2 = (rng() - 0.5) * 0.08;   // lean, and a kink higher up
   const tx = (t) => x + lx * t + (t > cb * 0.6 ? lx2 * (t - cb * 0.6) : 0);
   const tr = Math.max(0.05, H * 0.011, 0.0005 * d);   // trunks never thinner than the GPU can draw
@@ -597,7 +607,8 @@ export function* scotsPine(ctx, out, x, d, opts = {}) {
       c = jitter(c, rng, 0.12);
       const s = ss * (0.6 + 0.6 * rng());
       if (i === 0 && m >= 6) { const cc = mul3(col, 0.55); out(cxk, cyk - ry * 0.1, -cdk, rx * 0.55, ry * 0.5, rx * 0.45, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, kind); continue; }
-      out(cxk + ux * rx * rad, cyk + uy * ry * rad, -(cdk - uz * rx * 0.7 * rad), s * 1.2, s * 0.65, s, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+      // (wide and flat, with its width as the splat's y axis turned level: a beat lifts it by that)
+      out(cxk + ux * rx * rad, cyk + uy * ry * rad, -(cdk - uz * rx * 0.7 * rad), s * 0.65, s * 1.2, s, c[0], c[1], c[2], 1, Q_YX[0], Q_YX[1], Q_YX[2], Q_YX[3], kind);
       if (out.due()) yield;
     }
   }
@@ -673,7 +684,7 @@ export function* birch(ctx, out, x, d, opts = {}) {
 // Placing trees with a shared budget: collect them first, then give each a share of the splats in
 // proportion to its size on screen, capped at full detail.
 // ---------------------------------------------------------------------------------------------
-GROVE_OF.set(scotsPine, 0).set(spruce, 1).set(birch, 2);
+PAIR_OF.set(scotsPine, 0).set(spruce, 1).set(birch, 0);
 function* drawPlan(ctx, out, plan, budget) {
   let sw = 0;
   for (const t of plan) sw += t.w;
@@ -686,7 +697,7 @@ function* drawPlan(ctx, out, plan, budget) {
   }
   for (const t of plan) {
     // (only trees out to the middle distance answer the beat: beyond GROVE_FAR they keep still)
-    yield* t.fn(ctx, withMove(out, t.d > GROVE_FAR ? MOVE.STILL : grove(t.g != null ? t.g : GROVE_OF.get(t.fn))), t.x, t.d, { ...t.opts, n: t.n });
+    yield* t.fn(ctx, withMove(out, t.d > GROVE_FAR ? MOVE.STILL : grove(t.g)), t.x, t.d, { ...t.opts, n: t.n });
     if (out.due()) yield;
     if (out.n > out.limit) break;
   }
@@ -703,11 +714,11 @@ function forestTree(ctx, out, W, wx, d, rng, opts = {}) {
   else { fn = spruce; H = Hc * (0.8 + 0.35 * rng()); Wd = H * (0.24 + 0.08 * rng()); }
   if (opts.young) H *= opts.young;
   // about one in five of the grown spruce-shaped trees is a larch (from the same draw, so the
-  // forest is laid out as before): lighter, a little wider, in the fourth beat group
+  // forest is laid out as before): lighter, a little wider, on the other pair of beat groups
   const larch = fn === spruce && !opts.young && (u * 7.13) % 1 < 0.22;
   if (larch) Wd *= 1.15;
   const nMax = Math.round(coniferSplats(out, d, H, Wd) * (opts.detail || 1));
-  return { fn, g: (opts.young && !opts.scattered) || larch ? G_YOUNG : undefined, x: wx - ctx.x0, d, w: (H * Wd) / (d * d), nMax: Math.max(1, nMax), opts: { rng, height: H, width: Wd, y, kind: opts.kind, open: !!opts.young, ...(larch ? { color: C.larch, tip: C.larchTip } : {}) } };
+  return { fn, g: groveFor(fn, opts.side || 0, larch), x: wx - ctx.x0, d, w: (H * Wd) / (d * d), nMax: Math.max(1, nMax), opts: { rng, height: H, width: Wd, y, kind: opts.kind, open: !!opts.young, edge: !!opts.edge, ...(larch ? { color: C.larch, tip: C.larchTip } : {}) } };
 }
 
 // The forest seen from outside: trees on a world grid; those at an edge facing the camera are
@@ -721,11 +732,12 @@ function forestPlan(ctx, out, W, plan, dLo, dHi, sp, opts = {}) {
       const r = worldRng(ctx, 501, gx, gk);
       const wx = (gx + r()) * sp, d = (gk + r()) * sp;
       if (d < dLo || d >= dHi) continue;
+      const side = sideOf(gx, gk);
       const s = surface(W, wx, d);
       if (s.t !== T.FOREST) {
         // scattered trees out in the open: young ones in clearings, stunted pines on the bog
         if ((s.t === T.OPEN || s.t === T.BOG || s.t === T.CLEARCUT) && r() < (s.t === T.BOG ? 0.03 : 0.01 + 0.12 * smooth(0.4, 0.5, s.f))) {
-          const t = forestTree(ctx, out, W, wx, d, r, { birch: 0.4, young: s.t === T.BOG ? 0.35 : 0.3 + 0.5 * r(), scattered: true, y: s.y - 0.1, detail: opts.detail });
+          const t = forestTree(ctx, out, W, wx, d, r, { birch: 0.4, young: s.t === T.BOG ? 0.35 : 0.3 + 0.5 * r(), scattered: true, y: s.y - 0.1, detail: opts.detail, side });
           plan.push(t);
         }
         continue;
@@ -733,15 +745,16 @@ function forestPlan(ctx, out, W, plan, dLo, dHi, sp, opts = {}) {
       const y = s.y - 0.15;
       const front = !isForest(W, wx, d - sp * 1.2);
       if (front) {
-        plan.push(forestTree(ctx, out, W, wx, d, r, { birch: 0.18 * (1 - pineMix(W, wx, d)), y, detail: opts.detail }));
+        plan.push(forestTree(ctx, out, W, wx, d, r, { birch: 0.18 * (1 - pineMix(W, wx, d)), y, detail: opts.detail, side, edge: opts.edge }));
         // undergrowth along the edge: young spruce and birch, so the foot of the wall is ragged
-        if (r() < (opts.under != null ? opts.under : 0.6)) plan.push(forestTree(ctx, out, W, wx + (r() - 0.5) * sp, d - sp * (0.3 + 0.4 * r()), r, { birch: 0.3, young: 0.12 + 0.25 * r(), y, detail: opts.detail }));
+        // (on the other side of the pair from the tree it stands under)
+        if (r() < (opts.under != null ? opts.under : 0.6)) plan.push(forestTree(ctx, out, W, wx + (r() - 0.5) * sp, d - sp * (0.3 + 0.4 * r()), r, { birch: 0.3, young: 0.12 + 0.25 * r(), y, detail: opts.detail, side: 1 - side }));
         continue;
       }
       const front2 = !isForest(W, wx, d - sp * 2.6) || !isForest(W, wx - sp * 1.5, d) || !isForest(W, wx + sp * 1.5, d);
-      if (front2) { plan.push(forestTree(ctx, out, W, wx, d, r, { y, detail: 0.35 * (opts.detail || 1) })); continue; }
+      if (front2) { plan.push(forestTree(ctx, out, W, wx, d, r, { y, detail: 0.35 * (opts.detail || 1), side })); continue; }
       if (r() < (opts.inner != null ? opts.inner : 0.12)) {
-        const t = forestTree(ctx, out, W, wx, d, r, { y, hk: 1.1 });
+        const t = forestTree(ctx, out, W, wx, d, r, { y, hk: 1.1, side });
         t.nMax = Math.min(t.nMax, 3);
         plan.push(t);
       }
@@ -845,7 +858,7 @@ function* rockCutting(ctx, out, W, c, plan) {
       const d = 6 + (h - 1.45) / 3.2 + 1 + 6 * r();
       const H = 2 + 7 * r(), isB = r() < 0.35;
       const Wd = H * (isB ? 0.45 : 0.3);
-      plan.push({ fn: isB ? birch : spruce, g: G_YOUNG, x: wx0 - ctx.x0, d, w: (H * Wd) / (d * d), nMax: coniferSplats(out, d, H, Wd), opts: { rng: r, height: H, width: Wd, y: h - 0.2 } });
+      plan.push({ fn: isB ? birch : spruce, g: groveFor(isB ? birch : spruce, i), x: wx0 - ctx.x0, d, w: (H * Wd) / (d * d), nMax: coniferSplats(out, d, H, Wd), opts: { rng: r, height: H, width: Wd, y: h - 0.2 } });
     }
   }
 }
@@ -1028,7 +1041,7 @@ function* lakeProps(ctx, out, W, dLo, dHi) {
         if (cd >= dLo && cd < dHi) {
           yield* cabin(ctx, out, W, wx, cd, cr, {});
           yield* jetty(ctx, out, wx + 3, sd + 1, sd - 12, lk.level, cr);
-          yield* birch(ctx, withMove(out, grove(GROVE_OF.get(birch))), wx - ctx.x0 - 7, cd + 2, { rng: cr, height: 11, y: surfY(W, wx - 7, cd + 2) });
+          yield* birch(ctx, withMove(out, grove(groveFor(birch, lk.i))), wx - ctx.x0 - 7, cd + 2, { rng: cr, height: 11, y: surfY(W, wx - 7, cd + 2) });
         }
       }
     }
@@ -1706,17 +1719,20 @@ function* wildlife(ctx, out, W, dLo, dHi) {
 // forest, a goshawk dashing low over open ground before the trees, and at dusk and dawn an owl in
 // place of any of them (an eagle owl over the water, a great grey owl elsewhere).
 //
-// They fly (MOVE.FLY, through kit flyBody and flyWing): the shader carries them along the line
-// and flaps their wings in bursts. A bird heading along the line shows the window its wings end
+// They fly (MOVE.FLY, through kit flyBody and flyWing, every piece of every bird with FLIGHT.SOAR):
+// the shader carries them along the line, holds the wings as drawn, and every twelve seconds or so
+// gives two slow beats. A bird heading along the line shows the window its wings end
 // on (a stroke, not a bird), so a soarer faces the train, nose a little up, as a soaring bird
 // hangs and drifts on the wind: the window sees it from below and in front, the way a field guide
 // draws it, with the wings spread across the frame in their flat plank, shallow V or crooked M,
 // the fingered hands, the pale head and the tail beyond. The goshawk, dashing past, is seen from
 // the side and in front.
-// A wing piece flaps by its lift (in the shader's second frame it drops 1.7 times that), given
-// piece by piece in proportion to its distance from the body. The soarers (eagles, osprey,
-// buzzard) carry none, so their wings hold still through the shader's flap bursts, V and all; the
-// goshawk and the owls beat, a little. They are drawn about 2 to 2.6 times life size.
+// A wing piece beats by its lift (amp per metre out from the body, so the tip travels most and the
+// root not at all; the shader swings it from 0.35 of its lift above where it is drawn to 1.15 of
+// it below): 0.3 for the eagles, osprey and buzzard, a little more for the goshawk (flap, flap,
+// glide) and the owls (deep, soft beats). Body, head and tail carry none. Raptors once flapped like
+// pigeons and then not at all; the owner asked for "flap sometimes, just slowly". They are drawn
+// about 2 to 2.6 times life size.
 //
 // Where: in each world cell, the first of a few tries in the middle 36% of the cell where the
 // bird can fly so that, from the train level with it and as it comes and goes, it stands clear
@@ -1733,10 +1749,11 @@ const BIRD_CELL = 4200, BIRD_SPAN = 0.36, NEAR_CHUNK = 200;   // cells' middles 
 // the root, at the end, wedge (longer in the middle) 0..1, colour, bar colour or null]; body:
 // [half length, radius, colour]; head: [forward of the body, radius, colour]. S: drawn scale;
 // pitch: the nose lifted (radians; owls fly level, the rest are given one each);
-// amp: the flap (lift per metre out from the body).
+// amp: the beat (lift per metre out from the body); clear: the drop below the bird its place was
+// chosen to leave room for (kept from the old flap, so the birds fly where they did).
 const RAPTOR = {
   seaEagle: {
-    S: 2.2, amp: 0,
+    S: 2.2, amp: 0.3, clear: 0,
     wing: [[0.06, 0.2, -0.34, 0], [0.48, 0.24, -0.37, 0.04], [0.88, 0.2, -0.22, 0.08]],
     arm: [[0.24, 0.17, 0.11], [0.18, 0.13, 0.09], [0.12, 0.09, 0.07]], hand: [[0.2, 0.15, 0.1], [0.13, 0.1, 0.08], [0.1, 0.08, 0.06]],
     fingers: [7, 0.32, 0.02, [0.08, 0.065, 0.055]],
@@ -1744,7 +1761,7 @@ const RAPTOR = {
     body: [0.36, 0.13, [0.21, 0.15, 0.1]], head: [0.46, 0.095, [0.66, 0.6, 0.47]], bill: [0.6, 0.05, [0.8, 0.64, 0.15]],
   },
   golden: {
-    S: 2.2, amp: 0,
+    S: 2.2, amp: 0.3, clear: 0,
     wing: [[0.06, 0.15, -0.26, 0], [0.42, 0.23, -0.38, 0.1], [0.84, 0.18, -0.2, 0.2]],
     arm: [[0.22, 0.15, 0.09], [0.28, 0.23, 0.19], [0.22, 0.19, 0.16]], hand: [[0.2, 0.14, 0.09], [0.3, 0.26, 0.21], [0.2, 0.17, 0.14]],
     fingers: [6, 0.3, 0.04, [0.07, 0.06, 0.05]],
@@ -1752,7 +1769,7 @@ const RAPTOR = {
     body: [0.36, 0.13, [0.2, 0.14, 0.09]], head: [0.42, 0.085, [0.6, 0.44, 0.2]], bill: [0.54, 0.035, [0.24, 0.22, 0.2]],
   },
   osprey: {
-    S: 2.35, amp: 0,
+    S: 2.35, amp: 0.3, clear: 0,
     wing: [[0.05, 0.12, -0.17, 0], [0.36, 0.21, -0.11, 0.12], [0.76, 0.0, -0.15, 0.02]],
     arm: [[0.76, 0.75, 0.72], [0.7, 0.7, 0.68], [0.5, 0.49, 0.47]], hand: [[0.7, 0.7, 0.68], [0.5, 0.49, 0.47], [0.42, 0.41, 0.4]],
     fingers: [4, 0.16, 0.1, [0.1, 0.09, 0.08]],
@@ -1761,7 +1778,7 @@ const RAPTOR = {
     carpal: [0.1, 0.08, 0.07],
   },
   buzzard: {
-    S: 2.35, amp: 0,
+    S: 2.35, amp: 0.3, clear: 0,
     wing: [[0.05, 0.14, -0.22, 0], [0.36, 0.17, -0.25, 0.07], [0.6, 0.13, -0.15, 0.12]],
     arm: [[0.3, 0.2, 0.13], [0.74, 0.7, 0.62], [0.26, 0.22, 0.19]], hand: [[0.3, 0.21, 0.14], [0.74, 0.7, 0.63], [0.24, 0.2, 0.17]],
     fingers: [5, 0.17, 0.02, [0.1, 0.08, 0.07]],
@@ -1770,7 +1787,7 @@ const RAPTOR = {
     carpal: [0.12, 0.09, 0.06], breast: [0.7, 0.64, 0.54],
   },
   goshawk: {
-    S: 2.35, amp: 0.18,
+    S: 2.35, amp: 0.4, clear: 0.18,
     wing: [[0.05, 0.14, -0.22, 0], [0.3, 0.16, -0.24, 0.12], [0.5, 0.12, -0.12, 0.22]],
     arm: [[0.6, 0.6, 0.58], [0.5, 0.5, 0.49], [0.36, 0.36, 0.36]], hand: [[0.52, 0.52, 0.51], [0.4, 0.4, 0.4], [0.3, 0.3, 0.31]],
     fingers: [5, 0.11, 0.02, [0.14, 0.14, 0.15]],
@@ -1779,7 +1796,7 @@ const RAPTOR = {
     brow: [0.78, 0.78, 0.76],
   },
   greatGrey: {
-    S: 2.3, amp: 0.1, pitch: 0.1,
+    S: 2.3, amp: 0.4, clear: 0.1, pitch: 0.1,
     wing: [[0.05, 0.13, -0.17, 0], [0.4, 0.15, -0.2, 0.05], [0.7, 0.1, -0.11, 0.08]],
     arm: [[0.5, 0.5, 0.48], [0.4, 0.4, 0.38], [0.24, 0.24, 0.23]], hand: [[0.46, 0.46, 0.44], [0.34, 0.34, 0.33], [0.2, 0.2, 0.19]],
     fingers: [5, 0.13, 0.03, [0.2, 0.2, 0.19]],
@@ -1788,7 +1805,7 @@ const RAPTOR = {
     disc: [0.8, 0.8, 0.76],
   },
   eagleOwl: {
-    S: 2.3, amp: 0.1, pitch: 0.1,
+    S: 2.3, amp: 0.4, clear: 0.1, pitch: 0.1,
     wing: [[0.05, 0.14, -0.18, 0], [0.42, 0.16, -0.21, 0.05], [0.72, 0.1, -0.11, 0.08]],
     arm: [[0.66, 0.52, 0.32], [0.54, 0.41, 0.25], [0.26, 0.19, 0.12]], hand: [[0.62, 0.48, 0.3], [0.48, 0.36, 0.22], [0.22, 0.16, 0.1]],
     fingers: [5, 0.14, 0.03, [0.18, 0.13, 0.08]],
@@ -1874,7 +1891,7 @@ function makeRaptor(W, i) {
     else if (run) { at = 'open'; d = spread(run[0], run[1], u2); }
     const type = at === 'lake' ? (u3 < 0.5 ? 'seaEagle' : 'osprey') : at === 'open' ? (u3 < 0.55 ? 'buzzard' : 'golden') : (u3 < 0.55 ? 'golden' : 'buzzard');
     const R = RAPTOR[type], ext = raptorReach(R, d);
-    const below = 0.45 * ext + 1.7 * R.amp * ext + 1.2, above = 0.45 * ext + 0.8;
+    const below = 0.45 * ext + 1.7 * R.clear * ext + 1.2, above = 0.45 * ext + 0.8;
     let need = -Infinity;
     for (const [cam, bx] of birdViews(cx, d, fc.dir)) need = Math.max(need, skyNeed(W, cam, bx, d) + below);
     const top = 2.6 + 0.4 * d - above;                   // about 22 degrees up, level with it
@@ -1904,10 +1921,10 @@ function drawRaptor(out, x, y, z, b, type, bank = b.bank, yaw = b.yaw) {
       const t0 = i / n, t1 = (i + 1) / n;
       const pa = P(lerp(a[0], e[0], t0), lerp(a[1], e[1], t0), lerp(a[2], e[2], t0));
       const pb = P(lerp(a[0], e[0], t1), lerp(a[1], e[1], t1), lerp(a[2], e[2], t1));
-      flyWing(out, pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], Math.max(r, minR), col, 1, (pa[1] + pb[1]) / 2 - Math.max(0.02, lerp(lift0, lift1, (i + 0.5) / n)), K);
+      flyWing(out, pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], Math.max(r, minR), col, 1, (pa[1] + pb[1]) / 2 - Math.max(0.02, lerp(lift0, lift1, (i + 0.5) / n)), K, FLIGHT.SOAR);
     }
   };
-  const lift = (e) => R.amp * e * S, bodyC = (p, sx, sy, c) => flyBody(out, p[0], p[1], p[2], Math.max(sx, minR), Math.max(sy, minR), c, Q_ID, K);
+  const lift = (e) => R.amp * e * S, bodyC = (p, sx, sy, c) => flyBody(out, p[0], p[1], p[2], Math.max(sx, minR), Math.max(sy, minR), c, Q_ID, K, FLIGHT.SOAR);
   const juv = type === 'golden' && b.juv;                // a young golden eagle: white wing patches and tail base
   for (const sg of [1, -1]) {
     const shade = sg > 0 ? 1 : 0.82;                     // the far wing a little darker
@@ -1929,7 +1946,8 @@ function drawRaptor(out, x, y, z, b, type, bank = b.bank, yaw = b.yaw) {
       const f = (q + 0.5) / nf, ub = lerp(H[1], H[2], f), len = fl * (1 - 0.45 * Math.pow(Math.abs(2 * f - 1.3) / 1.3, 1.5));
       piece([ub, sg * (H[0] - 0.04), H[3]], [ub + (ub - mid) * 0.7 - sweep, sg * (H[0] + len), H[3] + 0.04], rf, mul3(fc, shade), lift(H[0]), lift(H[0] + len), 2);
     }
-    if (R.carpal) { const p = P(lerp(pts[1][1], pts[1][2], 0.3), sg * pts[1][0], pts[1][3]); bodyC(p, 0.08 * S, 0.06 * S, mul3(R.carpal, shade)); }
+    // the dark patch at the wrist: a short piece of wing, so that it beats with the wing it is on
+    if (R.carpal) { const u = lerp(pts[1][1], pts[1][2], 0.3), e = pts[1][0]; piece([u + 0.04, sg * (e - 0.04), pts[1][3]], [u - 0.04, sg * (e + 0.04), pts[1][3]], 0.06 * S, mul3(R.carpal, shade), lift(e), lift(e), 1); }
   }
   // the tail: a fan of feathers behind the body, spread in the plane of the wings
   const [tl, tw0, tw1, wedge, tc, bar] = R.tail, u0 = -R.body[0] * 0.75, rt = tw1 / 3.2 * S;
@@ -2028,7 +2046,7 @@ function* trackside(ctx, emit) {
       const H = 1 + Math.min(4.5, (d - 5) * 0.3 * (0.3 + r()));
       const isB = r() < 0.35;
       const Wd = isB ? H * 0.5 : H * 0.36;
-      plan.push({ fn: isB ? birch : spruce, x: wx - ctx.x0, d, w: (H * Wd) / (d * d), nMax: coniferSplats(out, d, H, Wd), opts: { rng: r, height: H, width: Wd, y: s.y - 0.1 } });
+      plan.push({ fn: isB ? birch : spruce, g: groveFor(isB ? birch : spruce, i + k), x: wx - ctx.x0, d, w: (H * Wd) / (d * d), nMax: coniferSplats(out, d, H, Wd), opts: { rng: r, height: H, width: Wd, y: s.y - 0.1 } });
     }
   }
   // boulders
@@ -2042,7 +2060,7 @@ function* trackside(ctx, emit) {
     yield* boulder(ctx, out, W, wx, d, 0.4 + 1.2 * r() * r(), r);
   }
   // the forest edge where the forest comes close
-  forestPlan(ctx, out, W, plan, 12, ctx.zFar, 4.2, { inner: 0.2, under: 0.25 });
+  forestPlan(ctx, out, W, plan, 12, ctx.zFar, 4.2, { inner: 0.2, under: 0.25, edge: true });
   yield* drawPlan(ctx, out, plan, Math.max(0, out.limit - out.n));
 
   // ground: ballast, cess, a dark ditch, then the cover (heather, bilberry, grass) and the surface
