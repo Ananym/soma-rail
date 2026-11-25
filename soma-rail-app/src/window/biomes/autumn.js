@@ -497,7 +497,10 @@ function heightAt(W, wx, d) {
   }
   const t = d - x.fd, tb = d - x.fb;
   const bank = x.bank * smooth(0, 26, t);
-  return LV + 0.15 + bank + farHills(W, wx, tb + 30, x) * smooth(-60, 40, tb) + 0.01 * Math.max(0, tb) + (d > 5000 ? mountains(W, wx, d) : 0);
+  // (the land comes up out of the water: where the far shore stands forward of the hills' base line
+  // the hill is already metres high at the waterline, and a heightfield has no face to draw there,
+  // so the shore would stand on a wall with the sky showing through under the trees)
+  return LV + 0.15 + bank + farHills(W, wx, tb + 30, x) * smooth(-60, 40, tb) * (0.03 + 0.97 * smooth(0, 40, t)) + 0.01 * Math.max(0, tb) + (d > 5000 ? mountains(W, wx, d) : 0);
 }
 // How far out from an island a point of open water lies, in island radii (1 at its shore; large
 // when no island is near).
@@ -780,7 +783,7 @@ function* fillLake(ctx, out, W, opts = {}) {
   const sample = (u) => Math.pow(A + u * (B - A), 1 / a1);
   // opts.occlude: what stands behind a nearer skyline (the back of a ridge, the land behind a point)
   // is mostly not drawn. Per column of 40 m, the highest elevation seen so far going out.
-  const hidden = opts.occlude ? skyline(ctx, W, dn, df) : null;
+  const hidden = opts.occlude ? skyline(ctx, W, Math.max(30, dn * 0.5), df) : null;
   // a sample: distance, x, and its surface; water samples are kept by wKeep (up to two re-draws)
   // (and every sample is kept by whether it can be seen: the land below the rim mostly cannot)
   const pick = (r, u0) => {
@@ -830,7 +833,10 @@ function* fillLake(ctx, out, W, opts = {}) {
         const mc = massColor(W, wx, d, 0.3, rng, 0);
         const c = jitter(mul3(mc.c, 0.42), rng, 0.08);
         // (low: it must never stand up over the crowns of the row behind it, up the slope)
-        const sy = Math.min(H * 0.16, r * 0.5), yy = s.y + sy + H * 0.25 * rng(), sx = r * 0.75;
+        // (a fill samples by plan area: on a slope that faces the window each sample must stand as
+        // tall as the ground rises over it, or the sky shows through the hillside under the crowns)
+        const e = Math.max(3, r), up = Math.max(0, (W.H(wx, d + e) - s.h) / e);
+        const sy = Math.max(Math.min(H * 0.16, r * 0.5), Math.min(H * 0.45, 0.6 * r * up)), yy = s.y + sy + H * 0.25 * rng(), sx = r * 0.75;
         out(x, yy, -d, sx, sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, STILL);
         if (o) emitMirror(out, x, yy, -d, sx / Math.sqrt(pm), sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE);
       } else {
@@ -841,7 +847,7 @@ function* fillLake(ctx, out, W, opts = {}) {
         const steep = clamp(Math.hypot(hz, hx), 0, 3);
         const lift = s.t === T.GRASS && d < 30 ? 0.05 + r * 0.3 * rng() : 0.02;
         // (across the lake, upright and round: a flat wide splat there reads as a sideways smear)
-        const far = d > 250, sy = r * (far ? 0.55 : 0.12 + 0.3 * Math.min(1, steep)), sx = far ? r * 0.7 : r * ax;
+        const far = d > 250, sy = r * (far ? 0.55 + 0.5 * clamp(hz, 0, 1.5) : 0.12 + 0.3 * Math.min(1, steep)), sx = far ? r * 0.7 : r * ax;
         out(x, s.y + lift, -d, sx, sy, far ? r * 0.7 : r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
         if (o) emitMirror(out, x, s.y + lift, -d, sx / Math.sqrt(pm), sy, far ? r * 0.7 : r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
       }
@@ -853,25 +859,41 @@ const mirrorFill = true;
 // What stands behind a nearer skyline: per column of 40 m, the highest elevation seen so far going
 // out (sampled every 6% of distance). hidden(x, d, y): whether a point at (chunk x, d, y) is behind.
 function skyline(ctx, W, dn, df) {
-  const OX = 40, ds = [];
-  for (let dd = dn; dd < df; dd *= 1.06) ds.push(dd);
-  const cols = [];
-  for (let c = 0; c * OX <= ctx.length + OX; c++) {
-    const wx = ctx.x0 + c * OX, run = new Float32Array(ds.length);
-    let m = -1;
-    for (let k = 0; k < ds.length; k++) {
-      const h = W.H(wx, ds[k]);
-      run[k] = m;
-      m = Math.max(m, ((h > LV + 0.5 ? h + 5 : LV) - CAMY) / ds[k]);
+  // (The window looks out through 40 degrees either side of square, and every point passes through
+  // all of it as the train goes by: the land behind a spur is hidden square on and plain to see from
+  // down the line. So a point is hidden only if it is hidden along the square ray and along a ray
+  // from well to either side. A ray of slope u meets the line at x - u d, and every point on it
+  // shares that: per ray slope, a table by where the ray starts and how far out.)
+  const memo = ctx._sky || (ctx._sky = new Map()), key = dn + ':' + df;
+  if (memo.has(key)) return memo.get(key);
+  const OX = 50, US = [-0.72, 0, 0.72], M = 0.72 * df, ds = [];
+  for (let dd = dn; dd < df; dd *= 1.08) ds.push(dd);
+  const nc = Math.ceil((ctx.length + 2 * M) / OX) + 1;
+  const tabs = US.map((u) => {
+    const cols = [];
+    for (let c = 0; c < nc; c++) {
+      const sx = ctx.x0 - M + c * OX, run = new Float32Array(ds.length);
+      let m = -1;
+      for (let k = 0; k < ds.length; k++) {
+        const h = W.H(sx + u * ds[k], ds[k]);
+        run[k] = m;
+        m = Math.max(m, ((h > LV + 0.5 ? h + 5 : LV) - CAMY) / ds[k]);
+      }
+      cols.push(run);
     }
-    cols.push(run);
-  }
-  const lk = Math.log(1.06);
-  return (x, d, y) => {
-    const run = cols[clamp(Math.round(x / OX), 0, cols.length - 1)];
-    const k = clamp(Math.floor(Math.log(d / dn) / lk) - 1, 0, run.length - 1);
-    return (y - CAMY) / d < run[k] - 0.003;
+    return cols;
+  });
+  const lk = Math.log(1.08);
+  const fn = (x, d, y) => {
+    const k = clamp(Math.floor(Math.log(d / dn) / lk) - 1, 0, ds.length - 1), a = (y - CAMY) / d + 0.003;
+    for (let i = 0; i < US.length; i++) {
+      const run = tabs[i][clamp(Math.round((x - US[i] * d + M) / OX), 0, nc - 1)];
+      if (a >= run[k]) return false;
+    }
+    return true;
   };
+  memo.set(key, fn);
+  return fn;
 }
 
 // The far waterline, and every island's: one crisp thin line at the water (pale granite, a strip of
@@ -887,13 +909,29 @@ function* waterline(ctx, out, W, dLo, dHi) {
     const back = surface(W, wx, d + 4), tree = isTree(back.t);
     const H = tree ? canopyH(W, wx, d + 6, back) : 0;
     // (a bank only as tall as the dark under the crowns: a few metres, more where the trees are near)
-    const top = tree ? back.y + clamp(H * 0.4, 2, 2 + 2400 / d) : clamp(back.y + 0.3, LV + 0.6, LV + 2.6);
+    const top = tree ? back.y + clamp(H * 0.5, 2, 11) : clamp(back.y + 0.3, LV + 0.6, LV + 2.6);
     const m = noise1(wx / 23, W.ws + 991);
-    const pale = m > 0.72 ? C.sand : mix3(C.granite, C.graniteDark, 0.15 + 0.4 * noise1(wx / 7, W.ws + 992));
+    const pale = m > 0.72 ? [...C.sand] : mix3(C.granite, C.graniteDark, 0.15 + 0.4 * noise1(wx / 7, W.ws + 992));
     const bank = tree ? mix3([0.05, 0.04, 0.035], C.floor, 0.25 * m) : mul3(mix3(C.granite, C.graniteDark, 0.6 + 0.3 * m), 0.62);
     const b0 = LV + 0.1, by = (b0 + top) / 2, bh = Math.max(0.3, (top - b0) * 0.3), sx = st * 0.75;
     o(x, by, -(d + 1.5), sx, bh, sx, bank[0], bank[1], bank[2], 1, 0, 0, 0, 1, KIND.GROUND);
     emitMirror(out, x, by, -(d + 1.5), sx, bh, sx, bank[0], bank[1], bank[2], 1, 0, 0, 0, 1, KIND.GROUND);
+    if (!tree) {
+      // a bare strip of rock or beach: behind it the forest's edge, and the dark under its crowns
+      for (const back2 of [9, 16, 26]) {
+        const f = surface(W, wx, d + back2);
+        if (!isTree(f.t)) continue;
+        const fy = f.y, H2 = canopyH(W, wx, d + back2, f), t2 = fy + clamp(H2 * 0.5, 2, 11), y2 = (LV + 0.4 + t2) / 2, h2 = Math.max(0.3, (t2 - LV - 0.4) * 0.3);
+        const dk = mix3([0.05, 0.04, 0.035], C.floor, 0.25 * m);
+        o(x, y2, -(d + back2), sx, h2, sx, dk[0], dk[1], dk[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        emitMirror(out, x, y2, -(d + back2), sx, h2, sx, dk[0], dk[1], dk[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        break;
+      }
+    }
+    // (the line is pale where rock or sand meets the water and dark where the forest overhangs it:
+    // one unbroken pale line the whole width of the lake reads as a wire)
+    const lit = tree ? smooth(0.42, 0.6, noise1(wx / 55, W.ws + 994)) : 1;
+    pale[0] = bank[0] + (pale[0] - bank[0]) * lit; pale[1] = bank[1] + (pale[1] - bank[1]) * lit; pale[2] = bank[2] + (pale[2] - bank[2]) * lit;
     const lh = Math.max(0.14, 0.0008 * d);
     o(x, LV + lh * 1.1, -d, sx, lh, sx * 0.6, pale[0], pale[1], pale[2], 1, 0, 0, 0, 1, KIND.GROUND);
     emitMirror(out, x, LV + lh * 1.1, -d, sx, lh, sx * 0.6, pale[0] * lr, pale[1] * lr, pale[2] * lr, 1, 0, 0, 0, 1, KIND.GROUND);
@@ -947,15 +985,19 @@ function colourGroup(c, sp) {
 const CROWN_MIN = 6.5;
 function crownSpacing(d, kd, min = CROWN_MIN) { return Math.max(min, d * kd); }
 function* crowns(ctx, out, W, dLo, dHi, opts = {}) {
-  const kd = (opts.kd || 0.0062) / Math.sqrt(Math.max(0.25, Math.min(2, out.density)));
+  const kd0 = (opts.kd || 0.0062) / Math.sqrt(Math.max(0.25, Math.min(2, out.density)));
   const maxN = opts.max != null ? opts.max : Infinity;
   const hidden = skyline(ctx, W, Math.max(30, dLo * 0.5), dHi);
   const x0 = ctx.x0, x1 = ctx.x0 + ctx.length;
-  // pass 1: the cells, and which hold a crown that can be seen
-  const list = [];
-  let est = 0;
+  // pass 1: the cells, and which hold a crown that can be seen. (Should a chunk's crowns ask for more
+  // than their share, as where a big hill fills the band, the cells are laid again a little larger:
+  // fewer, bigger crowns that still cover the hillside. Dropping crowns instead left holes in the
+  // forest, and through a hole in a hillside the sky shows.)
+  let list = [], est = 0;
+  const lay = (kd, minS) => {
+  list = []; est = 0;
   for (let d0 = dLo, j = 0; d0 < dHi; j++) {
-    const s = crownSpacing(d0, kd, opts.min), ds = s * 0.82;
+    const s = crownSpacing(d0, kd, minS), ds = s * 0.82;
     const row = Math.round(d0 * 10);
     for (let cx = Math.floor((x0 - s) / s); cx * s < x1 + s; cx++) {
       const r = makeRng(hashInts(W.ws, 141 + 0, row, cx));
@@ -988,13 +1030,16 @@ function* crowns(ctx, out, W, dLo, dHi, opts = {}) {
     }
     d0 += ds;
   }
-  // (should the crowns ask for more than their share, every crown keeps its place and a few drop,
-  // evenly, by a hash: a thinner forest, not a bare far end)
+  };
+  const min0 = opts.min || CROWN_MIN;
+  lay(kd0, min0);
+  for (let t = 0, k = 1; t < 2 && est > maxN * 1.03; t++) { k *= Math.sqrt(est / maxN) * 1.03; lay(kd0 * k, min0 * k); }
+  // (what little is still over drops evenly, by a hash; a rock lump never drops)
   const keep = est > maxN ? maxN / est : 1;
   note('crowns', ctx.x0, dLo, { est, keep: +keep.toFixed(2), n: list.length });
   const sun = SUN;
   for (const [wx, d, y, H, w, P, n, u1, u2, u3, isl, nd, fd, s, front] of list) {
-    if (keep < 1 && u3 > keep) continue;
+    if (keep < 1 && u3 > keep && n >= 0) continue;
     const x = wx - x0;
     if (n < 0) {
       // a rock lump: granite lit by its slope, barrens and lichen on it
@@ -1004,7 +1049,8 @@ function* crowns(ctx, out, W, dLo, dHi, opts = {}) {
       let c = mix3(C.granite, C.graniteDark, 0.2 + 0.5 * u1);
       c = mix3(c, nz > 0.6 ? C.barren : C.lichen, smooth(0.45, 0.8, Math.abs(nz - 0.5) * 2) * 0.5);
       c = mul3(c, clamp(0.95 + 0.45 * hz - 0.35 * hx, 0.55, 1.25));
-      const sx = w * 0.32, sy = w * 0.24;
+      // (as tall as the face rises over the cell: a steep face is seen nearly square on)
+      const sx = w * 0.42, sy = w * (0.26 + 0.3 * clamp(hz, 0, 1.6));
       out(x, y + sy * 0.8, -d, sx, sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK, STILL);
       if (mirrorable({ y, nd }, d)) emitMirror(out, x, y + sy * 0.8, -d, sx, sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK);
       if (out.due()) yield;
@@ -3558,7 +3604,7 @@ function* mid(ctx0, emit) {
   yield* drawPlan(ctx, out, plan, Math.max(0, out.limit - out.n));
   out.limit = Infinity;              // (the crowns keep to their own max)
   yield* waterline(ctx, out, W, ctx.zNear, ctx.zFar);
-  yield* crowns(ctx, out, W, ctx.zNear, ctx.zFar, { max: 0.6 * ctx.count, kd: 0.0125, min: 9 });
+  yield* crowns(ctx, out, W, ctx.zNear, ctx.zFar, { max: 0.74 * ctx.count, kd: 0.0125, min: 9 });
   yield* fillLake(ctx, out, W, { power: 1.25, cover: 3, maxR: 0.05, mass: true, mirror: 0.7, occlude: true, wKeep: (d) => clamp(1000 / d, 0.35, 1) });
 }
 
@@ -3567,6 +3613,100 @@ function* far(ctx0, emit) {
   const out = makeOut(ctx, emit, { zMargin: 600 });
   dreamSeason(ctx, out, W);
   yield* farFill(ctx, out, W);
+}
+
+// A mountain face's colour: dark conifer forest on the lower slopes, grey rock and scree above the
+// tree line, the first snow on the summits and down the gullies, blue and violet with distance;
+// then the sun on it, a lit side and a shaded side, so the form reads through the haze.
+// (el: metres over the lake; hx, hd: the slope; v: 0..1; mtn: how far into the mountains)
+function mountainColour(W, wx, d, el, hx, hd, v, mtn) {
+  const tl = 620 + 180 * noise2(wx / 1500, d / 1300, W.ws + 123), sn = 1650 + 180 * noise2(wx / 1100, d / 1000, W.ws + 124);
+  const gully = smooth(0.55, 0.8, noise2(wx / 260, d / 420, W.ws + 125)) * smooth(0.25, 0.6, Math.hypot(hx, hd));
+  let c;
+  if (el < tl) c = mix3([0.05, 0.08, 0.07], [0.1, 0.12, 0.09], v);
+  else c = mix3([0.34, 0.35, 0.42], [0.5, 0.48, 0.5], noise2(wx / 300, d / 300, W.ws + 126));
+  if (el > tl - 120 && el < tl + 80) c = mix3(c, [0.22, 0.23, 0.24], 0.5);   // (the broken edge of the trees)
+  const snow = el > sn || (el > sn - 300 && gully > 0.62);
+  if (snow) c = mix3(c, [0.8, 0.8, 0.8], 0.9);
+  c = mix3(c, snow ? [0.62, 0.66, 0.8] : [0.2, 0.22, 0.38], (snow ? 0.22 : 0.36) * mtn);   // (blue and violet with distance)
+  const nn = norm3(-hx, 1, hd);
+  const lam = nn[0] * SUN[0] + nn[1] * SUN[1] + nn[2] * SUN[2];
+  // (the shade is the sky's: bluer, not only darker)
+  const sh = 0.2 + 1.15 * Math.max(0, lam), cool = smooth(0.55, 0.3, sh);
+  c = [c[0] * sh * (1 - 0.18 * cool), c[1] * sh * (1 - 0.06 * cool), c[2] * sh * (1 + 0.22 * cool)];
+  return [Math.min(0.8, c[0]), Math.min(0.8, c[1]), Math.min(0.8, c[2])];
+}
+
+// The mountains' ridgelines. A fill samples a face by its area on the map and cannot draw an edge:
+// its splats near a crest stand over it at every height, and the skyline comes out as a comb. So
+// the crests are found (each column of the map, going out: where the ground tops out and falls
+// away behind) and joined from column to column into ridgelines, and each piece of ridgeline is a
+// thin splat laid along it just under the crest, with two thicker ones under that: the skyline, and
+// every nearer ridge against the range behind it, is one clean line whatever the faces are made of.
+// These are the land's own crests, not the outline from one place, so they hold from anywhere along
+// the line. Still, like the faces.
+const RIDGE_T = [0.0015, 0.0034, 0.0068, 0.012, 0.02];
+function* ridgelines(ctx, out, W, hiddenAt, mirrored) {
+  const L = ctx.length, df = ctx.zFar, CS = 80, DS = 90, D0 = 5200;
+  const nd = Math.floor((df - D0) / DS);
+  let prev = null;
+  const hs = new Float32Array(nd + 2);
+  for (let c = 0; c * CS <= L + CS; c++) {
+    const x = c * CS, wx = ctx.x0 + x, pts = [];
+    for (let k = 0; k <= nd + 1; k++) hs[k] = W.H(wx, D0 + k * DS);
+    let run = -1;
+    for (let k = 1; k <= nd; k++) {
+      const h = hs[k], d = D0 + k * DS, a = (h - CAMY) / d;
+      if (h > hs[k - 1] && h >= hs[k + 1] && h - LV > 320) {
+        // the ground falls away behind it (a shoulder on a rising face is no ridgeline)
+        let low = h;
+        for (let j = k + 1; j <= Math.min(nd + 1, k + 7); j++) low = Math.min(low, hs[j]);
+        if (h - low > 45 && a > run - 0.02 && !hiddenAt(x, d, h)) {
+          // (the crest between the samples, by the parabola through three)
+          const den = hs[k - 1] - 2 * h + hs[k + 1], t = den < 0 ? clamp(0.5 * (hs[k - 1] - hs[k + 1]) / den, -0.5, 0.5) : 0;
+          pts.push([d + t * DS, h - 0.25 * (hs[k - 1] - hs[k + 1]) * t]);
+        }
+      }
+      run = Math.max(run, a);
+    }
+    if (prev) {
+      for (const [d1, h1] of pts) {
+        let best = null;
+        // (the same ridge in the last column: near in distance and in height; a crest with no such
+        // neighbour is a ridge's end or a lone knob, and the pieces either side and the faces cover it)
+        for (const q of prev) if (Math.abs(q[0] - d1) < 2.2 * CS && Math.abs(q[1] - h1) < 2 * CS && (!best || Math.abs(q[0] - d1) < Math.abs(best[0] - d1))) best = q;
+        if (!best) continue;
+        const d0 = best[0], h0 = best[1];
+        const dx = CS, dy = h1 - h0, dz = -(d1 - d0), len = Math.hypot(dx, dy, dz);
+        const q = quatXTo(dx / len, dy / len, dz / len);
+        // (a splat shows to about twice its scale, past both ends of its piece: level, that joins
+        // the pieces up; on a steep piece its upper end would stand over the summit as a spike, so
+        // a steep piece is slid down its own line until its upper end is at the piece's top)
+        const SL = 0.62 * len, slide = (2 * SL - 0.62 * len) * smooth(0.12, 0.45, Math.abs(dy) / len) * (dy > 0 ? -1 : 1) / len;
+        const xm = x - CS / 2 + slide * dx, dm = (d0 + d1) / 2 - slide * dz, hm = (h0 + h1) / 2 + slide * dy, wxm = ctx.x0 + xm;
+        if (xm < 0 || xm >= L) continue;
+        // the near face under the crest: its slope, for the light on it
+        const e = 160, yb = W.H(wxm, dm - e);
+        const hd = (hm - yb) / e, hx = (W.H(wxm + e, dm - e) - yb) / e;
+        const mtn = smooth(5000, 7000, dm);
+        // (the thin one is the line; the thicker ones under it, each the face's colour at its height,
+        // hang like a curtain inside the mountain behind the face: a cliff has next to no area on the
+        // map, so the fill leaves it bare, and through a bare cliff the sky would show)
+        let drop = 0, tPrev = 0;
+        for (let j = 0; j < 5; j++) {
+          const T = dm * RIDGE_T[j];
+          drop += j === 0 ? 1.5 * T : 1.15 * (tPrev + T);
+          tPrev = T;
+          if (hm - drop - LV < 300) break;
+          const cc = mountainColour(W, wxm, dm, hm - drop - LV, hx, hd, 0.5, mtn), sx = Math.max(len * 0.62, T * 0.55);
+          out(xm, hm - drop, -dm, sx, T, T, cc[0], cc[1], cc[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
+          if (j < 4 && mirrored(xm, dm, hm)) emitMirror(out, xm, hm - drop, -dm, sx, T, T, cc[0], cc[1], cc[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
+        }
+      }
+    }
+    prev = pts;
+    if (out.due()) yield;
+  }
 }
 
 // The far band: the hills beyond the lake, in autumn colour, and their reflection where the lake
@@ -3603,6 +3743,7 @@ function* farFill(ctx, out, W) {
   const pm = 0.55 * mirN / reach.length;
   const mirrored = (x, d, y) => d * EYE / (EYE + Math.max(0, y + 6 - LV)) < reach[col(x)] - 15;
   const n0 = out.n;
+  yield* ridgelines(ctx, out, W, hidden, mirrored);
   const nS = Math.round((n - (out.n - n0)) / (1 + pm));
   const target = out.n + (n - (out.n - n0));
   for (let i = 0; out.n < target && i < nS * 3; i++) {
@@ -3627,22 +3768,8 @@ function* farFill(ctx, out, W) {
       const mc = massColor(W, wx, d, 0.5 + 0.4 * v, rng, dark);
       c = mix3(mc.c, [0.24, 0.14, 0.08], 0.12);
       if (y > LV + 170 && noise2(wx / 700, d / 600, W.ws + 121) > 0.65) c = mix3(c, C.granite, 0.5);
-    } else {
-      // the mountains: dark conifer forest on the lower slopes, grey rock and scree above the tree
-      // line, the first snow on the summits and down the gullies
-      const tl = 620 + 180 * noise2(wx / 1500, d / 1300, W.ws + 123), sn = 1650 + 180 * noise2(wx / 1100, d / 1000, W.ws + 124);
-      const gully = smooth(0.55, 0.8, noise2(wx / 260, d / 420, W.ws + 125)) * smooth(0.25, 0.6, Math.hypot(hx, hd));
-      if (el < tl) c = mix3([0.05, 0.08, 0.07], [0.1, 0.12, 0.09], v);
-      else c = mix3([0.34, 0.35, 0.42], [0.5, 0.48, 0.5], noise2(wx / 300, d / 300, W.ws + 126));
-      if (el > tl - 120 && el < tl + 80) c = mix3(c, [0.22, 0.23, 0.24], 0.5);   // (the broken edge of the trees)
-      const snow = el > sn || (el > sn - 300 && gully > 0.62);
-      if (snow) c = mix3(c, [0.8, 0.8, 0.8], 0.9);
-      c = mix3(c, snow ? [0.62, 0.66, 0.8] : [0.2, 0.22, 0.38], 0.22 * mtn);   // (blue and violet with distance)
-    }
-    // lit side and shaded side: the sun on each face, so the form reads (the haze lifts the shade)
-    const lam = nn[0] * SUN[0] + nn[1] * SUN[1] + nn[2] * SUN[2];
-    c = mul3(c, mtn > 0 ? 0.26 + 1.1 * Math.max(0, lam) : 1);
-    if (mtn <= 0) c = shade(c, nn[0], nn[1], nn[2], 0.55, 0.6);
+      if (mtn > 0) { const lam = nn[0] * SUN[0] + nn[1] * SUN[1] + nn[2] * SUN[2]; c = mul3(c, 0.26 + 1.1 * Math.max(0, lam)); } else c = shade(c, nn[0], nn[1], nn[2], 0.55, 0.6);
+    } else c = mountainColour(W, wx, d, el, hx, hd, v, mtn);
     c = jitter(c, rng, 0.05);
     c = [Math.min(0.8, c[0]), Math.min(0.8, c[1]), Math.min(0.8, c[2])];
     // (upright and round: a lump of crowns, or of rock; never stretched sideways)
@@ -3650,14 +3777,15 @@ function* farFill(ctx, out, W) {
     // area on the screen, so each stands as tall as the face rises over it)
     const steep = Math.min(1.6, Math.hypot(hx, hd));
     let sx = r * (0.78 + 0.2 * steep), sy = r * ((mtn > 0 ? 0.5 : 0.6) + 0.55 * steep), q = Q_ID;
-    let ox = 0, oy = mtn > 0 ? 2 : 6, oz = 0;
+    let ox = 0, oy = mtn > 0 ? -0.8 * sy : 6, oz = 0;
     if (mtn > 0 && steep > 0.25) {
       // a mountain face: a stroke laid down the fall line (gullies, scree, the grain of the rock),
-      // hanging from its sample point down the slope, so none stands up over the ridgeline
+      // hanging from its sample point by its whole visible half length (a splat shows to about
+      // twice its scale), so none stands up over the crest; the crests are ridgelines()'s
       const fl = norm3(hx, hx * hx + hd * hd, -hd);
       q = quatXTo(fl[0], fl[1], fl[2]);
-      sx = r * (0.75 + 0.45 * steep); sy = r * 0.42;
-      ox = -fl[0] * sx * 0.7; oy = -fl[1] * sx * 0.7; oz = -fl[2] * sx * 0.7;
+      sx = r * (0.7 + 0.3 * steep); sy = r * 0.5;
+      ox = -fl[0] * sx * 1.9; oy = -fl[1] * sx * 1.9; oz = -fl[2] * sx * 1.9;
     }
     out(x + ox, y + oy, -d + oz, sx, sy, sy, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
     if (mirrored(x, d, y) && rng() < 0.55) emitMirror(out, x, y + 6, -d, sx, sy, sy, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
