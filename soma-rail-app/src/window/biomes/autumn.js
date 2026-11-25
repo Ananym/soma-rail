@@ -29,9 +29,31 @@
 // straight from the shore, 50 to 190 m, its slope and its reflection framing the lake; the second
 // 150 to 300 m; the third 250 to 420 m, three to five kilometres back and pale in the haze. Their
 // crests wander, their heights roll with a few summits standing up, side valleys cut the first
-// where a bay runs in, and a bare granite face or a bald summit shows here and there. The forest on
-// them is drawn as lumps of crowns lit by the slope they stand on; what lies behind a nearer
-// skyline is mostly not drawn.
+// where a bay runs in, and a bare granite face or a bald summit shows here and there.
+//
+// THE MOUNTAINS. Behind the hills, from about 6 km to the far band's limit (mountains, tabulated on
+// a 50 m grid), three families of ranges with ridgelines running obliquely to the line, summits
+// mostly 1,700 to 2,100 m over the lake: dark conifer forest on the lower slopes, grey rock and
+// scree above the tree line, the first snow on the summits and down the gullies, blue and violet
+// with distance; each face lit or shaded by the sun, the steep faces drawn as strokes down the fall
+// line. They stand over the hills' skyline at nine places in ten along the line, and reflect in the
+// lake wherever their image falls on water. They keep still on the beat.
+//
+// THE FOREST ACROSS THE WATER (crowns). The far shore, the points, the islands and the hills are
+// crowns, not a painted mass: on a world grid, each row as wide as a crown that stays about six
+// pixels across, each crown a rounded dome a little taller than wide with a lit cap over a shaded
+// body, its own colour, a dark gap round it; a conifer a narrow cone with a lit side. The front rank
+// at the water is whole trees with pale birch trunks; the waterline (waterline()) is one thin pale
+// line of rock or beach with the dark bank behind it, both mirrored so the reflection starts at the
+// trees' feet. Behind a nearer skyline nothing is drawn. Every tree across the water answers the beat
+// with its colour (colourGroup): red, orange, gold, dark.
+//
+// THE LIFE OF THE LAKE. Boats (rowing boats, canoes, kayaks, skiffs with an angler, sailing dinghies,
+// pontoon boats), boats at moorings, marker buoys, rafts of ducks, loons, geese on the water, a moose
+// or a deer swimming, deadheads and drowned snags, lily beds, granite islets with a pine, cottages
+// with docks and people on them, campsites and landing beaches on the far shore (waterThings, boats,
+// wildlife, cottages): about 21 to 23 things to the kilometre within 300 m of the line, five to seven
+// in an open view.
 //
 // THE COLOUR. Autumn first: maples about half the forest (scarlet, flame, crimson, gold), birch
 // and aspen a third (clear yellow, a few still green-gold), oak russet, tamarack smoky gold by the
@@ -43,7 +65,8 @@
 // stands beyond the near shore (the far shore's forest and its ground, the hills, the islands,
 // trees, cabins, docks, boats, people and animals standing in the water) is drawn a second time,
 // mirrored in the water plane (mirrorOut: y' = LV - 1.05 (y - LV), the same x and distance, so the
-// image is right from every point of the pass), a little darker and greyer, wider than tall, and
+// image is right from every point of the pass), a little darker and greyer, drawn out downward by
+// the ripple (taller, never wider), and
 // tagged MOVE.STILL (a reflection never swells on the beat). The water surface itself is a veil
 // over that mirror world: splats are drawn back to front, so an opaque surface would hide it. The
 // veil's opacity follows Fresnel's law for the angle the eye looks down at it, bent toward the
@@ -57,7 +80,9 @@
 // THE TREES, THE BEAT AND THE BIRDS. See the header of the tree section (and treeGroup: every tree
 // and plant near enough answers the beat in one of four groups, a kind's trees split between two
 // groups half a cycle apart, so neighbours swell in turn); the close woods carry an understory at
-// the eye. Geese fly in skeins low over the lake with a steady wing beat; the bald eagle soars at
+// the eye. Geese fly in skeins low over the lake with a steady wing beat, within 84 m of the line
+// (they are carried at about 0.7 of the train's speed, so in view for some fourteen seconds at
+// 100 km/h, and their chunk must outlast them); the bald eagle soars at
 // the eye's height over the water, beating its wings slowly now and then.
 import { hashInts, hashString, makeRng, noise1, noise2, fbm2 } from '../rng.js';
 import { makeTerrain } from '../terrain.js';
@@ -385,6 +410,40 @@ function farHills(W, wx, t, x) {
     + smooth(0.88, 1, top) * smooth(0.6, 0.75, noise2(wx / 300, t / 260, s + 72));
   return H;
 }
+// The mountains behind the hills, from about 6 km to the far band's limit: three families of ranges
+// whose ridgelines run obliquely to the line (ridged noise in turned, stretched coordinates: long
+// crests with summits, shoulders and cols along them, not a row of cones), peaks 900 to 2,100 m
+// over the lake, the nearest range lower. d: distance from the line.
+const RANGES = [[0.38, 2700, 950, 1450, 301], [-0.52, 2300, 820, 1280, 311], [0.12, 4300, 1400, 1080, 321]];
+// (tabulated on a 50 m grid in tiles of 800 m, per world, and read bilinearly: at 6 km and more a
+// splat is tens of metres across, and the far band asks for three heights per splat or more)
+const MG = 50, MT = 16;
+function mountains(W, wx, d) {
+  if (d < 5000) return 0;
+  const gx = wx / MG, gd = d / MG, tx = Math.floor(gx / MT), td = Math.floor(gd / MT);
+  const key = tx * 4096 + td;
+  let t = W.mt && W.mt.get(key);
+  if (!t) {
+    if (!W.mt) W.mt = new Map();
+    t = new Float32Array((MT + 1) * (MT + 1));
+    for (let i = 0; i <= MT; i++) for (let j = 0; j <= MT; j++) t[i * (MT + 1) + j] = mountainsRaw(W, (tx * MT + i) * MG, Math.max(5000, (td * MT + j) * MG));
+    if (W.mt.size > 4000) W.mt.clear();
+    W.mt.set(key, t);
+  }
+  const u = gx - tx * MT, v = gd - td * MT, i = Math.min(MT - 1, Math.floor(u)), j = Math.min(MT - 1, Math.floor(v)), a = u - i, b = v - j, k = i * (MT + 1) + j;
+  return (t[k] * (1 - b) + t[k + 1] * b) * (1 - a) + (t[k + MT + 1] * (1 - b) + t[k + MT + 2] * b) * a;
+}
+function mountainsRaw(W, wx, d) {
+  if (d < 5000) return 0;
+  const env = smooth(5000, 7600, d) * (0.75 + 0.25 * smooth(7000, 10000, d));
+  let h = 0;
+  for (const [a, su, sv, amp, sd] of RANGES) {
+    const ca = Math.cos(a), sa = Math.sin(a), u = (wx * ca + d * sa) / su, v = (-wx * sa + d * ca) / sv;
+    const rg = 1 - Math.abs(2 * fbm2(u, v, W.ws + sd, 3) - 1);
+    h = smax(h, amp * rg * rg * rg * (0.5 + 0.9 * noise2(u * 0.3, v * 0.3, W.ws + sd + 1)), 50);
+  }
+  return env * (300 + h);
+}
 function heightAt(W, wx, d) {
   const x = xAt(W, wx, XH);
   if (d < x.nd) {
@@ -438,7 +497,7 @@ function heightAt(W, wx, d) {
   }
   const t = d - x.fd, tb = d - x.fb;
   const bank = x.bank * smooth(0, 26, t);
-  return LV + 0.15 + bank + farHills(W, wx, tb + 30, x) * smooth(-60, 40, tb) + 0.01 * Math.max(0, tb);
+  return LV + 0.15 + bank + farHills(W, wx, tb + 30, x) * smooth(-60, 40, tb) + 0.01 * Math.max(0, tb) + (d > 5000 ? mountains(W, wx, d) : 0);
 }
 // How far out from an island a point of open water lies, in island radii (1 at its shore; large
 // when no island is near).
@@ -503,7 +562,7 @@ function surface(W, wx, d) {
   if (t < 0.4 + 6 * Math.pow(noise1(wx / 47, W.ws + 76), 2.5)) { s.t = noise1(wx / 260, W.ws + 77) > 0.75 ? T.BEACH : T.SHORE; return s; }
   // bare rock: the granite faces and the bald summits (HILL was set by the heightAt above)
   if (t > 30 && HILL.rock > 0.5 + 0.3 * noise2(wx / 60, d / 50, W.ws + 78)) { s.t = T.ROCK; return s; }
-  if (t < 40 && inClearing(W, wx, d)) { s.t = T.GRASS; return s; }
+  if (t < 40 && (inClearing(W, wx, d) || campClear(W, wx, d))) { s.t = T.GRASS; return s; }
   s.t = T.FOREST;
   return s;
 }
@@ -579,14 +638,14 @@ function emitMirror(out, x, y, z, sx, sy, sz, r, g, b, o, qx, qy, qz, qw, kind) 
   if (h <= -0.05) return;
   const yy = LV - 1.05 * h;
   if (Math.max(r, g, b) >= 0.97 && kind === KIND.LIGHT) {
-    out(x, yy, z, sx * 1.3, sy * 1.15, sz, r, g, b, o * 0.6, -qx, qy, -qz, qw, KIND.LIGHT, STILL);
+    out(x, yy, z, sx * 1.05, sy * 1.3, sz, r, g, b, o * 0.6, -qx, qy, -qz, qw, KIND.LIGHT, STILL);
     return;
   }
   // (the dreamlike level: in some stretches the reflection shows another season, see dreamSeason)
   if (out.season) [r, g, b] = out.season(x, r, g, b);
   const l = 0.3 * r + 0.55 * g + 0.15 * b;
   const k = 0.8;
-  out(x, yy, z, sx * 1.3, sy * 0.95, sz * 1.1, (r + (l - r) * 0.2) * k, (g + (l - g) * 0.2) * k, (b + (l - b) * 0.2) * k * 1.04, o, -qx, qy, -qz, qw, kind === KIND.SURREAL ? KIND.SURREAL : KIND.OTHER, STILL);
+  out(x, yy, z, sx * 1.04, sy * 1.22, sz * 1.04, (r + (l - r) * 0.2) * k, (g + (l - g) * 0.2) * k, (b + (l - b) * 0.2) * k * 1.04, o, -qx, qy, -qz, qw, kind === KIND.SURREAL ? KIND.SURREAL : KIND.OTHER, STILL);
 }
 function mirrorOut(out, move = 0) {
   let byMove = mirrors.get(out);
@@ -721,28 +780,7 @@ function* fillLake(ctx, out, W, opts = {}) {
   const sample = (u) => Math.pow(A + u * (B - A), 1 / a1);
   // opts.occlude: what stands behind a nearer skyline (the back of a ridge, the land behind a point)
   // is mostly not drawn. Per column of 40 m, the highest elevation seen so far going out.
-  let hidden = null;
-  if (opts.occlude) {
-    const OX = 40, ds = [];
-    for (let dd = dn; dd < df; dd *= 1.06) ds.push(dd);
-    const cols = [];
-    for (let c = 0; c * OX <= L + OX; c++) {
-      const wx = ctx.x0 + c * OX, run = new Float32Array(ds.length);
-      let m = -1;
-      for (let k = 0; k < ds.length; k++) {
-        const h = W.H(wx, ds[k]);
-        run[k] = m;                                       // the highest seen nearer than ds[k]
-        m = Math.max(m, ((h > LV + 0.5 ? h + 12 : LV) - CAMY) / ds[k]);
-      }
-      cols.push(run);
-    }
-    const lk = Math.log(1.06);
-    hidden = (x, d, y) => {
-      const run = cols[clamp(Math.round(x / OX), 0, cols.length - 1)];
-      const k = clamp(Math.floor(Math.log(d / dn) / lk) - 1, 0, run.length - 1);
-      return (y - CAMY) / d < run[k] - 0.003;
-    };
-  }
+  const hidden = opts.occlude ? skyline(ctx, W, dn, df) : null;
   // a sample: distance, x, and its surface; water samples are kept by wKeep (up to two re-draws)
   // (and every sample is kept by whether it can be seen: the land below the rim mostly cannot)
   const pick = (r, u0) => {
@@ -753,6 +791,9 @@ function* fillLake(ctx, out, W, opts = {}) {
       const top = s.y + (isTree(s.t) ? 14 : 0.5);
       const sk = seenKeep(d, top) * (hidden && hidden(x, d, top) ? 0.06 : 1);
       k = s.t === T.WATER ? wKeep(d) : 1;
+      // (bare rock on the hills across the lake is the crowns' rock lumps, and the far shore's strip
+      // of rock and beach is waterline()'s: not here, where far off a splat is tens of metres wide)
+      if (opts.mass && s.far && !s.isl && ((s.t === T.ROCK && d > s.fd + 25) || ((s.t === T.SHORE || s.t === T.BEACH) && d > 250))) k = 0.02;
       if (t === 4 || r() < k * sk) break;
     }
     return [d, x, s, s.t === T.WATER ? k : 1];
@@ -783,25 +824,15 @@ function* fillLake(ctx, out, W, opts = {}) {
       const mir = s.far && mirrorable(s, d) && rng() < pm;
       const o = mir ? mirrorFill : null;
       if (mass && isTree(s.t) && s.far) {
-        // the forest mass: a splat somewhere between the floor and the canopy top
-        const H = canopyH(W, wx, d, s) * (0.82 + 0.36 * rng());
-        const v = Math.pow(rng(), 0.6);
-        const mc = massColor(W, wx, d, v, rng, !s.isl && d > s.fd ? smooth(0.7, 1, HILL.top) : 0);
-        let c = jitter(mc.c, rng, 0.1);
-        const mv = d < 160 ? grove(treeGroup(mc.sp, Math.floor(wx / 9) + Math.floor(d / 9))) : STILL;
-        const top = v > 0.8;
-        const yy = s.y + H * (top ? 0.74 + 0.2 * v : 0.1 + 0.72 * v);
-        let sx = top ? r * 0.6 * ax : r * 1.1 * ax, sy = top ? H * 0.16 : Math.max(r * 0.8, H * 0.2 * (1 - 0.4 * v)), sz = top ? r * 0.6 : r * 1.1;
-        if (d > 250) {
-          // a hillside across the lake: a lump of crowns standing up, lit by the slope it is on
-          // (a flat splat on a slope facing the eye reads as a sideways smear)
-          const e = Math.max(8, r);
-          const hz = (W.H(wx, d + e) - s.h) / e, hx = (W.H(wx + e, d) - s.h) / e;
-          c = mul3(c, clamp(0.9 + 0.5 * hz - 0.3 * hx, 0.6, 1.25));
-          sx = r * 0.85 * ax; sy = r * (0.55 + 0.25 * v); sz = r * 0.8;
-        }
-        out(x, yy, -d, sx, sy, sz, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, mv);
-        if (o) emitMirror(out, x, yy, -d, sx / Math.sqrt(pm), sy, sz, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE);
+        // under the crowns (see crowns()): the dark of the forest's depths, which shows in the gaps
+        // between them, a little of each crown's colour in it; upright, never stretched sideways
+        const H = canopyH(W, wx, d, s);
+        const mc = massColor(W, wx, d, 0.3, rng, 0);
+        const c = jitter(mul3(mc.c, 0.42), rng, 0.08);
+        // (low: it must never stand up over the crowns of the row behind it, up the slope)
+        const sy = Math.min(H * 0.16, r * 0.5), yy = s.y + sy + H * 0.25 * rng(), sx = r * 0.75;
+        out(x, yy, -d, sx, sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE, STILL);
+        if (o) emitMirror(out, x, yy, -d, sx / Math.sqrt(pm), sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.TREE);
       } else {
         let c = groundColor(W, s, wx, d, rng);
         const e = Math.max(0.6, r);
@@ -809,15 +840,234 @@ function* fillLake(ctx, out, W, opts = {}) {
         c = mul3(c, clamp(0.92 + 0.45 * hz - 0.25 * hx, 0.55, 1.25));
         const steep = clamp(Math.hypot(hz, hx), 0, 3);
         const lift = s.t === T.GRASS && d < 30 ? 0.05 + r * 0.3 * rng() : 0.02;
-        const sy = r * (d > 250 ? 0.45 : 0.12 + 0.3 * Math.min(1, steep));
-        out(x, s.y + lift, -d, r * ax, sy, r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
-        if (o) emitMirror(out, x, s.y + lift, -d, r * ax / Math.sqrt(pm), sy, r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        // (across the lake, upright and round: a flat wide splat there reads as a sideways smear)
+        const far = d > 250, sy = r * (far ? 0.55 : 0.12 + 0.3 * Math.min(1, steep)), sx = far ? r * 0.7 : r * ax;
+        out(x, s.y + lift, -d, sx, sy, far ? r * 0.7 : r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        if (o) emitMirror(out, x, s.y + lift, -d, sx / Math.sqrt(pm), sy, far ? r * 0.7 : r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
       }
     }
     if (out.due()) yield;
   }
 }
 const mirrorFill = true;
+// What stands behind a nearer skyline: per column of 40 m, the highest elevation seen so far going
+// out (sampled every 6% of distance). hidden(x, d, y): whether a point at (chunk x, d, y) is behind.
+function skyline(ctx, W, dn, df) {
+  const OX = 40, ds = [];
+  for (let dd = dn; dd < df; dd *= 1.06) ds.push(dd);
+  const cols = [];
+  for (let c = 0; c * OX <= ctx.length + OX; c++) {
+    const wx = ctx.x0 + c * OX, run = new Float32Array(ds.length);
+    let m = -1;
+    for (let k = 0; k < ds.length; k++) {
+      const h = W.H(wx, ds[k]);
+      run[k] = m;
+      m = Math.max(m, ((h > LV + 0.5 ? h + 5 : LV) - CAMY) / ds[k]);
+    }
+    cols.push(run);
+  }
+  const lk = Math.log(1.06);
+  return (x, d, y) => {
+    const run = cols[clamp(Math.round(x / OX), 0, cols.length - 1)];
+    const k = clamp(Math.floor(Math.log(d / dn) / lk) - 1, 0, run.length - 1);
+    return (y - CAMY) / d < run[k] - 0.003;
+  };
+}
+
+// The far waterline, and every island's: one crisp thin line at the water (pale granite, a strip of
+// beach) and behind it the bank, up into the canopy: the dark under the front rank's crowns where
+// the forest comes down to the water, the rock where the shore is bare; and both mirrored, so the
+// reflection starts at the feet of what it reflects. (Without it the far water's clear veil shows
+// the underlay's sky colour between the shore and its image: the pale band the owner saw.) One
+// piece every few metres of shore, a little wider than the step so the line is unbroken.
+function* waterline(ctx, out, W, dLo, dHi) {
+  const x0 = ctx.x0, L = ctx.length, o = withMove(out, STILL);
+  const piece = (wx, d, lr) => {
+    const x = wx - x0, st = Math.max(1.2, d * 0.006);
+    const back = surface(W, wx, d + 4), tree = isTree(back.t);
+    const H = tree ? canopyH(W, wx, d + 6, back) : 0;
+    // (a bank only as tall as the dark under the crowns: a few metres, more where the trees are near)
+    const top = tree ? back.y + clamp(H * 0.4, 2, 2 + 2400 / d) : clamp(back.y + 0.3, LV + 0.6, LV + 2.6);
+    const m = noise1(wx / 23, W.ws + 991);
+    const pale = m > 0.72 ? C.sand : mix3(C.granite, C.graniteDark, 0.15 + 0.4 * noise1(wx / 7, W.ws + 992));
+    const bank = tree ? mix3([0.05, 0.04, 0.035], C.floor, 0.25 * m) : mul3(mix3(C.granite, C.graniteDark, 0.6 + 0.3 * m), 0.62);
+    const b0 = LV + 0.1, by = (b0 + top) / 2, bh = Math.max(0.3, (top - b0) * 0.3), sx = st * 0.75;
+    o(x, by, -(d + 1.5), sx, bh, sx, bank[0], bank[1], bank[2], 1, 0, 0, 0, 1, KIND.GROUND);
+    emitMirror(out, x, by, -(d + 1.5), sx, bh, sx, bank[0], bank[1], bank[2], 1, 0, 0, 0, 1, KIND.GROUND);
+    const lh = Math.max(0.14, 0.0008 * d);
+    o(x, LV + lh * 1.1, -d, sx, lh, sx * 0.6, pale[0], pale[1], pale[2], 1, 0, 0, 0, 1, KIND.GROUND);
+    emitMirror(out, x, LV + lh * 1.1, -d, sx, lh, sx * 0.6, pale[0] * lr, pale[1] * lr, pale[2] * lr, 1, 0, 0, 0, 1, KIND.GROUND);
+  };
+  // the far shore
+  for (let wx = x0; wx < x0 + L;) {
+    const x = xAt(W, wx, XT), d = x.fd, st = Math.max(1.2, d * 0.006);
+    if (d >= dLo && d < dHi && CAMY - LV < 0.6 * d) piece(wx, d, 0.85);
+    wx += st;
+    if (out.due()) yield;
+  }
+  // the islands' near sides
+  for (const { i } of cellsAround(ctx, ICELL, 160)) {
+    const isl = islandOf(W, i);
+    if (!isl || isl.d < dLo - isl.rd || isl.d > dHi + isl.rd) continue;
+    const per = Math.PI * (isl.rx + isl.rd), st = Math.max(1.2, isl.d * 0.006), n = Math.ceil(per / st);
+    for (let k = 0; k <= n; k++) {
+      const a = Math.PI * (1 + k / n), ux = Math.cos(a), uy = Math.sin(a), kk = isleK(isl, ux, uy) * 0.995;
+      const wx = isl.wx + ux * isl.rx * kk, d = isl.d + uy * isl.rd * kk;
+      if (wx < x0 || wx >= x0 + L || d < dLo || d >= dHi) continue;
+      piece(wx, d, 0.85);
+      if (out.due()) yield;
+    }
+  }
+}
+// ---------------------------------------------------------------------------------------------
+// THE FOREST ACROSS THE WATER, AS CROWNS. Every tree beyond the near shore (the far shore, the
+// points, the islands, the hills) that the bands do not draw as a whole tree is a crown on a world
+// grid: rows of cells stepping out from the line, each row's cells as wide as a crown at that
+// distance is to stay at least about 6 px across on a 1080p screen (a real crown, 6.5 m, out to a
+// kilometre; beyond, a lump of a few crowns the same few pixels wide). Each crown is drawn as a
+// crown: a rounded dome a little taller than wide, standing on its own with a dark gap round it,
+// its own colour (one tree scarlet, the next gold), lit on top and on the sun's side and shaded
+// below and on the other. By its size on the screen P: under 6 px one upright splat; then a shaded
+// body under a lit cap; from 14 px a shaded side lump; from 28 px a lit side lump and a second cap.
+// A conifer is a narrow dark cone (two stacked tapering splats and a lit sliver), never a ball on a
+// stick. The front rank (nothing of the forest in front of it) also gets the dark shadow under its
+// canopy and, for birch and aspen, a pale trunk. Nothing is stretched sideways. Behind a nearer
+// skyline nothing is drawn. Every crown answers the beat in the group of its colour (colourGroup).
+// ---------------------------------------------------------------------------------------------
+// Beat groups by colour, for everything across the water: red and crimson 0, gold and yellow 2 (the
+// two that stand side by side most often, about a sixth of all neighbours: groups two apart are
+// never on together), orange, russet and deep gold 1, the dark conifers 3.
+function colourGroup(c, sp) {
+  if (sp >= SP.SPRUCE) return 3;
+  const r = c[0], g = c[1], b = c[2], mx = Math.max(r, g, b), mn = Math.min(r, g, b), dd = Math.max(1e-6, mx - mn);
+  if (mx < 0.14) return 3;
+  const hue = mx === r ? 60 * (((g - b) / dd + 6) % 6) : mx === g ? 60 * ((b - r) / dd + 2) : 60 * ((r - g) / dd + 4);
+  return hue < 12 || hue > 330 ? 0 : hue < 46 ? 1 : 2;
+}
+const CROWN_MIN = 6.5;
+function crownSpacing(d, kd, min = CROWN_MIN) { return Math.max(min, d * kd); }
+function* crowns(ctx, out, W, dLo, dHi, opts = {}) {
+  const kd = (opts.kd || 0.0062) / Math.sqrt(Math.max(0.25, Math.min(2, out.density)));
+  const maxN = opts.max != null ? opts.max : Infinity;
+  const hidden = skyline(ctx, W, Math.max(30, dLo * 0.5), dHi);
+  const x0 = ctx.x0, x1 = ctx.x0 + ctx.length;
+  // pass 1: the cells, and which hold a crown that can be seen
+  const list = [];
+  let est = 0;
+  for (let d0 = dLo, j = 0; d0 < dHi; j++) {
+    const s = crownSpacing(d0, kd, opts.min), ds = s * 0.82;
+    const row = Math.round(d0 * 10);
+    for (let cx = Math.floor((x0 - s) / s); cx * s < x1 + s; cx++) {
+      const r = makeRng(hashInts(W.ws, 141 + 0, row, cx));
+      const wx = (cx + 0.5 + 0.55 * (r() - 0.5) + (j % 2) * 0.5) * s;
+      if (wx < x0 || wx >= x1) continue;
+      const d = d0 + ds * (0.5 + 0.5 * (r() - 0.5));
+      const sf = surface(W, wx, d);
+      if (!sf.far) continue;
+      // bare rock on the hills (a granite face, a bald summit): a rock lump in the same cell
+      if (sf.t === T.ROCK && d > sf.fd + 25) {
+        if (hidden(wx - x0, d, sf.y + 2)) continue;
+        list.push([wx, d, sf.y, 0, s * (0.8 + 0.2 * r()), 1158 * s / d, -1, r(), r(), r(), 0, sf.nd, sf.fd, s, false]);
+        est += 1 + (mirrorable({ y: sf.y, nd: sf.nd }, d) ? 1 : 0);
+        continue;
+      }
+      if (!isTree(sf.t)) continue;
+      if (opts.skip && opts.skip(wx, d, sf)) continue;
+      const H = canopyH(W, wx, d, sf) * (0.85 + 0.3 * r());
+      const y = sf.y - 0.2;
+      if (!(CAMY - (y + H) < 0.6 * d) || hidden(wx - x0, d, y + H)) continue;
+      const w = s * (0.78 + 0.22 * r());
+      const P = 1158 * w / d;
+      const n = P < 6 ? 1 : P < 40 ? 2 : P < 70 ? 3 : 5;
+      const mir = mirrorable({ y, nd: sf.nd }, d);
+      // (the front rank: water, or bare shore down to the water, in front of it)
+      const fr = surface(W, wx, d - s * 1.05), front = fr.t === T.WATER || ((fr.t === T.SHORE || fr.t === T.BEACH || fr.t === T.ISLE_ROCK) && surface(W, wx, d - s * 2.1).t === T.WATER);
+      list.push([wx, d, y, H, w, P, n, r(), r(), r(), sf.isl ? 1 : 0, sf.nd, d > sf.fd ? sf.fd : -1, s, front]);
+      if (front) est += 1;
+      est += n + (mir ? 1 : 0);
+    }
+    d0 += ds;
+  }
+  // (should the crowns ask for more than their share, every crown keeps its place and a few drop,
+  // evenly, by a hash: a thinner forest, not a bare far end)
+  const keep = est > maxN ? maxN / est : 1;
+  note('crowns', ctx.x0, dLo, { est, keep: +keep.toFixed(2), n: list.length });
+  const sun = SUN;
+  for (const [wx, d, y, H, w, P, n, u1, u2, u3, isl, nd, fd, s, front] of list) {
+    if (keep < 1 && u3 > keep) continue;
+    const x = wx - x0;
+    if (n < 0) {
+      // a rock lump: granite lit by its slope, barrens and lichen on it
+      const e = Math.max(6, s);
+      const hz = (W.H(wx, d + e) - y) / e, hx = (W.H(wx + e, d) - y) / e;
+      const nz = noise2(wx / 40, d / 30, W.ws + 993);
+      let c = mix3(C.granite, C.graniteDark, 0.2 + 0.5 * u1);
+      c = mix3(c, nz > 0.6 ? C.barren : C.lichen, smooth(0.45, 0.8, Math.abs(nz - 0.5) * 2) * 0.5);
+      c = mul3(c, clamp(0.95 + 0.45 * hz - 0.35 * hx, 0.55, 1.25));
+      const sx = w * 0.32, sy = w * 0.24;
+      out(x, y + sy * 0.8, -d, sx, sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK, STILL);
+      if (mirrorable({ y, nd }, d)) emitMirror(out, x, y + sy * 0.8, -d, sx, sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK);
+      if (out.due()) yield;
+      continue;
+    }
+    const rr = makeRng(hashInts(W.ws, 143, Math.round(wx * 4), Math.round(d * 4)));
+    const sp = pickSpecies(W, wx, d, u1, fd >= 0 ? smooth(60, 10, d - fd) : 0.4, u2, !isl && fd >= 0 ? 0.45 * smooth(0.8, 1, HILL.top) : 0);
+    const cr = crownOf(sp, rr());
+    // the slope it stands on: a hillside facing the sun is lit
+    const e = Math.max(6, s);
+    const hz = (W.H(wx, d + e) - y) / e, hx = (W.H(wx + e, d) - y) / e;
+    const lit = clamp(0.92 + 0.35 * hz - 0.3 * hx, 0.65, 1.2) * (0.86 + 0.28 * rr());
+    const top = mul3(cr[0], lit), low = mul3(cr[1], lit * 0.72);
+    const conifer = sp >= SP.SPRUCE || sp === SP.TAMARACK;
+    const mv = grove(colourGroup(cr[0], sp));
+    const mir = mirrorable({ y, nd }, d);
+    const z = -d;
+    // (the reflection: one softer splat for the whole crown, its first one, drawn out a little)
+    let first = true;
+    const put = (px, py, sx, sy, c) => {
+      const cc = [Math.min(0.8, c[0]), Math.min(0.8, c[1]), Math.min(0.8, c[2])];
+      out(px, py, z, sx, sy, sx * 0.9, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, KIND.TREE, mv);
+      if (mir && first) emitMirror(out, px, py, z, sx * 1.12, sy * 1.15, sx, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, KIND.TREE);
+      first = false;
+    };
+    const sl = -0.09 * w;                 // (the lit side: toward the sun, -x)
+    if (conifer) {
+      // a narrow cone standing a little over the canopy round it, from its middle up
+      const tp = y + H * (sp === SP.TAMARACK ? 1 : 1.1), hk = Math.min(H * 0.7, w * 2.1), wc = w * 0.7;
+      const dk = sp === SP.TAMARACK ? low : mix3(low, top, 0.5), lt = sp === SP.TAMARACK ? top : mix3(top, [0.3, 0.36, 0.26], 0.25);
+      if (n === 1) put(x, tp - hk * 0.45, wc * 0.24, hk * 0.32, mix3(dk, lt, 0.3));
+      else {
+        put(x, tp - hk * 0.6, wc * 0.27, hk * 0.24, dk);
+        put(x + sl * 0.4, tp - hk * 0.25, wc * 0.14, hk * 0.2, lt);
+        if (n >= 3) put(x + sl, tp - hk * 0.5, wc * 0.09, hk * 0.18, mul3(lt, 1.12));
+      }
+    } else {
+      const hc = w * 1.25, cy = y + H - hc * 0.5;
+      // (narrow enough to leave the dark between crowns, and room for the beat's swell)
+      if (n === 1) put(x, cy, w * 0.25, hc * 0.29, mix3(low, top, 0.55));
+      else {
+        put(x, cy - hc * 0.06, w * 0.24, hc * 0.27, low);
+        put(x + sl, cy + hc * 0.2, w * 0.17, hc * 0.14, top);
+        if (n >= 3) put(x - sl * 2, cy - hc * 0.1, w * 0.15, hc * 0.16, mul3(low, 0.78));
+        if (n >= 5) {
+          put(x + sl * 2.2, cy + hc * 0.02, w * 0.14, hc * 0.14, mix3(top, low, 0.3));
+          put(x - sl * 1.2, cy + hc * 0.26, w * 0.12, hc * 0.1, mul3(top, 1.08));
+        }
+      }
+    }
+    // the front rank: a birch's or an aspen's pale trunk under its crown (the bank under the front
+    // rank, the waterline and their reflection are drawn by waterline())
+    if (front || (fd >= 0 && d - s * 1.1 < fd)) {
+      if ((sp === SP.BIRCH || sp === SP.ASPEN) && P >= 9 && u3 < 0.5) {
+        // (short, just under the crown: a long pale stick under a ball reads as a lollipop)
+        const tw = Math.max(0.0008 * d, w * 0.03), bc = sp === SP.BIRCH ? BIRCH_BARK : ASPEN_BARK;
+        out(x + w * 0.05, y + H - w * 1.25 - H * 0.07, z, tw, H * 0.08, tw, bc[0], bc[1], bc[2], 1, 0, 0, 0, 1, KIND.TREE, mv);
+      }
+    }
+    void sun;
+    if (out.due()) yield;
+  }
+}
 // The i-th of n stratified draws in 0..1, visited in golden-ratio order: any first part of the run
 // covers the whole range evenly, so a fill that stops short of its estimate thins evenly instead
 // of leaving its far end bare.
@@ -839,7 +1089,9 @@ function waterSplat(out, W, x, wx, d, r, ax, s, rng, cover) {
   const R = fresnel(d);
   // how deep the bed lies here (s.h: the bed's height), the shallows' reach wandering
   const depth = LV - s.h, shallow = 0.9 + 0.8 * noise1(wx / 37, W.ws + 99);
-  if (depth < shallow) {
+  // (only near, where the eye looks down into them: across the lake a strip of shallows is a thin
+  // pale line along the foot of the far shore, over the start of its reflection)
+  if (depth < shallow && d < WATER_SEEN + 50) {
     // looking down through clear shallow water to stones and sand, the sky's glare on top
     const st = noise2(wx / 1.4, d / 1.2, W.ws + 100);
     let bed = mix3(C.bedSand, C.bedStone, smooth(0.3, 0.7, st));
@@ -876,10 +1128,11 @@ function waterSplat(out, W, x, wx, d, r, ax, s, rng, cover) {
 //   spruce and balsam fir: near-black green spires (pinewood's spruce)
 //   white pine: the Shield's tall pine, a bare trunk and flat dark layers of foliage swept by the
 //     west wind to one side (after pinewood's Scots pine)
-// On the beat (kit grove()), in four groups: maples and oak on groups 0 and 2, the rest on 1 and 3,
-// each tree taking one of its kind's pair by its place (treeGroup), so beside a swelling tree its
-// neighbour rests. Only trees and plants in the near and middle distance do; beyond GROVE_FAR they
-// keep still, as does the forest mass beyond 160 m, and every reflection.
+// On the beat (kit grove()), in four groups. On this side of the water, maples and oak on groups 0
+// and 2, the rest on 1 and 3, each tree taking one of its kind's pair by its place (treeGroup), so
+// beside a swelling tree its neighbour rests. Across the water every tree and crown, at any
+// distance, answers with its colour (colourGroup: red 0, orange 1, gold 2, dark 3): the two rules
+// meet at the near shore, where nothing grows, so there is no seam. Reflections keep still.
 // ---------------------------------------------------------------------------------------------
 const GROVE_FAR = 600;
 function treeSplats(out, d, H, Wd) {
@@ -1156,11 +1409,16 @@ function* whitePine(ctx, out, x, d, opts = {}) {
   const lean = (rng() - 0.3) * 0.05, sweep = opts.sweep != null ? opts.sweep : 0.25 + 0.35 * rng();
   const tx = (t) => x + lean * t;
   const tr = Math.max(0.07, H * 0.014, 0.0005 * d);
-  if (n <= 4) {
-    out(tx(cb * 0.5), y0 + cb * 0.5, -d, tr, cb * 0.5, tr, BARK_PINE[0] * 0.8, BARK_PINE[1] * 0.8, BARK_PINE[2] * 0.8, 1, 0, 0, 0, 1, kind);
-    const c = shade(col, 0, 1, 0.3, 0.62, 0.45);
-    out(tx(H) + sweep * Wc * 0.2, y0 + cb + (H - cb) * 0.55, -d, Wc * 0.42, (H - cb) * 0.3, Wc * 0.3, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
-    if (n >= 3) out(tx(H) + sweep * Wc * 0.3, y0 + cb + (H - cb) * 0.2, -d, Wc * 0.3, (H - cb) * 0.14, Wc * 0.22, c[0] * 0.8, c[1] * 0.8, c[2] * 0.8, 1, 0, 0, 0, 1, kind);
+  // (a pine across the lake given only a few dozen splats would build as a trunk under a few dark
+  // blobs, a lollipop: it is a cone instead)
+  if (n <= 4 || (d > 120 && n < 80) || (d > 150 && n < 300)) {
+    // far off: a narrow dark cone standing in the canopy, a lighter side toward the sun; its trunk
+    // short and low (a bare stick under a ball reads as a lollipop)
+    const c = shade(col, 0, 1, 0.3, 0.62, 0.45), lt = mix3(hi, [0.3, 0.36, 0.26], 0.3), cw = Math.min(Wc, H * 0.3);
+    out(tx(H * 0.2), y0 + H * 0.2, -d, tr, H * 0.12, tr, BARK_PINE[0] * 0.7, BARK_PINE[1] * 0.7, BARK_PINE[2] * 0.7, 1, 0, 0, 0, 1, kind);
+    out(tx(H * 0.5), y0 + H * 0.5, -d, cw * 0.3, H * 0.22, cw * 0.26, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+    if (n >= 3) out(tx(H * 0.8), y0 + H * 0.8, -d, cw * 0.16, H * 0.14, cw * 0.14, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+    if (n >= 4) out(tx(H * 0.6) - cw * 0.1, y0 + H * 0.6, -d, cw * 0.1, H * 0.14, cw * 0.1, lt[0], lt[1], lt[2], 1, 0, 0, 0, 1, kind);
     return;
   }
   const trunkN = clamp(Math.round(n * 0.12), 3, 50);
@@ -1229,8 +1487,10 @@ function* birch(ctx, out, x, d, opts = {}) {
   const cb = H * ((aspen ? 0.4 + 0.12 * rng() : 0.3 + 0.12 * rng()) + (opts.tall ? 0.12 : 0));
   if (n <= 4) {
     out(x + lean * cb * 0.5, y0 + cb * 0.5, -d, tr * 1.2, cb * 0.45, tr, bark[0] * 0.85, bark[1] * 0.85, bark[2] * 0.85, 1, 0, 0, 0, 1, kind);
-    const c = shade(leaf, -0.2, 0.8, 0.4, 0.62, 0.45);
-    for (let k = 0; k < Math.max(1, Math.min(3, n - 1)); k++) out(x + lean * H * 0.7 + (k - 1) * Wc * 0.15, y0 + cb + (H - cb) * (0.45 + 0.15 * (k % 2)), -d, Wc * 0.32, (H - cb) * 0.32, Wc * 0.26, c[0], c[1], c[2], 1, 0, 0, 0, 1, kind);
+    // (a rounded crown, a little taller than wide, its shaded body under a lit cap: not a candle)
+    const c = shade(leaf, -0.2, 0.8, 0.4, 0.62, 0.45), cw = Math.max(Wc, (H - cb) * 0.55);
+    out(x + lean * H * 0.7, y0 + cb + (H - cb) * 0.45, -d, cw * 0.3, (H - cb) * 0.27, cw * 0.26, c[0] * 0.8, c[1] * 0.8, c[2] * 0.8, 1, 0, 0, 0, 1, kind);
+    if (n >= 3) out(x + lean * H * 0.8 - cw * 0.06, y0 + cb + (H - cb) * 0.66, -d, cw * 0.2, (H - cb) * 0.15, cw * 0.18, Math.min(0.8, c[0] * 1.08), Math.min(0.8, c[1] * 1.08), Math.min(0.8, c[2] * 1.08), 1, 0, 0, 0, 1, kind);
     return;
   }
   const trunkN = clamp(Math.round(n * 0.12), 3, 40);
@@ -1293,6 +1553,7 @@ const KINDS = [
 // A tree of species sp at (wx, d) standing at y: a plan entry. refl: drawn with its reflection.
 // opts: hk (height scale), hmax (a cap on the height), alt (0 or 1: which of its kind's two beat
 // groups the tree takes; from a hash of its place when not given), refl, detail, cap, open, tall.
+let crownSel = null;
 function planTree(ctx, out, sp, wx, d, y, r, opts = {}) {
   const K = KINDS[sp];
   let H = (K.h[0] + (K.h[1] - K.h[0]) * r()) * (opts.hk || 1);
@@ -1306,8 +1567,11 @@ function planTree(ctx, out, sp, wx, d, y, r, opts = {}) {
   const alt = opts.alt != null ? opts.alt : hashInts(Math.round(wx * 2), Math.round(d * 2), 977) & 1;
   return {
     fn: K.fn, sp, x: wx - ctx.x0, d, w: (H * Wd) / (d * d), nMax: opts.cap ? Math.min(opts.cap, nMax) : nMax, refl: !!opts.refl,
-    group: treeGroup(sp, alt),
-    opts: { rng: r, height: H, width: opts.tall ? Wd * 0.75 : Wd, y, kind: opts.kind, crown: crownOf(sp, r()), open: opts.open, tall: opts.tall },
+    // (a tree across the water answers with its colour, as the crowns round it; one on the near side
+    // with its neighbours alternating)
+    group: opts.refl ? colourGroup(crownSel = crownOf(sp, r()), sp) : treeGroup(sp, alt),
+    opts: { rng: r, height: H, width: opts.tall ? Wd * 0.75 : Wd, y, kind: opts.kind, crown: opts.refl ? crownSel : crownOf(sp, r()), open: opts.open, tall: opts.tall },
+    across: !!opts.refl,
   };
 }
 // Share a budget between the plan's trees in proportion to their size on screen, capped at full
@@ -1325,7 +1589,7 @@ function* drawPlan(ctx, out, plan, budget) {
   }
   plan.sort((a, b) => a.d - b.d || a.x - b.x);
   for (const t of plan) {
-    const mv = t.move != null ? t.move : t.d > GROVE_FAR ? STILL : grove(t.group);
+    const mv = t.move != null ? t.move : t.d > GROVE_FAR && !t.across ? STILL : grove(t.group);
     const o = t.refl ? mirrorOut(out, mv) : withMove(out, mv);
     const n0 = out.n;
     yield* t.fn(ctx, o, t.x, t.d, { ...t.opts, n: t.n });
@@ -1363,6 +1627,7 @@ function forestPlan(ctx, out, W, plan, dLo, dHi, sp, opts = {}) {
       const tall = r() < 0.07;
       if (tall) spc = SP.PINE;
       if (!forestAt(wx, d - sp * 1.2)) { plan.push(planTree(ctx, out, spc, wx, d, y, r, { refl: true, detail: opts.detail, cap: opts.cap, hk: tall ? 1.15 : 1 })); continue; }
+      if (opts.frontOnly) continue;            // (behind the front rank: the crown field, crowns())
       if (!forestAt(wx, d - sp * 2.6) || !forestAt(wx - sp * 1.5, d) || !forestAt(wx + sp * 1.5, d)) { plan.push(planTree(ctx, out, spc, wx, d, y, r, { refl: true, detail: 0.4 * (opts.detail || 1), cap: opts.cap })); continue; }
       if (r() < (opts.inner != null ? opts.inner : 0.1)) {
         const t = planTree(ctx, out, spc, wx, d, y, r, { hk: 1.1, refl: false });
@@ -1925,7 +2190,7 @@ function* floatPlane(ctx, out, x, d, dir, rng) {
 }
 
 // --- cottages: a cabin by the water with its dock, chairs, a boathouse, a canoe, a raft, a plane ---
-const SCELL = 620;
+const SCELL = 440;
 const LOG_WALLS = [[0.4, 0.27, 0.16], [0.33, 0.22, 0.13], [0.46, 0.33, 0.2]];
 const PAINT = [[[0.5, 0.12, 0.08], [0.74, 0.73, 0.68]], [[0.16, 0.3, 0.2], [0.74, 0.73, 0.68]], [[0.74, 0.73, 0.68], [0.16, 0.28, 0.2]], [[0.62, 0.48, 0.26], [0.36, 0.14, 0.1]], [[0.24, 0.32, 0.42], [0.74, 0.73, 0.68]]];
 const ROOFS = [[0.16, 0.2, 0.16], [0.36, 0.12, 0.09], [0.24, 0.24, 0.25], [0.3, 0.26, 0.2]];
@@ -1984,6 +2249,15 @@ function inClearing(W, wx, d) {
   }
   return false;
 }
+// Whether (wx, d) is in a campsite's or a landing beach's clearing on the far shore.
+function campClear(W, wx, d) {
+  const i0 = Math.floor(wx / WCELL);
+  for (let i = i0 - 1; i <= i0 + 1; i++) {
+    const t = waterThingOf(W, i);
+    if (t && (t.kind === 'camp' || t.kind === 'beach') && Math.abs(wx - t.wx) < 14 && d - t.d < 10 && t.d - d < 8) return true;
+  }
+  return false;
+}
 // Open water at a point (no island), without asking surface(), which asks for the clearings.
 function openWater(W, wx, d) { const x = xAt(W, wx, { ...XT }); return d > x.nd + 1 && d < x.fd - 1 && !islandAt(W, wx, d); }
 function* cottages(ctx, out, W, dLo, dHi, night) {
@@ -2003,6 +2277,12 @@ function* cottages(ctx, out, W, dLo, dHi, night) {
       if (s.chairs) {
         const cd = s.d1 - (s.near ? 1.6 : -1.6);
         for (let k = 0; k < 2; k++) chair(od, s.dx - ctx.x0 + (k ? 1.2 : -1.2) * (s.end ? 1 : 0.4), LV + 0.6, cd, (s.near ? Math.PI : 0) + (k ? -0.25 : 0.25), s.chairs[k]);
+      }
+      // someone on the dock: standing at its end looking out, or fishing off it
+      if (r() < 0.6) {
+        const pk = boatK(s.d1) / 1.25, pd = s.d1 - (s.near ? 0.6 : -0.6);
+        person(scaleOut(mirrorOut(out), s.dx - ctx.x0 + 1.8, LV + 0.6, -pd, pk), s.dx - ctx.x0 + 1.8, LV + 0.6, pd, r, { pose: 'stand', hat: r() < 0.5, arms: r() < 0.5 ? [[0.3, 0.05, 0.2], [0.25, 0, 0.1]] : null });
+        note('dockPerson', s.dx, s.d1);
       }
       note('dock', s.dx, s.d1, { chairs: !!s.chairs });
     }
@@ -2097,20 +2377,20 @@ function paddle(out, a, b, d, bladeC, shaft = [0.55, 0.42, 0.26]) {
   const p = [b[0] + dx / l * 0.3, b[1] + dy / l * 0.3, b[2] + dz / l * 0.3];
   bar(out, b, p, limbR(0.09, d), bladeC, 1, KIND.OTHER, STILL);
 }
-const BOATCELL = 430;
+const BOATCELL = 125;
 function boatOf(W, i) {
   return cache(W, ST.BOAT, i, () => {
     const r = makeRng(hashInts(W.ws, 81, i));
-    if (r() > 0.6) return null;
+    if (r() > 0.75) return null;
     const wx = (i + 0.2 + 0.6 * r()) * BOATCELL;
     const x = xAt(W, wx, { ...XT });
     const u = r();
-    const type = u < 0.32 ? 'row' : u < 0.62 ? 'canoe' : u < 0.84 ? 'skiff' : 'kayak';
+    const type = u < 0.24 ? 'row' : u < 0.48 ? 'canoe' : u < 0.64 ? 'skiff' : u < 0.76 ? 'kayak' : u < 0.9 ? 'sail' : 'pontoon';
     const lo = Math.max(x.nd + 18, WATER_SEEN + 6), hi = Math.min(x.fd - 25, 240);
     if (hi - lo < 10) return null;
     const d = lo + (hi - lo) * Math.pow(r(), 1.4);
     for (const dx of [-5, 0, 5]) for (const dd of [-4, 4]) if (!openWater(W, wx + dx, d + dd)) return null;
-    return { i, wx, d, type, dir: r() < 0.5 ? 1 : -1, moving: type !== 'skiff' && r() < 0.7, seed: hashInts(W.ws, 82, i) };
+    return { i, wx, d, type, dir: r() < 0.5 ? 1 : -1, moving: type !== 'skiff' && type !== 'pontoon' && r() < 0.7, seed: hashInts(W.ws, 82, i) };
   });
 }
 // An out that scales everything about (cx, cy, cz): a thing drawn at life size comes out S times
@@ -2121,6 +2401,124 @@ function scaleOut(out, cx, cy, cz, S) {
   return m;
 }
 const boatK = (d) => 1.6 + 0.9 * smooth(70, 230, d);
+// The lived-in lake: small things on the water and its far shore, one to a world cell of 62 m,
+// mostly 70 to 250 m out where they read (drawn larger than life, as the boats), every one with its
+// reflection. Rigid things STILL, animals and people FLASH.
+//   buoy      a red or white marker buoy with a band (the channel past a point)
+//   ducks     a raft of mallards and black ducks, six to twelve
+//   snag      a deadhead or a drowned tree: a grey trunk leaning out of the water, a stub of root
+//   lily      a lily bed off the shore: broad pads, green and yellowing, a few white flowers
+//   islet     a granite islet just breaking the water, with a white pine or two
+//   swimmer   a moose or a deer swimming across, only its head and back showing, its V wake
+//   moored    a boat at a mooring, nobody in it
+//   camp      on the far shore: a tent, a fire with its smoke, a canoe pulled up, someone at it
+//   beach     on the far shore: two or three canoes turned over on a strip of sand
+const WCELL = 62;
+const WKINDS = ['buoy', 'ducks', 'snag', 'lily', 'islet', 'swimmer', 'moored', 'camp', 'beach'];
+function waterThingOf(W, i) {
+  return cache(W, ST.FLOCK * 4 + 1, i, () => {
+    const r = makeRng(hashInts(W.ws, 211, i));
+    if (r() > 0.78) return null;
+    const wx = (i + 0.2 + 0.6 * r()) * WCELL, x = xAt(W, wx, { ...XT });
+    const u = r();
+    const kind = u < 0.12 ? 'buoy' : u < 0.27 ? 'ducks' : u < 0.39 ? 'snag' : u < 0.51 ? 'lily' : u < 0.6 ? 'islet' : u < 0.67 ? 'swimmer' : u < 0.79 ? 'moored' : u < 0.9 ? 'camp' : 'beach';
+    if (kind === 'camp' || kind === 'beach') {
+      // on the far shore, near enough to read
+      const d = x.fd + (kind === 'camp' ? 5 + 3 * r() : 2);
+      if (x.fd > 285 || x.fd < 90 || d > 296) return null;
+      // (heightAt, not surface(): surface asks campClear, which asks this)
+      if (W.H(wx, d) > LV + 6) return null;
+      return { kind, wx, d, seed: hashInts(W.ws, 212, i) };
+    }
+    const lo = Math.max(x.nd + 14, WATER_SEEN + 4), hi = Math.min(x.fd - (kind === 'lily' || kind === 'snag' ? 8 : 20), kind === 'buoy' || kind === 'swimmer' ? 220 : 260);
+    if (hi - lo < 8) return null;
+    // (lilies and snags keep to the shallows of the far shore and the islands' lee; the rest anywhere)
+    const d = kind === 'lily' || kind === 'snag' ? hi - 6 * r() : lo + (hi - lo) * Math.pow(r(), 1.3);
+    for (const dx of [-4, 0, 4]) if (!openWater(W, wx + dx, d)) return null;
+    return { kind, wx, d, dir: r() < 0.5 ? 1 : -1, seed: hashInts(W.ws, 212, i) };
+  });
+}
+function* waterThings(ctx, out, W, dLo, dHi) {
+  for (const { i } of cellsAround(ctx, WCELL, 30)) {
+    const t = waterThingOf(W, i);
+    if (!t || !inD(t.d, dLo, dHi) || !inX(ctx, t.wx, 12)) continue;
+    const r = makeRng(t.seed), x = t.wx - ctx.x0, d = t.d, z = -d, K = boatK(d) / 1.25;
+    const o = scaleOut(mirrorOut(out, STILL), x, LV, z, K), of = scaleOut(mirrorOut(out, FLASH), x, LV, z, K);
+    if (t.kind === 'buoy') {
+      const c = r() < 0.6 ? [0.72, 0.12, 0.08] : [0.76, 0.75, 0.72], band = c[0] > 0.7 && c[1] < 0.3 ? [0.76, 0.75, 0.72] : [0.72, 0.12, 0.08];
+      for (let k = 0; k < 5; k++) { const cc = k === 2 ? band : c, w = 0.32 * (1 - k * 0.12); o(x, LV + 0.15 + k * 0.28, z, w, 0.16, w, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, KIND.OTHER); }
+    } else if (t.kind === 'ducks') {
+      const n = 6 + Math.floor(r() * 7);
+      for (let m = 0; m < n; m++) {
+        const px = x + (r() - 0.5) * 7, pd = d + (r() - 0.5) * 4, dr = t.dir, male = r() < 0.5;
+        const body = male ? [0.44, 0.4, 0.36] : [0.36, 0.27, 0.18];
+        of(px, LV + 0.1, -pd, 0.3, 0.1, 0.13, body[0], body[1], body[2], 1, 0, 0, 0, 1, KIND.OTHER);
+        const hc = male ? [0.06, 0.24, 0.12] : [0.32, 0.24, 0.16];
+        of(px + dr * 0.27, LV + 0.24, -pd, 0.08, 0.07, 0.07, hc[0], hc[1], hc[2], 1, 0, 0, 0, 1, KIND.OTHER);
+        of(px - dr * 0.22, LV + 0.15, -pd, 0.08, 0.05, 0.08, 0.12, 0.1, 0.09, 1, 0, 0, 0, 1, KIND.OTHER);
+      }
+    } else if (t.kind === 'snag') {
+      // a dead trunk leaning out of the water, silver-grey, a branch or two, the root plate dark
+      const grey = [0.5, 0.48, 0.44], lean = 0.5 + 0.5 * r(), L = 4 + 3 * r(), a = [x, LV - 0.2, z], b = [x + t.dir * L * lean, LV + L * 0.8, z + (r() - 0.5) * 2];
+      bar(o, a, b, Math.max(0.14, 0.0012 * d), grey, 5, KIND.OTHER);
+      bar(o, [lerp(a[0], b[0], 0.6), lerp(a[1], b[1], 0.6), z], [lerp(a[0], b[0], 0.6) - t.dir * 1.2, lerp(a[1], b[1], 0.6) + 1.4, z], Math.max(0.07, 0.0008 * d), grey, 3, KIND.OTHER);
+      for (let k = 0; k < 3; k++) o(x + (r() - 0.5) * 1.4, LV + 0.12, z + (r() - 0.5), 0.5, 0.18, 0.4, 0.16, 0.13, 0.1, 1, 0, 0, 0, 1, KIND.OTHER);
+    } else if (t.kind === 'lily') {
+      // (pads drawn large: seen from 30 m up at this distance a real one would be under a pixel)
+      const n = 26 + Math.floor(r() * 20), R = 6 + 5 * r();
+      for (let m = 0; m < n; m++) {
+        const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * R, pr = 0.5 + 0.35 * r();
+        const c = jitter(r() < 0.3 ? [0.46, 0.4, 0.12] : [0.12, 0.24, 0.08], r, 0.08);
+        o(x + Math.cos(a) * rr, LV + 0.03, -(d + Math.sin(a) * rr * 0.6), pr, 0.03, pr * 0.85, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        if (r() < 0.12) o(x + Math.cos(a) * rr + 0.2, LV + 0.15, -(d + Math.sin(a) * rr * 0.6), 0.16, 0.1, 0.16, 0.78, 0.77, 0.74, 1, 0, 0, 0, 1, KIND.OTHER);
+      }
+    } else if (t.kind === 'islet') {
+      // a granite hump just breaking the water, and a white pine or two leaning with the west wind
+      const R = 3 + 3 * r();
+      for (let k = 0; k < 40; k++) {
+        const a = r() * Math.PI * 2, rr = Math.sqrt(r()), c = mix3(C.granite, C.graniteDark, 0.2 + 0.5 * r());
+        const h = 1.6 * (1 - rr * rr) * (0.7 + 0.5 * r());
+        o(x + Math.cos(a) * rr * R, LV + h * 0.6, -(d + Math.sin(a) * rr * R * 0.7), R * 0.24, Math.max(0.3, h * 0.45), R * 0.22, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK);
+      }
+      const np = 1 + Math.floor(r() * 2);
+      for (let k = 0; k < np; k++) yield* whitePine(ctx, mirrorOut(out, grove(3)), x + (r() - 0.5) * R, d + (r() - 0.5) * R * 0.4, { rng: r, height: 10 + 6 * r(), y: LV + 1, open: true, n: 120 });
+    } else if (t.kind === 'swimmer') {
+      // a moose (or a deer) swimming: the head and the hump of the back, its V wake
+      const moose = r() < 0.6, k = wildK(d) * (moose ? 1 : 0.8), F = beastFrame(mirrorOut(out), x, LV, z, t.dir > 0 ? 0 : Math.PI, k);
+      const col = moose ? [0.3, 0.2, 0.13] : [0.44, 0.34, 0.24];
+      F.E(0, 0.05, 0, 0.5, 0.14, 0.2, col);
+      F.E(0.62, 0.22, 0, moose ? 0.24 : 0.14, moose ? 0.16 : 0.1, 0.12, mul3(col, 0.9), -0.3);
+      F.E(0.48, 0.12, 0, 0.12, 0.12, 0.1, col);
+      for (const sg of [-1, 1]) F.S([0.6, 0.32, sg * 0.06], [0.55, 0.45, sg * 0.14], 0.04, col);
+      wake(out, x - t.dir * 0.5 * k, d, t.dir, 9 * k / 2, 0.7);
+    } else if (t.kind === 'moored') {
+      // a boat at its mooring, nobody aboard, swung to the breeze
+      const c = [[0.46, 0.28, 0.14], [0.6, 0.62, 0.62], [0.66, 0.1, 0.07], [0.2, 0.38, 0.26]][Math.floor(r() * 4)];
+      hull(o, x, d, t.dir, 4.4, 1.5, 0.55, c, [0.52, 0.42, 0.3], true, r);
+      o(x + t.dir * 3.2, LV + 0.15, z, 0.22, 0.18, 0.22, 0.76, 0.75, 0.72, 1, 0, 0, 0, 1, KIND.OTHER);
+    } else if (t.kind === 'camp') {
+      // a campsite: a tent, the fire and its smoke, a canoe pulled up, someone sitting at the fire
+      const y = W.H(t.wx, d), tc = [[0.78, 0.44, 0.08], [0.2, 0.4, 0.26], [0.72, 0.16, 0.1]][Math.floor(r() * 3)];
+      for (let k = 0; k < 7; k++) {
+        const f = k / 6, w = 1.4 * (1 - f) + 0.1;
+        for (const sg of [-1, 1]) o(x + 3 + sg * w * 0.5, y + 0.15 + f * 1.4, -(d + 1.5), w * 0.35, 0.16, 1.1, tc[0] * (sg > 0 ? 0.75 : 1), tc[1] * (sg > 0 ? 0.75 : 1), tc[2] * (sg > 0 ? 0.75 : 1), 1, 0, 0, 0, 1, KIND.OTHER);
+      }
+      for (let k = 0; k < 5; k++) o(x + (r() - 0.5) * 0.6, y + 0.12, z + (r() - 0.5) * 0.6, 0.15, 0.1, 0.15, 0.3, 0.26, 0.24, 1, 0, 0, 0, 1, KIND.ROCK);
+      o(x, y + 0.3, z, 0.18, 0.22, 0.18, 1, 0.55, 0.16, 1, 0, 0, 0, 1, KIND.LIGHT);
+      yield* smoke(withMove(out, MOVE.VAPOUR), [x, y + 0.6, z], d, r, 0.7);
+      yield* canoe(o, x - 4, y + 0.05, d - 2, { yaw: 0.25, len: 5.2, col: [0.66, 0.1, 0.07], flip: true }, r);
+      person(of, x + 1.2, y, d, r, { pose: 'sit', hat: r() < 0.5 });
+    } else {
+      // canoes turned over on a strip of sand
+      const y = W.H(t.wx, d), cols = [[0.66, 0.1, 0.07], [0.2, 0.36, 0.22], [0.8, 0.62, 0.08], [0.56, 0.56, 0.55]];
+      for (let k = 0; k < 6; k++) o(x + (k - 2.5) * 2.2, y + 0.04, -(d + 1.5), 1.6, 0.06, 1.4, C.sand[0], C.sand[1], C.sand[2], 1, 0, 0, 0, 1, KIND.GROUND);
+      const n = 2 + Math.floor(r() * 2);
+      for (let k = 0; k < n; k++) yield* canoe(o, x + (k - (n - 1) / 2) * 2.4, y + 0.05, d + 1 + 0.6 * k, { yaw: 0.2 * (r() - 0.5), len: 5.2, col: cols[Math.floor(r() * 4)], flip: true }, r);
+    }
+    note(t.kind, t.wx, d);
+    if (out.due()) yield;
+  }
+}
 function* boats(ctx, out, W, dLo, dHi) {
   for (const { i } of cellsAround(ctx, BOATCELL, 20)) {
     const b = boatOf(W, i);
@@ -2164,6 +2562,31 @@ function* boats(ctx, out, W, dLo, dHi) {
       bar(o, tip, [tip[0] + dir * 1.2, LV + 0.02, pz - 0.6], limbR(0.008, d), [0.62, 0.62, 0.6], 4, KIND.OTHER, STILL, 0.6);
       if (r() < 0.6) person(o, x + dir * 1.2, LV + 0.25, d, r, { vest: true, arms: [[0.1, -0.35, 0.2], [-0.1, -0.35, 0.2]] });
       note('skiff', b.wx, d);
+    } else if (b.type === 'sail') {
+      // a small sailing dinghy: a white hull, a mast, a white or red triangle of sail heeled a little
+      // to the breeze, one sitting aft at the tiller
+      const hc = r() < 0.6 ? [0.74, 0.73, 0.7] : [0.2, 0.32, 0.5], sc = r() < 0.7 ? [0.78, 0.77, 0.74] : [0.72, 0.16, 0.1];
+      hull(o, x, d, dir, 4.3, 1.5, 0.5, hc, [0.6, 0.55, 0.45], true, r);
+      const heel = 0.12 * dir, mx = x + dir * 0.6, top = [mx + heel * 6, LV + 6.6, z], foot = [mx, LV + 0.5, z];
+      bar(o, foot, top, limbR(0.05, d), [0.7, 0.7, 0.68], 5, KIND.OTHER, STILL);
+      bar(o, [mx, LV + 1.1, z], [mx - dir * 2.4, LV + 1.0, z], limbR(0.04, d), [0.6, 0.6, 0.58], 3, KIND.OTHER, STILL);
+      // the sail: a triangle from the mast to the boom's end, tiled in rows
+      for (let k = 0; k < 9; k++) {
+        const t = (k + 0.5) / 9, yy = LV + 1.2 + 5.2 * t, w = 2.3 * (1 - t);
+        const cx = mx + heel * (yy - LV) - dir * w * 0.5;
+        o(cx, yy, z - 0.05, w * 0.55, 0.35, 0.04, sc[0] * (0.92 + 0.08 * t), sc[1] * (0.92 + 0.08 * t), sc[2] * (0.92 + 0.08 * t), 1, 0, 0, 0, 1, KIND.OTHER, STILL);
+      }
+      person(o, x - dir * 1.4, LV + 0.25, d, r, { vest: true, hat: r() < 0.5, arms: [[-dir * 0.3, -0.2, 0.1], [0.1, -0.35, 0.1]] });
+      note('sail', b.wx, d);
+    } else if (b.type === 'pontoon') {
+      // a pontoon boat: a flat deck on two pale floats, a rail round it, a canopy, people aboard
+      for (const sz of [-1, 1]) for (let u = -2.6; u <= 2.6; u += 0.5) o(x + dir * u, LV + 0.25, z + sz * 0.9, 0.3, 0.22, 0.25, 0.72, 0.72, 0.7, 1, 0, 0, 0, 1, KIND.OTHER, STILL);
+      for (let u = -2.8; u <= 2.8; u += 0.55) for (const v of [-0.7, 0, 0.7]) o(x + dir * u, LV + 0.55, z + v, 0.32, 0.06, 0.4, 0.42, 0.36, 0.3, 1, 0, 0, 0, 1, KIND.OTHER, STILL);
+      for (const v of [-1, 1]) bar(o, [x - 2.8, LV + 1.4, z + v], [x + 2.8, LV + 1.4, z + v], limbR(0.035, d), [0.7, 0.7, 0.7], 5, KIND.OTHER, STILL);
+      const cc = [[0.2, 0.3, 0.5], [0.6, 0.12, 0.08], [0.18, 0.36, 0.22]][Math.floor(r() * 3)];
+      for (let u = -1.4; u <= 1.4; u += 0.55) for (const v of [-0.7, 0, 0.7]) o(x + dir * u, LV + 2.7, z + v, 0.32, 0.05, 0.4, cc[0], cc[1], cc[2], 1, 0, 0, 0, 1, KIND.OTHER, STILL);
+      for (const u of [-1.2, 0.2, 1.4]) if (r() < 0.8) person(o, x + dir * u, LV + 0.6, d, r, { pose: r() < 0.5 ? 'stand' : 'sit', hat: r() < 0.4 });
+      note('pontoon', b.wx, d);
     } else {
       // a kayak: slim and bright, one paddler with a double blade
       const col = [[0.8, 0.62, 0.08], [0.8, 0.3, 0.06], [0.14, 0.4, 0.5]][Math.floor(r() * 3)];
@@ -2372,7 +2795,7 @@ function beaver(out, x, d, dir, k) {
 
 const WILD = {
   moose: { cell: 2300, p: 0.8 }, bear: { cell: 2900, p: 0.65 }, deer: { cell: 1500, p: 0.7 }, lodge: { cell: 2100, p: 0.6 },
-  loons: { cell: 800, p: 0.65 }, geese: { cell: 1700, p: 0.55 }, heron: { cell: 1500, p: 0.6 },
+  loons: { cell: 380, p: 0.7 }, geese: { cell: 700, p: 0.6 }, heron: { cell: 900, p: 0.6 },
 };
 function wildOf(W, kind, i) {
   const ki = Object.keys(WILD).indexOf(kind);
@@ -2492,7 +2915,7 @@ function flyingGoose(out, x, y, z, dir, k) {
   }
 }
 // Skeins of geese and pairs. One skein to one flight cell (all of it within 9 m of the cell's
-// middle). Most fly low over the lake, 60 to 115 m out and below the eye, so the water, the far
+// middle, and within 84 m of the track). Most fly low over the lake, 54 to 80 m out and below the eye, so the water, the far
 // shore, an island or the hills move behind them; a few high against the sky; now and then a pair
 // skimming the water.
 const GEESECELL = 1150;
@@ -2505,7 +2928,10 @@ function skeinOf(W, i) {
     if (fc.dir < 0 && r() < 0.7) fc = flightCell(fc.wx + FLY_CELL);
     const kind = r();
     const pair = kind < 0.25, high = kind > 0.82;
-    const d = 60 + 35 * r();
+    // (a steady flier is carried at about 0.7 of the train's speed, so a skein going the train's way
+    // stays in view a long while: all of it must keep within 84 m of the track, the arms included,
+    // or its chunk is gone before it has left the window)
+    const d = 54 + 16 * r();
     const y = pair ? LV + 3 + 4 * r() : high ? 18 + 14 * r() : -16 + 18 * r();
     const n = pair ? 2 : 7 + Math.floor(r() * 3);
     return { fc, pair, high, d, y, n, seed: hashInts(W.ws, 142, i) };
@@ -2524,7 +2950,7 @@ function* skeins(ctx, out, W, dLo, dHi) {
       const arm = m === 0 ? 0 : (m % 2 ? 1 : -1), rank = Math.ceil(m / 2);
       const bx = fc.wx + fc.dir * (pair ? 1.5 - 3 * m : 4.5 - rank * 2.2);
       const by = y + (pair ? 0.3 * m : arm * rank * 0.35) + (r() - 0.5) * 0.3;
-      const bd = d + (pair ? 1.2 * m : arm * rank * 3.2);
+      const bd = d + (pair ? 1.2 * m : arm * rank * 2.4);
       if (!inX(ctx, bx, 0)) continue;
       flyingGoose(out, bx - ctx.x0, by, -bd, fc.dir, k);
     }
@@ -3094,6 +3520,7 @@ function* near(ctx0, emit) {
   yield* cottages(ctx, out, W, 24, ctx.zFar, night);
   yield* landmarks(ctx, out, W, 'near', night);
   yield* boats(ctx, out, W, ctx.zNear, ctx.zFar);
+  yield* waterThings(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* wildlife(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* skeins(ctx, out, W, ctx.zNear, ctx.zFar);
   yield* eagles(ctx, out, W);
@@ -3104,8 +3531,13 @@ function* near(ctx0, emit) {
   const plan = [];
   yield* islandDetail(ctx, out, W, ctx.zNear, ctx.zFar, plan);
   woodsPlan(ctx, out, W, plan, ctx.zNear, ctx.zFar, 6.5, 0.5);
-  forestPlan(ctx, out, W, plan, ctx.zNear, ctx.zFar, 6.5, { inner: 0.1 });
+  forestPlan(ctx, out, W, plan, ctx.zNear, ctx.zFar, 6.5, { frontOnly: true });
   yield* drawPlan(ctx, out, plan, Math.max(0, out.limit - out.n));
+  // the forest across the water behind its front rank (which the plan drew as whole trees)
+  const front = (wx, d) => { const f = surface(W, wx, d - 7.8); return !(isTree(f.t) && f.far); };
+  out.limit = Infinity;              // (the crowns keep to their own max)
+  yield* waterline(ctx, out, W, ctx.zNear, ctx.zFar);
+  yield* crowns(ctx, out, W, 60, ctx.zFar, { max: 0.3 * ctx.count, skip: front });
   yield* understory(ctx, out, W, ctx.zNear, 60, 0.12 * out.left());
   yield* fillLake(ctx, out, W, { power: 1.55, cover: 3.2, mass: true, mirror: 0.75, wKeep: (d) => clamp(230 / d, 0.45, 1) });
 }
@@ -3123,8 +3555,10 @@ function* mid(ctx0, emit) {
   yield* mist(ctx, out, W, ctx.zNear, 2000, 160, 110);
   const plan = [];
   yield* islandDetail(ctx, out, W, ctx.zNear, ctx.zFar, plan);
-  forestPlan(ctx, out, W, plan, ctx.zNear, 1500, 13, { inner: 0.04, detail: 0.6, cap: 6 });
   yield* drawPlan(ctx, out, plan, Math.max(0, out.limit - out.n));
+  out.limit = Infinity;              // (the crowns keep to their own max)
+  yield* waterline(ctx, out, W, ctx.zNear, ctx.zFar);
+  yield* crowns(ctx, out, W, ctx.zNear, ctx.zFar, { max: 0.6 * ctx.count, kd: 0.0125, min: 9 });
   yield* fillLake(ctx, out, W, { power: 1.25, cover: 3, maxR: 0.05, mass: true, mirror: 0.7, occlude: true, wKeep: (d) => clamp(1000 / d, 0.35, 1) });
 }
 
@@ -3146,13 +3580,15 @@ function* farFill(ctx, out, W) {
   const OX = 100, M = 900, occ = [], reach = [];
   for (let wx = ctx.x0 - M; wx <= ctx.x0 + L + M; wx += OX) {
     let a = -1;
-    for (const dd of [400, 700, 1000, 1400, 1900, 2500, 2950]) a = Math.max(a, (W.H(wx, dd) + 16 - CAMY) / dd);
+    // (the mid band's ridges, and the far hills in front of the mountains)
+    for (const dd of [400, 700, 1000, 1400, 1900, 2500, 2950, 3500, 4200, 5000]) a = Math.max(a, (W.H(wx, dd) + 8 - CAMY) / dd);
     occ.push(a);
     reach.push(xAt(W, wx, XT).fd);
   }
   const occMin = occ.map((_, k) => { let m = Infinity; for (let j = Math.max(0, k - 7); j <= Math.min(occ.length - 1, k + 7); j++) m = Math.min(m, occ[j]); return m; });
   const col = (x) => clamp(Math.round((x + M) / OX), 0, occ.length - 1);
-  const hidden = (x, d, y) => (y - CAMY) / d < occMin[col(x)] - 0.004;
+  // (what lies nearer than a column's own skyline sample cannot be hidden by it)
+  const hidden = (x, d, y) => d > 3600 && (y - CAMY) / d < occMin[col(x)] - 0.004;
   let vis = 0;
   for (let k = 0; k < 300; k++) {
     const d = dn * Math.pow(df / dn, rng()), x = rng() * L;
@@ -3166,8 +3602,9 @@ function* farFill(ctx, out, W) {
   for (const f of reach) if (f > 300) mirN++;
   const pm = 0.55 * mirN / reach.length;
   const mirrored = (x, d, y) => d * EYE / (EYE + Math.max(0, y + 6 - LV)) < reach[col(x)] - 15;
-  const nS = Math.round(n / (1 + pm));
-  const target = out.n + n;
+  const n0 = out.n;
+  const nS = Math.round((n - (out.n - n0)) / (1 + pm));
+  const target = out.n + (n - (out.n - n0));
   for (let i = 0; out.n < target && i < nS * 3; i++) {
     let d = 0, x = 0, wx = 0, y = 0;
     for (let t = 0; t < 6; t++) {
@@ -3177,21 +3614,53 @@ function* farFill(ctx, out, W) {
       if (!hidden(x, d, y)) break;
     }
     const dens = (nS / d / Z) / L / fv;
-    const r = clamp(Math.sqrt(2.6 / (Math.PI * dens)), 0.0012 * d, 0.03 * d);
-    const e = Math.max(40, r), dark = smooth(0.7, 1, HILL.top);
+    const r = clamp(Math.sqrt(2.6 / (Math.PI * dens)), 0.0012 * d, 0.014 * d);
+    // (the slope over a face's width: on the mountains a lit face and a shaded one, not a mottle)
+    const e = d > 5000 ? Math.max(160, r * 1.4) : Math.max(40, r), dark = smooth(0.7, 1, HILL.top);
     const hx = (W.H(wx + e, d) - y) / e, hd = (W.H(wx, d + e) - y) / e;
     const nn = norm3(-hx, 1, hd);
-    // autumn forest seen from kilometres off: a mottle of rust, gold and dark spruce, bare rock on
-    // the highest knobs
-    const v = rng();
-    const mc = massColor(W, wx, d, 0.5 + 0.4 * v, rng, dark);
-    let c = mix3(mc.c, [0.24, 0.14, 0.08], 0.12);
-    if (y > LV + 170 && noise2(wx / 700, d / 600, W.ws + 121) > 0.65) c = mix3(c, C.granite, 0.5);
-    c = shade(c, nn[0], nn[1], nn[2], 0.55, 0.6);
-    c = jitter(c, rng, 0.06);
-    const ax = 0.8 + 0.5 * rng();
-    out(x, y + 6, -d, r * ax, r * 0.5, r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
-    if (mirrored(x, d, y) && rng() < 0.55) emitMirror(out, x, y + 6, -d, r * ax * 1.35, r * 0.5, r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+    const el = y - LV, v = rng(), mtn = d > 5000 ? smooth(5000, 7000, d) : 0;
+    let c;
+    if (el < 260 + 140 * noise2(wx / 900, d / 800, W.ws + 122) || mtn <= 0) {
+      // autumn forest seen from kilometres off: lumps of crowns in rust, gold and dark spruce,
+      // bare rock on the highest knobs (and only at the mountains' foot)
+      const mc = massColor(W, wx, d, 0.5 + 0.4 * v, rng, dark);
+      c = mix3(mc.c, [0.24, 0.14, 0.08], 0.12);
+      if (y > LV + 170 && noise2(wx / 700, d / 600, W.ws + 121) > 0.65) c = mix3(c, C.granite, 0.5);
+    } else {
+      // the mountains: dark conifer forest on the lower slopes, grey rock and scree above the tree
+      // line, the first snow on the summits and down the gullies
+      const tl = 620 + 180 * noise2(wx / 1500, d / 1300, W.ws + 123), sn = 1650 + 180 * noise2(wx / 1100, d / 1000, W.ws + 124);
+      const gully = smooth(0.55, 0.8, noise2(wx / 260, d / 420, W.ws + 125)) * smooth(0.25, 0.6, Math.hypot(hx, hd));
+      if (el < tl) c = mix3([0.05, 0.08, 0.07], [0.1, 0.12, 0.09], v);
+      else c = mix3([0.34, 0.35, 0.42], [0.5, 0.48, 0.5], noise2(wx / 300, d / 300, W.ws + 126));
+      if (el > tl - 120 && el < tl + 80) c = mix3(c, [0.22, 0.23, 0.24], 0.5);   // (the broken edge of the trees)
+      const snow = el > sn || (el > sn - 300 && gully > 0.62);
+      if (snow) c = mix3(c, [0.8, 0.8, 0.8], 0.9);
+      c = mix3(c, snow ? [0.62, 0.66, 0.8] : [0.2, 0.22, 0.38], 0.22 * mtn);   // (blue and violet with distance)
+    }
+    // lit side and shaded side: the sun on each face, so the form reads (the haze lifts the shade)
+    const lam = nn[0] * SUN[0] + nn[1] * SUN[1] + nn[2] * SUN[2];
+    c = mul3(c, mtn > 0 ? 0.26 + 1.1 * Math.max(0, lam) : 1);
+    if (mtn <= 0) c = shade(c, nn[0], nn[1], nn[2], 0.55, 0.6);
+    c = jitter(c, rng, 0.05);
+    c = [Math.min(0.8, c[0]), Math.min(0.8, c[1]), Math.min(0.8, c[2])];
+    // (upright and round: a lump of crowns, or of rock; never stretched sideways)
+    // (a fill samples by plan area: a steep face, seen nearly square on, gets few samples for its
+    // area on the screen, so each stands as tall as the face rises over it)
+    const steep = Math.min(1.6, Math.hypot(hx, hd));
+    let sx = r * (0.78 + 0.2 * steep), sy = r * ((mtn > 0 ? 0.5 : 0.6) + 0.55 * steep), q = Q_ID;
+    let ox = 0, oy = mtn > 0 ? 2 : 6, oz = 0;
+    if (mtn > 0 && steep > 0.25) {
+      // a mountain face: a stroke laid down the fall line (gullies, scree, the grain of the rock),
+      // hanging from its sample point down the slope, so none stands up over the ridgeline
+      const fl = norm3(hx, hx * hx + hd * hd, -hd);
+      q = quatXTo(fl[0], fl[1], fl[2]);
+      sx = r * (0.75 + 0.45 * steep); sy = r * 0.42;
+      ox = -fl[0] * sx * 0.7; oy = -fl[1] * sx * 0.7; oz = -fl[2] * sx * 0.7;
+    }
+    out(x + ox, y + oy, -d + oz, sx, sy, sy, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
+    if (mirrored(x, d, y) && rng() < 0.55) emitMirror(out, x, y + 6, -d, sx, sy, sy, c[0], c[1], c[2], 1, q[0], q[1], q[2], q[3], KIND.GROUND);
     if (out.due()) yield;
   }
 }
@@ -3203,7 +3672,7 @@ export const autumnBiome = {
   hazeDist: 9000,
   gold: 0.9,
   // the water and what stands round it are the picture: the trackside is mostly water and rock
-  shares: { trackside: 0.1, near: 0.38, mid: 0.36, far: 0.16 },
+  shares: { trackside: 0.1, near: 0.28, mid: 0.43, far: 0.19 },
   // morning, late afternoon and dusk, the low warm sun of October
   slots: { dawn: 0.32, day: 0.38, dusk: 0.3, night: 0 },
   beatKinds: [KIND.BUILDING, KIND.LIGHT],
@@ -3236,6 +3705,7 @@ function layout(seedStr, x0, x1) {
     skeins: list(GEESECELL, skeinOf, (k) => ({ wx: k.fc.wx, dir: k.fc.dir, d: R(k.d), y: R(k.y), n: k.n, pair: k.pair, high: k.high })),
     wild: Object.keys(WILD).flatMap((k) => list(WILD[k].cell, (W2, i) => wildOf(W2, k, i), (g) => ({ kind: k, wx: R(g.wx), d: R(g.d), n: g.n }))),
     boats: list(BOATCELL, boatOf, (b) => ({ wx: R(b.wx), d: R(b.d), type: b.type, moving: b.moving })),
+    water: list(WCELL, waterThingOf, (t) => ({ kind: t.kind, wx: R(t.wx), d: R(t.d) })),
     cottages: list(SCELL, siteOf, (s) => ({ wx: R(s.cx), d: R(s.cd), near: s.near, dock: R(s.d1), boathouse: s.boathouse, plane: s.plane, raft: s.raft, canoe: s.canoe })),
   };
 }
