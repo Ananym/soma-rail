@@ -97,6 +97,7 @@ Tuning parameters, added to the URL (for example `?debug=1&budget=300000`):
 | `weather` | `1` | Quiet passages thin the rain, the snow and the motorway's traffic; `0` keeps them always full |
 | `events` | `1` | A drop or a breakdown in the music sets off an event (a train passing on the other track, a flock lifting off, fireworks, a meteor shower); `0` turns them off. `fire=train`, `flock`, `fireworks` or `meteors` starts one by hand |
 | `chase` | `1` | Lamps in a row flare in turn at the music's tempo while it has a firm lock; `0` rests them |
+| `mastLock` | `1` | At full speed the train trims its pace by up to six per cent so that masts pass the middle of the window on the beat, and comes back to that after any slowing; `0` leaves the pace alone |
 | `move` | `1` | Strength of the things that move on their own (prayer flags, motorway traffic, mist and plumes); `0` keeps everything still |
 | `seed` | random | A tuning aid: the same seed starts in the same scenery (track changes still alter it) |
 | `kit` | `1` | `0` leaves out the photo pieces |
