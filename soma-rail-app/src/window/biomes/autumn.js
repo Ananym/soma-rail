@@ -36,17 +36,27 @@
 // mostly 1,700 to 2,100 m over the lake: dark conifer forest on the lower slopes, grey rock and
 // scree above the tree line, the first snow on the summits and down the gullies, blue and violet
 // with distance; each face lit or shaded by the sun, the steep faces drawn as strokes down the fall
-// line. They stand over the hills' skyline at nine places in ten along the line, and reflect in the
-// lake wherever their image falls on water. They keep still on the beat.
+// line, hanging below their sample. The crests are drawn on their own (ridgelines): found on the
+// map, joined into lines, each piece a thin splat under the crest with a curtain of thicker ones
+// below it, so the skyline is a clean line and a cliff is never a hole. They stand over the hills'
+// skyline at nine places in ten along the line, and reflect in the lake wherever their image falls
+// on water. They keep still on the beat.
 //
 // THE FOREST ACROSS THE WATER (crowns). The far shore, the points, the islands and the hills are
 // crowns, not a painted mass: on a world grid, each row as wide as a crown that stays about six
 // pixels across, each crown a rounded dome a little taller than wide with a lit cap over a shaded
 // body, its own colour, a dark gap round it; a conifer a narrow cone with a lit side. The front rank
-// at the water is whole trees with pale birch trunks; the waterline (waterline()) is one thin pale
-// line of rock or beach with the dark bank behind it, both mirrored so the reflection starts at the
-// trees' feet. Behind a nearer skyline nothing is drawn. Every tree across the water answers the beat
-// with its colour (colourGroup): red, orange, gold, dark.
+// at the water is whole trees with pale birch trunks; the land rises out of the water (never a
+// step at the shore: a heightfield has no face, and the sky would show under the trees); the
+// waterline (waterline()) is a thin line, pale where rock or sand meets the water and dark where
+// the forest overhangs it, with the dark under the canopy behind it, both mirrored so the
+// reflection starts at the trees' feet. Nothing may leave a hole in the land across the water: what
+// shows through one is the sky or the mountains. So ground and rock on a slope stand as tall as the
+// slope rises; a chunk whose crowns would overrun their share lays larger crowns, never fewer; and
+// a crown is left out as hidden only when it is hidden along three sight lines (skyline), square
+// on and from 36 degrees either side, since the land behind a spur is in plain view from down the
+// line. Every tree across the water answers the beat with its colour (colourGroup): red, orange,
+// gold, dark.
 //
 // THE LIFE OF THE LAKE. Boats (rowing boats, canoes, kayaks, skiffs with an angler, sailing dinghies,
 // pontoon boats), boats at moorings, marker buoys, rafts of ducks, loons, geese on the water, a moose
@@ -846,10 +856,25 @@ function* fillLake(ctx, out, W, opts = {}) {
         c = mul3(c, clamp(0.92 + 0.45 * hz - 0.25 * hx, 0.55, 1.25));
         const steep = clamp(Math.hypot(hz, hx), 0, 3);
         const lift = s.t === T.GRASS && d < 30 ? 0.05 + r * 0.3 * rng() : 0.02;
-        // (across the lake, upright and round: a flat wide splat there reads as a sideways smear)
-        const far = d > 250, sy = r * (far ? 0.55 + 0.5 * clamp(hz, 0, 1.5) : 0.12 + 0.3 * Math.min(1, steep)), sx = far ? r * 0.7 : r * ax;
-        out(x, s.y + lift, -d, sx, sy, far ? r * 0.7 : r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
-        if (o) emitMirror(out, x, s.y + lift, -d, sx / Math.sqrt(pm), sy, far ? r * 0.7 : r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        if (d > 250) {
+          // Open ground across the lake (an island's rock, a clearing, a beach): seen at a graze, so
+          // low, as tall as the slope rises under it and no taller; and small. One splat the size of
+          // the sample would be tens of metres across: upright it stands on the water as a pale
+          // dome, flat it is a smear. Three small ones in the sample's place, each on its own ground.
+          const rs = r * 0.5;
+          for (let j = 0; j < 3; j++) {
+            const ox = j ? (rng() - 0.5) * 1.5 * r : 0, od = j ? (rng() - 0.5) * 1.5 * r : 0;
+            const yy = j ? W.H(wx + ox, d + od) : s.y;
+            if (yy < LV + 0.1) continue;
+            const sy = clamp(0.0016 * d, 0.3, 2.5) + 0.6 * rs * clamp(hz, 0, 1.5), sx = rs * 0.8, k = 0.9 + 0.2 * rng();
+            out(x + ox, yy + sy * 0.6, -(d + od), sx, sy, sx, c[0] * k, c[1] * k, c[2] * k, 1, 0, 0, 0, 1, KIND.GROUND);
+            if (o) emitMirror(out, x + ox, yy + sy * 0.6, -(d + od), sx, sy, sx, c[0] * k, c[1] * k, c[2] * k, 1, 0, 0, 0, 1, KIND.GROUND);
+          }
+        } else {
+          const sy = r * (0.12 + 0.3 * Math.min(1, steep)), sx = r * ax;
+          out(x, s.y + lift, -d, sx, sy, r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+          if (o) emitMirror(out, x, s.y + lift, -d, sx / Math.sqrt(pm), sy, r * (1.8 - ax), c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.GROUND);
+        }
       }
     }
     if (out.due()) yield;
@@ -1046,13 +1071,17 @@ function* crowns(ctx, out, W, dLo, dHi, opts = {}) {
       const e = Math.max(6, s);
       const hz = (W.H(wx, d + e) - y) / e, hx = (W.H(wx + e, d) - y) / e;
       const nz = noise2(wx / 40, d / 30, W.ws + 993);
-      let c = mix3(C.granite, C.graniteDark, 0.2 + 0.5 * u1);
-      c = mix3(c, nz > 0.6 ? C.barren : C.lichen, smooth(0.45, 0.8, Math.abs(nz - 0.5) * 2) * 0.5);
-      c = mul3(c, clamp(0.95 + 0.45 * hz - 0.35 * hx, 0.55, 1.25));
+      // (weathered Shield granite is a mid grey-pink under lichen, not white: pale lumps on a
+      // dark forested hill read as puffs of smoke)
+      let c = mix3(C.granite, C.graniteDark, 0.45 + 0.5 * u1);
+      c = mix3(c, nz > 0.6 ? C.barren : C.lichen, smooth(0.45, 0.8, Math.abs(nz - 0.5) * 2) * 0.55);
+      c = mul3(c, 0.72 * clamp(0.95 + 0.45 * hz - 0.35 * hx, 0.55, 1.25));
       // (as tall as the face rises over the cell: a steep face is seen nearly square on)
       const sx = w * 0.42, sy = w * (0.26 + 0.3 * clamp(hz, 0, 1.6));
       out(x, y + sy * 0.8, -d, sx, sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK, STILL);
       if (mirrorable({ y, nd }, d)) emitMirror(out, x, y + sy * 0.8, -d, sx, sy, sx, c[0], c[1], c[2], 1, 0, 0, 0, 1, KIND.ROCK);
+      // a joint or a ledge across it: the dark line that makes a rock face of a grey patch
+      if (P >= 7) out(x + (u2 - 0.5) * w * 0.4, y + sy * (0.5 + 0.9 * u3), -d + 0.5, sx * 0.9, sy * 0.13, sx * 0.3, c[0] * 0.45, c[1] * 0.45, c[2] * 0.47, 1, 0, 0, 0, 1, KIND.ROCK, STILL);
       if (out.due()) yield;
       continue;
     }
@@ -3684,7 +3713,7 @@ function* ridgelines(ctx, out, W, hiddenAt, mirrored) {
         // a steep piece is slid down its own line until its upper end is at the piece's top)
         const SL = 0.62 * len, slide = (2 * SL - 0.62 * len) * smooth(0.12, 0.45, Math.abs(dy) / len) * (dy > 0 ? -1 : 1) / len;
         const xm = x - CS / 2 + slide * dx, dm = (d0 + d1) / 2 - slide * dz, hm = (h0 + h1) / 2 + slide * dy, wxm = ctx.x0 + xm;
-        if (xm < 0 || xm >= L) continue;
+        if (x - CS / 2 < 0 || x - CS / 2 >= L) continue;      // (each chunk draws the pieces whose middle it holds)
         // the near face under the crest: its slope, for the light on it
         const e = 160, yb = W.H(wxm, dm - e);
         const hd = (hm - yb) / e, hx = (W.H(wxm + e, dm - e) - yb) / e;
