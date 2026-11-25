@@ -16,7 +16,7 @@ While the mouse is moving an overlay shows the channel list, what is playing, an
 
 - **Scenery / Next** queues a tunnel into the next kind of scenery; until the train is out of it the label shows where it is heading, for example "→ Karst". Press Next again while the change is on its way and the destination moves on to the kind after: the tunnel is re-aimed, or, once inside, the country behind the wall is built again. Only when the train is leaving the tunnel is it too late, and the press books another tunnel instead.
 - **Dreamlike** switches the surreal version on or off (through a tunnel). Once touched, the channel no longer decides it.
-- **Ignore distraction** keeps the train at speed and the music up whatever you do; the overlay still comes and goes with the mouse.
+- **Distraction slows train** is on to begin with: moving the mouse or leaving the window brakes the train and quietens the music. Switch it off and the train keeps its speed and the music its volume whatever you do; the overlay still comes and goes with the mouse.
 - **Max frame rate** caps the view at 30, 60 or 120 frames a second (60 unless you change it).
 - **Splats** sets how much the view is built from: 300k, 600k or 900k splats. It starts at 600k on a desktop and 300k on a phone or tablet; lower it if the view stutters. A change arrives through a tunnel, because the world is rebuilt behind it.
 

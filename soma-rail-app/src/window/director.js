@@ -73,6 +73,9 @@ export function createDirector({ params, reducedMotion = false }) {
     trebleNow: 0,
     trebleAvg: 0,
     beatMetres: 56,         // mast spacing; follows tempo when audio is available
+    mastMetres: 56,         // the spacing the world in view was built with (the engine sets it: fixed per world)
+    mastLock: 0,            // 0..1: how far the train is steering its masts onto the beat (see mastTrim)
+    mastErr: 0,             // beats, -0.5..0.5: how far ahead of the beat a mast passes the window's middle
     energy: 0,              // slow loudness, 0..1
     bpm: 0,                 // last trusted tempo, for the debug readout
     tunnel: null,           // { x0, x1, phase: 'approach' | 'inside' | 'leaving', next: {biome, seed} }
@@ -321,6 +324,50 @@ export function createDirector({ params, reducedMotion = false }) {
     state.chaseOn = reducedMotion ? 0 : c.on;
   }
 
+  // Masts on the beat. Mast spacing is set from the tempo when a world is built (one mast to a
+  // bar, or to two beats, or two bars), so at cruising speed masts pass at the music's rate. But
+  // nothing fixed WHEN they pass: where in the bar a mast crosses the window was an accident of
+  // the journey so far, and every time the listener's distraction slowed the train the masts came
+  // back at some other place in the bar. So, at full speed and with a beat clock to believe
+  // (state.chase, whole numbers on beats), the train steers: it runs up to MAST_TRIM faster or
+  // slower than its speed until a mast stands in the middle of the window on a beat, and then holds
+  // it there. A world built for a slightly different tempo (the first one is built for 120 BPM
+  // before any music has been heard) would leave the masts a steady fraction of a beat late, so a
+  // slow integral term learns the pace that world needs. The trim goes straight
+  // into the distance travelled; the speed shown, the blur and everything else keep the plain
+  // speed, and six per cent of pace cannot be seen. It lets go (easing, never stepping) whenever
+  // the train is slowed, the clock is in doubt, or the world's spacing no longer divides into
+  // beats at the present tempo (a new track before the next tunnel).
+  const MAST_TRIM = 0.06, MAST_GAIN = 0.25;     // most of half a beat out is made up in about four seconds
+  const MAST_LEARN = 0.03;                      // per beat of error per second: critically damped with the gain at about two beats a second
+  let trimNow = 0, learnt = 0, learntFor = '';
+  function mastTrim(dt) {
+    let want = 0, trim = 0;
+    const beatLen = state.bpm > 40 ? 60 / state.bpm : 0;
+    if (!reducedMotion && params.mastLock !== 0 && beatLen && state.rate === 1 && state.speed > 0.9 * state.cruise && state.chaseOn > 0.5 && state.mastMetres > 1) {
+      const perMast = state.mastMetres / (state.cruise * beatLen), n = Math.max(1, Math.round(perMast));   // beats to a mast
+      if (Math.abs(perMast - n) < 0.05 * n) {
+        let e = ((n * state.travelled) / state.mastMetres - state.chase) % 1;
+        e -= Math.round(e);                                 // ahead of the beat (+) or behind it (-), in beats
+        state.mastErr = e;
+        want = 1;
+        // (what was learnt belongs to one world at one tempo)
+        const key = `${state.mastMetres.toFixed(2)}:${n}:${Math.round(state.bpm / 2)}`;
+        if (key !== learntFor) { learntFor = key; learnt = 0; }
+        const p = -MAST_GAIN * e;
+        // (it learns only from a small error that stays: a big one is being closed by the gain, and would wind it up)
+        if (dt > 0 && Math.abs(e) < 0.25 && Math.abs(p + learnt) < MAST_TRIM) learnt = Math.max(-MAST_TRIM, Math.min(MAST_TRIM, learnt - MAST_LEARN * e * dt));
+        trim = Math.max(-MAST_TRIM, Math.min(MAST_TRIM, p + learnt));
+      }
+    }
+    if (dt > 0) {
+      state.mastLock += (want - state.mastLock) * smoothing(dt, want ? 0.8 : 0.4);
+      if (!want && state.mastLock < 0.002) state.mastLock = 0;
+      trimNow += (trim * (params.mastLock == null ? 1 : params.mastLock) - trimNow) * smoothing(dt, 0.3);
+    }
+    return trimNow * state.mastLock;
+  }
+
   return {
     state,
     on(name, fn) { listeners[name].push(fn); },
@@ -389,7 +436,7 @@ export function createDirector({ params, reducedMotion = false }) {
       const tau = target < state.speed ? 0.5 : 1.6;     // brakes faster than it pulls away
       state.speed += (target - state.speed) * (1 - Math.exp(-dt / tau));
       if (state.speed < 0.02 && target === 0) state.speed = 0;
-      state.travelled += state.speed * dt;
+      state.travelled += state.speed * (1 + mastTrim(dt)) * dt;
 
       // the clock: about an hour every 20 minutes at the plausible level, every 20 seconds at the dreamlike one
       // A stopped train holds the whole view still: the clock waits and the music stops moving the

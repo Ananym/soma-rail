@@ -727,6 +727,59 @@ console.log('\nBeat clock');
   }
 }
 
+console.log('\nMasts on the beat');
+{
+  // A steady track through the analysis and the director. Once the tempo is trusted the "world" is
+  // built (the engine copies the spacing: here by hand), the listener is distracted for three
+  // seconds (the train drops to a third of its speed), and then the train must bring its masts back
+  // onto the beat: every mast crossing the middle of the window within 0.08 of a beat of a kick.
+  const sr = 48000, bpm = 124, secs = 46, { buf, hits } = song(sr, secs, { bpm, parts: { kick: 1, hat: 1, snare: 1 } });
+  const run = (mastLock, spacing = 0) => {
+    const dir = createDirector({ params: { ...DIRECTOR_PARAMS, mastLock } }), S = dir.state;
+    const cross = [];
+    let built = false, last = 0, maxPace = 0;
+    features(buf, sr, 60, (t, f, dt) => {
+      dir.setRate(t >= 16 && t < 19 ? 0.33 : 1);
+      dir.setAudio(f); dir.update(dt);
+      if (!built && t > 9) { S.mastMetres = spacing || S.beatMetres; built = true; }
+      if (built) {
+        const k0 = Math.floor(last / S.mastMetres), k1 = Math.floor(S.travelled / S.mastMetres);
+        if (k1 > k0) cross.push(t - dt * (S.travelled - k1 * S.mastMetres) / Math.max(1e-9, S.travelled - last));
+        if (t > 22 && dt > 0) maxPace = Math.max(maxPace, Math.abs((S.travelled - last) / dt / S.speed - 1));
+      }
+      last = S.travelled;
+    });
+    const beatLen = 60 / bpm;
+    const off = (tc) => Math.min(...hits.kick.map((k) => Math.abs(k - tc))) / beatLen;      // beats from the nearest kick
+    const after = cross.filter((tc) => tc > 30 && tc < secs - 1).map(off);
+    return { S, n: after.length, worst: Math.max(...after), meanOff: mean(after), maxPace, spacing: S.mastMetres };
+  };
+  const on = run(1), offRun = run(0), first = run(1, 56);
+  check(on.n >= 6 && on.worst < 0.08 && on.S.mastLock > 0.9,
+    `masts after a distraction: ${on.n} masts (every ${on.spacing.toFixed(1)} m) pass within ${on.worst.toFixed(3)} of a beat of a kick (mean ${on.meanOff.toFixed(3)}); lock ${on.S.mastLock.toFixed(2)}, error ${on.S.mastErr.toFixed(3)} beats`);
+  check(on.maxPace <= 0.0605, `the trim never exceeds six per cent of the train's pace (most ${(100 * on.maxPace).toFixed(1)}%)`);
+  check(first.n >= 6 && first.worst < 0.08 && first.S.mastLock > 0.9,
+    `a world built for 120 BPM (a mast every 56 m) under a 124 BPM track: ${first.n} masts pass within ${first.worst.toFixed(3)} of a beat of a kick (mean ${first.meanOff.toFixed(3)}), the train ${(100 * first.maxPace).toFixed(1)}% off its pace at most`);
+  check(offRun.maxPace < 1e-9 && offRun.S.mastLock === 0, `mastLock=0: the train never trims (masts then pass ${offRun.meanOff.toFixed(3)} of a beat from a kick on average)`);
+}
+{
+  // The lock lets go without a step when the listener is distracted, and never acts while slowed.
+  const dir = createDirector({ params: DIRECTOR_PARAMS }), S = dir.state, dt = 1 / 60;
+  S.bpm = 120; S.chaseOn = 1; S.mastMetres = S.cruise * 2; S.speed = S.cruise; S.travelled = 0.3 * S.mastMetres;   // a mast every 4 beats, 1.2 beats out
+  let last = S.travelled, worstStep = 0, lastPace = 1, acted = false, most = 0;
+  for (let i = 0; i < 600; i++) {
+    if (i === 240) dir.setRate(0.5);
+    S.chaseOn = 1;                                   // (the director's own clock has no music here: hold it on by hand)
+    dir.update(dt);
+    const pace = (S.travelled - last) / dt / S.speed;
+    if (i > 0) worstStep = Math.max(worstStep, Math.abs(pace - lastPace));
+    if (i > 420 && Math.abs(pace - 1) > 1e-3) acted = true;
+    if (i < 240) most = Math.max(most, Math.abs(pace - 1));
+    lastPace = pace; last = S.travelled;
+  }
+  check(most > 0.015 && worstStep < 0.01 && !acted && S.mastLock === 0, `the trim eases in and out (it reaches ${(100 * most).toFixed(1)}% of pace; largest change in one frame ${(100 * worstStep).toFixed(2)}%) and is gone while the train is slowed`);
+}
+
 console.log('\nEvent schedule (the director alone, no analysis)');
 {
   // Step a director with no setAudio at all (Safari, iOS, no CORS), as the engine does: the world

@@ -25,10 +25,10 @@
       </button>
     </div>
     <div v-if="!touch" class="row">
-      <span class="label">Ignore distraction</span>
+      <span class="label">Distraction slows train</span>
       <span class="value"></span>
-      <button type="button" class="switch" :class="{ on: cheat }" :aria-pressed="cheat" @click="$emit('update:cheat', !cheat)">
-        {{ cheat ? 'On' : 'Off' }}
+      <button type="button" class="switch" :class="{ on: distractionSlows }" :aria-pressed="distractionSlows" @click="$emit('update:distraction-slows', !distractionSlows)">
+        {{ distractionSlows ? 'On' : 'Off' }}
       </button>
     </div>
     <div class="row">
@@ -60,10 +60,10 @@ import { CONFIG } from '../config';
 const props = defineProps({
   // { biome, level, inTunnel, next: { biome, level } | null } from the train window, or null before it starts
   view: { type: Object, default: null },
-  cheat: { type: Boolean, default: false },
+  distractionSlows: { type: Boolean, default: true },
   fps: { type: Number, default: 60 },
   budget: { type: Number, default: 600000 },      // splats in all; a change arrives through a tunnel
-  // a touch screen: no distraction to ignore, and a switch to keep the screen awake where the browser can
+  // a touch screen: no distraction mechanic to switch, and a switch to keep the screen awake where the browser can
   touch: { type: Boolean, default: false },
   keepAwake: { type: Boolean, default: false },
   wakeSupported: { type: Boolean, default: false },
@@ -71,7 +71,7 @@ const props = defineProps({
   channelName: { type: String, default: '' },     // touch: the channels live in a dialog, opened from a row here
   lastMouseMoveTime: { type: Number, default: Date.now() },
 });
-defineEmits(['next-biome', 'toggle-dreamlike', 'update:cheat', 'update:fps', 'update:budget', 'update:keep-awake', 'channels', 'credits']);
+defineEmits(['next-biome', 'toggle-dreamlike', 'update:distraction-slows', 'update:fps', 'update:budget', 'update:keep-awake', 'channels', 'credits']);
 
 const NAMES = {
   downs: 'Farmland', pinewood: 'Pine forest', saltflat: 'Salt flat', nightcity: 'City at night',

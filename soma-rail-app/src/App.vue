@@ -61,9 +61,12 @@ const overlayMoveTime = computed(() => (isFocused.value ? lastMouseMoveTime.valu
 // LocalStorage persistence
 const savedChannelId = useLocalStorage('selectedChannel', null);
 const savedVolume = useLocalStorage('volume', 0.5);   // the slider's place is kept between visits; half volume to begin with
-// Overlay settings: ignore distraction (the overlay still follows the mouse, but the train keeps
-// its speed and the music its volume), and the frame-rate cap.
-const cheat = useLocalStorage('ignoreDistraction', false);
+// Overlay settings: whether distraction slows the train (switched off, the overlay still follows
+// the mouse, but the train keeps its speed and the music its volume), and the frame-rate cap.
+// On unless the listener says otherwise. (The switch used to be "Ignore distraction", kept under
+// another key: someone who had switched that on keeps the train they chose.)
+const distractionSlows = useLocalStorage('distractionSlowsTrain', localStorage.getItem('ignoreDistraction') !== 'true');
+const cheat = computed(() => !distractionSlows.value);
 const fpsCap = useLocalStorage('fpsCap', 60);
 // Splats in all: 0 until the listener chooses, which means the default for the kind of device
 // (see splatBudget above: a touch screen gets half a desktop's).
@@ -331,7 +334,7 @@ onMounted(() => {
     <ViewControls
       v-if="hasStarted"
       :view="viewFailed ? null : viewState"
-      :cheat="cheat"
+      :distraction-slows="distractionSlows"
       :fps="fpsCap"
       :budget="splatBudget"
       @update:budget="savedBudget = $event"
@@ -345,7 +348,7 @@ onMounted(() => {
       :last-mouse-move-time="overlayMoveTime"
       @next-biome="windowRef && windowRef.nextBiome()"
       @toggle-dreamlike="windowRef && windowRef.toggleDreamlike()"
-      @update:cheat="cheat = $event"
+      @update:distraction-slows="distractionSlows = $event"
       @update:fps="fpsCap = $event"
       @credits="showCredits = true"
     />

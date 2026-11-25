@@ -124,6 +124,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
   // Mast spacing follows the music's tempo, but it is fixed for each world: masts and wires only
   // meet at chunk borders if every chunk agrees on the spacing.
   let worldBeat = S.beatMetres;
+  S.mastMetres = worldBeat;
 
   const tmp = { c: new THREE.Vector3(), s: new THREE.Vector3(), q: new THREE.Quaternion(), col: new THREE.Color() };
 
@@ -240,6 +241,7 @@ export function createEngine({ canvas, params, reducedMotion = false, profile = 
     terrain = makeTerrain(S.seed, biome.terrain);
     setUnderlay(biome); setHorizon(biome);
     worldBeat = S.beatMetres;
+    S.mastMetres = worldBeat;
     if (kit) kit.reset();
     events.clear();
     rebuilding = true;
@@ -507,7 +509,7 @@ uniforms.uFly.value = ((S.travelled % 49152) + 49152) % 49152;
     stats() {
       let splats = 0, pending = 0;
       for (const ch of chunks.values()) { if (ch.done) splats += ch.count(); else pending++; }
-      return { fps: Math.round(fps), at: Math.round(S.travelled), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres), photos: kit ? kit.stats().pieces : 0,
+      return { fps: Math.round(fps), at: Math.round(S.travelled), splats, pending, chunks: chunks.size, resScale: +resScale.toFixed(2), kmh: Math.round(S.speed * 3.6), hour: +S.hour.toFixed(2), biome: S.biome, level: S.level, tunnel: S.tunnel ? S.tunnel.phase : '', patched: shaderPatched, energy: +S.energy.toFixed(2), bpm: Math.round(S.bpm), mast: Math.round(S.beatMetres), mastLock: +S.mastLock.toFixed(2), mastErr: +S.mastErr.toFixed(2), photos: kit ? kit.stats().pieces : 0,
         levelName: LEVELS[S.level].name, slot: S.slot, beat: +S.beat.toFixed(2), sparkle: +S.sparkle.toFixed(2), tint: uniforms.uLightTint.value.toArray().map((v) => +v.toFixed(2)), dissolve: +S.dissolve.toFixed(2),
         next: S.tunnel ? { biome: S.tunnel.next.biome, levelName: LEVELS[S.tunnel.next.level].name, phase: S.tunnel.phase } : null,
         audio: !!audioProvider, show: events.stats(),

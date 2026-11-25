@@ -29,6 +29,7 @@ const NUM = {
   weather: 1,        // loudness thins or fills the rain, the snow and the traffic (0: always full, as before)
   events: 1,         // drops and breakdowns set off events (0: none)
   chase: 1,          // lamps chase at the tempo (0: they rest, as before)
+  mastLock: 1,       // the train trims its speed a few per cent so masts pass on the beat (0: it never does, as before)
   bigPin: -1,        // pins the big things' pulse 0..1 (-1: follows beatPin, else the music)
   smallPin: -1,      // pins the small things' pulse 0..1 (-1: follows beatPin, else the music)
   midPin: -1,        // pins the mid-band lift 0..1

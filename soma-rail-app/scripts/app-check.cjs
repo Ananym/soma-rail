@@ -214,7 +214,7 @@ const outDir = process.argv[2] || '.';
       // the controls a phone gets
       T.rows = await page.evaluate(() => [...document.querySelectorAll('.view-controls .label')].map((e) => e.textContent.trim()));
       T.wakeLockOffered = await page.evaluate(() => 'wakeLock' in navigator);
-      T.controlsOk = !T.rows.includes('Ignore distraction') && T.rows.includes('Scenery') && T.rows[0] === 'Channel' && (!T.wakeLockOffered || T.rows.includes('Keep screen on'));
+      T.controlsOk = !T.rows.includes('Distraction slows train') && !T.rows.includes('Ignore distraction') && T.rows.includes('Scenery') && T.rows[0] === 'Channel' && (!T.wakeLockOffered || T.rows.includes('Keep screen on'));
       T.noVolume = await page.evaluate(() => !document.querySelector('.volume-control'));
       T.supportLine = await page.evaluate(() => !!document.querySelector('.now-playing .support a[href*="somafm.com/support"]'));
       // pause brakes the train and silences the radio; play brings both back
@@ -363,7 +363,10 @@ const outDir = process.argv[2] || '.';
       await page.evaluate(() => { const d = window.__trainWindow.director; d.onTrack = d.__onTrack; delete d.__onTrack; });
       await press('.view-controls .group button', '30');
       const c3 = await D();
+      // "Distraction slows train" is on to begin with; switched off, a lost focus leaves the train at speed
+      const slows = await page.evaluate(() => { const r = document.querySelector('.view-controls .row:nth-child(3)'); return { label: r.querySelector('.label').textContent.trim(), on: r.querySelector('button').getAttribute('aria-pressed') === 'true' }; });
       await press('.view-controls .row:nth-child(3) button');
+      const slowsOff = await page.evaluate(() => document.querySelector('.view-controls .row:nth-child(3) button').getAttribute('aria-pressed') === 'false' && localStorage.getItem('distractionSlowsTrain') === 'false');
       await page.evaluate(() => window.dispatchEvent(new Event('blur')));
       await page.waitForTimeout(6000);
       const c4 = await D();
@@ -374,8 +377,8 @@ const outDir = process.argv[2] || '.';
       const credits = await page.evaluate(() => ({ open: !!document.querySelector('.credits'), items: document.querySelectorAll('.credits li').length, soma: !!document.querySelector('.credits a[href*="somafm.com"]') }));
       await press('.credits .close');
       const creditsClosed = await page.evaluate(() => !document.querySelector('.credits'));
-      const controls = { before: c0, nextBiome: c1.wantBiome, dreamlike: c2.wantLevel, fpsCap: c3.fpsCap, rateWhileCheating: c4.rate,
-        ok: c1.wantBiome !== c0.wantBiome && c2.wantLevel === 1 - c1.wantLevel && c0.fpsCap === 60 && c3.fpsCap === 30 && c4.rate === 1 && credits.open && credits.items >= 8 && credits.soma && creditsClosed && scroll.ok, credits, scroll };
+      const controls = { before: c0, nextBiome: c1.wantBiome, dreamlike: c2.wantLevel, fpsCap: c3.fpsCap, rateWhileCheating: c4.rate, slows, slowsOff,
+        ok: c1.wantBiome !== c0.wantBiome && c2.wantLevel === 1 - c1.wantLevel && c0.fpsCap === 60 && c3.fpsCap === 30 && slows.label === 'Distraction slows train' && slows.on && slowsOff && c4.rate === 1 && credits.open && credits.items >= 8 && credits.soma && creditsClosed && scroll.ok, credits, scroll };
       brake.controls = controls; brake.ok = brake.ok && controls.ok;
       // Next, pressed again while a change is on its way, changes the destination: before the swap by
       // re-aiming the tunnel, after it (still inside) by building the world again, and only when the
