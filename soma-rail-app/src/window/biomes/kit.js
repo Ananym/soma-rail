@@ -203,6 +203,8 @@ export function blade(out, hx, hy, z, len, angle, r0, r1, c, n = 3, kind = KIND.
 //   STEADY  geese, swans, herons, cranes: one smooth beat that never stops (drawn with the wings
 //           UP, carried down by 1.7 times the lift and back, twice a second), running down a
 //           skein as a wave (each bird a little after the one ahead of it), and a slow bob.
+//           Going the train's way they fly at about 0.7 of its speed (the others at about half),
+//           so everything of theirs must keep within 84 m of the track, not 120.
 //   SOAR    eagles, buzzards, vultures, storks on a thermal: the wings held as drawn (draw them
 //           in the glide), and every twelve seconds or so two slow beats that carry each piece
 //           from a third of its lift above where it is drawn to a little more than its lift

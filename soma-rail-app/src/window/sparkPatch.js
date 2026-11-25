@@ -165,13 +165,17 @@ uniform float uSway;`,
             // rate; against it: 0.7 to 1.2, so it whips past at about twice. (A bird going the train's way
             // is in view for longer than its chunk of the world exists unless it stays within
             // 324 * (1 - k) metres of the track: 136 m at the fastest. The flocks keep inside 120.)
-            float kf = (mod(cellI, 2.0) < 0.5 ? 0.45 + 0.13 * hf : -(0.7 + 0.5 * hf)) * min(uMove, 1.0);
+            // Steady fliers (wing kind 1: geese) go the train's way at 0.68 to 0.74 of its speed: a
+            // goose does 70 km/h, and at half the train's speed a skein looked slow. They must
+            // keep within 84 m of the track.
+            int wingKind = 3 - ((mvA >> 1) & 3);
+            float kWith = wingKind == 1 ? 0.68 + 0.06 * hf : 0.45 + 0.13 * hf;
+            float kf = (mod(cellI, 2.0) < 0.5 ? kWith : -(0.7 + 0.5 * hf)) * min(uMove, 1.0);
             center.x -= kf * home;
             mvBlur = 1.0 - kf;
             float lift = scales.z * 50.0;
             scales.z = scales.y;
             float ph = 6.2832 * hf;
-            int wingKind = 3 - ((mvA >> 1) & 3);
             float going = min(uMove, 1.0);
             if (wingKind == 1) {
                 center.y -= 0.85 * lift * (1.0 - cos(13.0 * uMoveT + ph + 0.8 * along * (mod(cellI, 2.0) < 0.5 ? 1.0 : -1.0))) * going;
